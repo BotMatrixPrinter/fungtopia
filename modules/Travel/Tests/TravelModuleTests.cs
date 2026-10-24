@@ -94,6 +94,7 @@ public class TravelModuleTests
         var rig = new Rig(TownSquare);
         Assert.Contains(typeof(PlayerInput), rig.Bus.Subscribed);
         Assert.Contains(typeof(PlayerState), rig.Bus.Subscribed);
+        Assert.Contains(typeof(ActiveDevice), rig.Bus.Subscribed);
     }
 
     [Fact]
@@ -132,7 +133,6 @@ public class TravelModuleTests
         rig.Tick();
         Assert.True(rig.Travel.ShowPrompt);
         Assert.Equal(index, rig.Travel.NearSignpost);
-        Assert.Equal("E / X: Map", TravelModule.PromptText);
 
         rig.Position = Near(signpost, 2.2f, 1.4f); // 2.61 m away
         rig.Tick();
@@ -590,5 +590,113 @@ public class TravelModuleTests
     public void TickBeforeStartThrows()
     {
         Assert.Throws<InvalidOperationException>(() => new TravelModule().Tick(new TickContext(0, Step)));
+    }
+
+    // ---- Prompts for the active device ----
+
+    public static IEnumerable<object[]> AllDevices()
+    {
+        foreach (DeviceKind kind in Enum.GetValues<DeviceKind>())
+            yield return new object[] { kind };
+    }
+
+    /// <summary>The glyph name prefixes of the other device families' icons.</summary>
+    private static string[] OtherFamilies(DeviceKind kind) => kind switch
+    {
+        DeviceKind.KeyboardMouse => new[] { "xbox_", "ps_", "ns_" },
+        DeviceKind.Xbox or DeviceKind.Generic => new[] { "key_", "mouse_", "ps_", "ns_" },
+        DeviceKind.PlayStation => new[] { "key_", "mouse_", "xbox_", "ns_" },
+        _ => new[] { "key_", "mouse_", "xbox_", "ps_" },
+    };
+
+    private static void AssertOnlyIconsOf(DeviceKind kind, string bbcode)
+    {
+        foreach (var prefix in OtherFamilies(kind))
+            Assert.DoesNotContain(Prompts.GlyphDirectory + prefix, bbcode);
+        // No plain-text key names like "E / X" or "Esc / B": every button is an icon.
+        Assert.DoesNotContain(" / ", bbcode);
+        Assert.DoesNotContain("Esc", bbcode);
+        Assert.DoesNotContain("Enter", bbcode);
+        Assert.Contains("[img=", bbcode);
+    }
+
+    [Theory]
+    [MemberData(nameof(AllDevices))]
+    public void SignpostPromptShowsTheInteractIconOfThatDeviceOnly(DeviceKind kind)
+    {
+        string prompt = TravelModule.PromptRich(kind);
+        Assert.StartsWith(Prompts.Rich(PromptAction.Interact, kind, TravelModule.PromptIconSize), prompt);
+        Assert.EndsWith(" Map", prompt);
+        AssertOnlyIconsOf(kind, prompt);
+    }
+
+    [Fact]
+    public void SignpostPromptUsesTheRightButtonPerDevice()
+    {
+        Assert.Contains("res://modules/Input/Glyphs/key_e.svg", TravelModule.PromptRich(DeviceKind.KeyboardMouse));
+        Assert.Contains("res://modules/Input/Glyphs/xbox_x.svg", TravelModule.PromptRich(DeviceKind.Xbox));
+        Assert.Contains("res://modules/Input/Glyphs/ps_square.svg", TravelModule.PromptRich(DeviceKind.PlayStation));
+        Assert.Contains("res://modules/Input/Glyphs/ns_y.svg", TravelModule.PromptRich(DeviceKind.Nintendo));
+        Assert.Contains("res://modules/Input/Glyphs/xbox_x.svg", TravelModule.PromptRich(DeviceKind.Generic));
+    }
+
+    [Theory]
+    [MemberData(nameof(AllDevices))]
+    public void MapHintShowsTheChooseConfirmAndBackIconsOfThatDeviceOnly(DeviceKind kind)
+    {
+        string hint = TravelModule.MapHintRich(kind);
+        int size = TravelModule.HintIconSize;
+        Assert.Contains(Prompts.Rich(PromptAction.MenuLeft, kind, size), hint);
+        Assert.Contains(Prompts.Rich(PromptAction.MenuRight, kind, size), hint);
+        Assert.Contains(Prompts.Rich(PromptAction.Confirm, kind, size) + " Travel", hint);
+        Assert.Contains(Prompts.Rich(PromptAction.Back, kind, size) + " Close", hint);
+        AssertOnlyIconsOf(kind, hint);
+    }
+
+    [Fact]
+    public void MapHintUsesTheRightButtonsPerDevice()
+    {
+        const string dir = "res://modules/Input/Glyphs/";
+        var keys = TravelModule.MapHintRich(DeviceKind.KeyboardMouse);
+        Assert.Contains(dir + "mouse_left.svg", keys);
+        Assert.Contains(dir + "key_enter.svg", keys);
+        Assert.Contains(dir + "key_esc.svg", keys);
+        var xbox = TravelModule.MapHintRich(DeviceKind.Xbox);
+        Assert.Contains(dir + "xbox_a.svg", xbox);
+        Assert.Contains(dir + "xbox_b.svg", xbox);
+        Assert.Contains(dir + "xbox_ls.svg", xbox);
+        var ps = TravelModule.MapHintRich(DeviceKind.PlayStation);
+        Assert.Contains(dir + "ps_cross.svg", ps);
+        Assert.Contains(dir + "ps_circle.svg", ps);
+        Assert.Contains(dir + "ps_ls.svg", ps);
+    }
+
+    [Fact]
+    public void PromptsFollowTheActiveDeviceLive()
+    {
+        var rig = new Rig(Near(Places.SignpostTown));
+        rig.Tick();
+        // Keyboard and mouse until Input says otherwise.
+        Assert.Equal(DeviceKind.KeyboardMouse, rig.Travel.Device);
+        Assert.Equal(TravelModule.PromptRich(DeviceKind.KeyboardMouse), rig.Travel.Prompt);
+        Assert.Equal(TravelModule.MapHintRich(DeviceKind.KeyboardMouse), rig.Travel.MapHint);
+
+        foreach (var kind in new[] { DeviceKind.Xbox, DeviceKind.PlayStation, DeviceKind.KeyboardMouse, DeviceKind.Nintendo })
+        {
+            rig.Travel.Handle(new ActiveDevice(kind));
+            rig.Tick();
+            Assert.Equal(kind, rig.Travel.Device);
+            Assert.Equal(TravelModule.PromptRich(kind), rig.Travel.Prompt);
+            Assert.Equal(TravelModule.MapHintRich(kind), rig.Travel.MapHint);
+            AssertOnlyIconsOf(kind, rig.Travel.Prompt);
+            AssertOnlyIconsOf(kind, rig.Travel.MapHint);
+        }
+    }
+
+    [Fact]
+    public void PromptTextIsBuiltOncePerDevice()
+    {
+        Assert.Same(TravelModule.PromptRich(DeviceKind.PlayStation), TravelModule.PromptRich(DeviceKind.PlayStation));
+        Assert.Same(TravelModule.MapHintRich(DeviceKind.Xbox), TravelModule.MapHintRich(DeviceKind.Xbox));
     }
 }

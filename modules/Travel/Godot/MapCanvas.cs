@@ -46,6 +46,8 @@ public partial class MapCanvas : Control
     private Vector2[] _ring = Array.Empty<Vector2>();
     private Vector2[] _disc = Array.Empty<Vector2>();
     private Font _font = null!;
+    private RichTextLabel _hint = null!;
+    private string _hintText = "";
 
     /// <summary>The Core to draw (selection, "you are here"); the preview can draw without one.</summary>
     public TravelModule? Travel { get; set; }
@@ -56,12 +58,49 @@ public partial class MapCanvas : Control
         SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         _font = new FontVariation { BaseFont = ThemeDB.FallbackFont, VariationEmbolden = 0.9f };
         Build();
+        _hint = BuildHint();
+        AddChild(_hint);
     }
 
     public override void _Process(double delta)
     {
-        if (Visible)
-            QueueRedraw();
+        if (!IsVisibleInTree())
+            return;
+        QueueRedraw();
+        PlaceHint();
+    }
+
+    /// <summary>
+    /// The hint line: the active device's buttons as icons (RichTextLabel BBCode from the Core), laid
+    /// out on the 1920-wide canvas, centered, centered on y 985 whatever the icons' height.
+    /// </summary>
+    private RichTextLabel BuildHint()
+    {
+        var hint = new RichTextLabel
+        {
+            BbcodeEnabled = true, FitContent = true, AutowrapMode = TextServer.AutowrapMode.Off,
+            ScrollActive = false, MouseFilter = MouseFilterEnum.Ignore,
+            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+        };
+        hint.AddThemeFontSizeOverride("normal_font_size", 30);
+        hint.AddThemeColorOverride("default_color", Ink);
+        hint.AddThemeFontOverride("normal_font", _font);
+        return hint;
+    }
+
+    private void PlaceHint()
+    {
+        // The Core builds each device's line once, so a new reference means the device changed.
+        string text = Travel?.MapHint ?? TravelModule.MapHintRich(Fungtopia.Input.DeviceKind.KeyboardMouse);
+        if (!ReferenceEquals(text, _hintText))
+            _hint.Text = _hintText = text;
+        var screen = new System.Numerics.Vector2(Size.X, Size.Y);
+        float scale = MapLayout.Scale(screen);
+        var o = MapLayout.Origin(screen);
+        float height = _hint.GetContentHeight();
+        _hint.Size = new Vector2(MapLayout.Width, height);
+        _hint.Scale = new Vector2(scale, scale);
+        _hint.Position = new Vector2(o.X, o.Y + (985f - height * 0.5f) * scale);
     }
 
     public override void _Draw()
@@ -80,8 +119,6 @@ public partial class MapCanvas : Control
         Text("Fungtopia", new Vector2(MapLayout.Width * 0.5f, 140f), 80, Ink, Ribbon, 14);
         foreach (var dot in _roadDots)
             DrawCircle(dot, 8f, Road, true, -1f, true);
-        Text("Click a place, or choose with arrows / WASD / stick and press Enter / E / A.   Esc / B: close",
-            new Vector2(MapLayout.Width * 0.5f, 1000f), 30, Ink, Parchment, 0);
 
         for (int i = 0; i < MapLayout.Centers.Length; i++)
         {

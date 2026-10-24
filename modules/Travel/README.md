@@ -2,7 +2,8 @@
 
 Fast travel between the three places of the world. A wooden signpost with three arrow boards
 stands at each signpost of the Map (`Places.SignpostTown`, `SignpostForestSouth`,
-`SignpostForestNorth`, `SignpostPetCity`). Near one a prompt "E / X: Map" shows; Interact there,
+`SignpostForestNorth`, `SignpostPetCity`). Near one a prompt "[Interact button] Map" shows (the
+icon of the device in use only: E key, Xbox X, PlayStation Square, ...); Interact there,
 or OpenMap (M / Back) anywhere outdoors, opens a full-screen map: three big circles on parchment,
 Mushroom Town, Mushroom Forest and Pet City, labeled, with "you are here". Picking one closes the
 map with a short fade and teleports the player to that place's signpost.
@@ -29,8 +30,13 @@ It publishes `MapState` every tick, `UiFocus` when the map opens or closes, and
 `Fungtopia.Player.TeleportPlayer` once per trip. Each tick:
 
 - **Prompt.** `NearSignpost` is the signpost within `PromptRadius` (2.5 m, horizontal) of the
-  player, or -1; `ShowPrompt` (text `PromptText`, "E / X: Map") while near one, alive, outdoors,
-  with the map closed and no fade running.
+  player, or -1; `ShowPrompt` while near one, alive, outdoors, with the map closed and no fade running.
+- **Device.** `Device` is the last `Fungtopia.Input.ActiveDevice` (keyboard and mouse until one
+  arrives). `Prompt` / `PromptRich(device)` is the signpost prompt and `MapHint` / `MapHintRich(device)`
+  the map's hint line, RichTextLabel BBCode built with `Prompts.Rich` once per device (no allocation
+  per tick), with only that device's icons: the prompt is the Interact icon (`PromptIconSize`, 40)
+  and "Map"; the hint (`HintIconSize`, 44) is left click "Pick a place" (keyboard and mouse only),
+  MenuLeft + MenuRight (and the left stick, Move, on pads) "Choose", Confirm "Travel", Back "Close".
 - **Opening.** While closed, alive and not in `Area.Home`: `OpenMap`, or `Interact` near a
   signpost, opens the map. `Here` ("you are here") is the destination nearest the player (the area
   it is in; on a road the one it is least outside of); the selection starts there.
@@ -60,12 +66,14 @@ Forest raised in the middle, Pet City right, radius 215; `Hit(point)`, `ToCanvas
 - a signpost at each of the four signposts, turned to its facing; its boards (top to bottom Pet
   City, Mushroom Forest, Mushroom Town) turn to point at the city plaza, the forest's center and
   the town square, each with the place's name on both faces (`Label3D`);
-- the prompt, a cream rounded pill with an ink border over the near signpost (canvas layer 11);
+- the prompt, a cream rounded pill with an ink border over the near signpost (canvas layer 11),
+  a `RichTextLabel` (`FitContent`) showing `Prompt`; the pill resizes to the icon and word;
 - the map, `MapCanvas` on canvas layer 20: dimmed world behind parchment, the title, dotted roads
   between the circles, Mushroom Town (sky, clouds, houses with spotted mushroom roofs and eye
   windows), Mushroom Forest (three big spotted mushrooms with eyes on grass), Pet City (tall pastel
   buildings with windows, a mushroom dome, a paw print), each with its name on a ribbon, a bobbing
-  pink pin over "You are here!", a pulsing gold glow on the selected one, and a hint line;
+  pink pin over "You are here!", a pulsing gold glow on the selected one, and the hint line, a
+  `RichTextLabel` showing `MapHint`, scaled with the canvas and centered on y 985 at any icon height;
 - the fade, a plum full-screen rect on canvas layer 21.
 
 While the map is open the mouse is freed (and captured again when it closes); mouse motion,
@@ -74,7 +82,10 @@ W A S D (physical keys) and the D-pad (`Step`), Enter / Space / gamepad A (`Conf
 B (`Close`) go to the Core, and the first pad's left stick goes to `Navigate` every frame.
 
 Screenshots: `./screenshot.sh modules/Travel/Godot/Preview.tscn` shows the open map;
-`TRAVEL_PREVIEW=signpost` shows the Town signpost with its prompt instead.
+`TRAVEL_PREVIEW=signpost` shows the Town signpost with its prompt instead; `TRAVEL_DEVICE=keyboard`
+(default), `xbox`, `playstation` or `nintendo` picks the device the prompts show (the preview loads
+the icons itself, as the Input view does in the game). Both labels pick up a new text when the
+device changes.
 
 ## Models
 

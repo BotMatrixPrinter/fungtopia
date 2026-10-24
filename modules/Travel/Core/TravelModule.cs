@@ -14,12 +14,17 @@ namespace Fungtopia.Travel;
 /// Publishes <see cref="MapState"/> every tick, and <see cref="UiFocus"/> (owner
 /// <see cref="FocusOwner"/>) when the map opens and when it closes, so Input stops walking meanwhile.
 /// </summary>
-public sealed class TravelModule : IModule, IMessageHandler<PlayerInput>, IMessageHandler<PlayerState>
+public sealed class TravelModule : IModule, IMessageHandler<PlayerInput>, IMessageHandler<PlayerState>,
+    IMessageHandler<ActiveDevice>
 {
     /// <summary>How near a signpost (horizontal meters) its prompt shows and Interact opens the map.</summary>
     public const float PromptRadius = 2.5f;
 
-    public const string PromptText = "E / X: Map";
+    /// <summary>Icon size (pixels) of the signpost prompt's button.</summary>
+    public const int PromptIconSize = 40;
+
+    /// <summary>Icon size (pixels, on the 1920 x 1080 map canvas) of the map's hint line.</summary>
+    public const int HintIconSize = 44;
 
     /// <summary>The fade to black after a pick, while the map still shows.</summary>
     public const float FadeOutSeconds = 0.3f;
@@ -44,6 +49,10 @@ public sealed class TravelModule : IModule, IMessageHandler<PlayerInput>, IMessa
     };
 
     private static readonly Area[] s_signpostAreas = { Area.Town, Area.Forest, Area.Forest, Area.PetCity };
+
+    private static readonly DeviceKind[] s_devices = Enum.GetValues<DeviceKind>();
+    private static readonly string[] s_prompts = PerDevice(BuildPrompt);
+    private static readonly string[] s_hints = PerDevice(BuildHint);
 
     private enum Phase
     {
@@ -89,7 +98,7 @@ public sealed class TravelModule : IModule, IMessageHandler<PlayerInput>, IMessa
     /// <summary>The <see cref="Signposts"/> index within <see cref="PromptRadius"/> of the player, or -1.</summary>
     public int NearSignpost { get; private set; } = -1;
 
-    /// <summary>Whether the "E / X: Map" prompt shows (near a signpost, map closed, outdoors).</summary>
+    /// <summary>Whether the signpost's "[Interact] Map" prompt shows (near a signpost, map closed, outdoors).</summary>
     public bool ShowPrompt { get; private set; }
 
     /// <summary>Black over the screen, 0..1.</summary>
@@ -99,6 +108,24 @@ public sealed class TravelModule : IModule, IMessageHandler<PlayerInput>, IMessa
     public int Traveling { get; private set; } = -1;
 
     public long Ticks { get; private set; }
+
+    /// <summary>The device used last, from Input's <see cref="ActiveDevice"/> (keyboard and mouse until then).</summary>
+    public DeviceKind Device { get; private set; } = DeviceKind.KeyboardMouse;
+
+    /// <summary>The signpost prompt for <see cref="Device"/>: RichTextLabel BBCode.</summary>
+    public string Prompt => PromptRich(Device);
+
+    /// <summary>The map's hint line for <see cref="Device"/>: RichTextLabel BBCode.</summary>
+    public string MapHint => MapHintRich(Device);
+
+    /// <summary>The signpost prompt on <paramref name="device"/>: its Interact icon, then "Map" (built once per device).</summary>
+    public static string PromptRich(DeviceKind device) => s_prompts[Array.IndexOf(s_devices, device)];
+
+    /// <summary>
+    /// The map's hint line on <paramref name="device"/>, only that device's icons (built once per device):
+    /// pick (left click, keyboard and mouse only), choose, travel (Confirm) and close (Back).
+    /// </summary>
+    public static string MapHintRich(DeviceKind device) => s_hints[Array.IndexOf(s_devices, device)];
 
     /// <summary>The <see cref="Destinations"/> index of Town, Forest or PetCity.</summary>
     public static int IndexOf(Area area) => area switch
@@ -143,6 +170,7 @@ public sealed class TravelModule : IModule, IMessageHandler<PlayerInput>, IMessa
         _bus = bus;
         bus.Subscribe<PlayerInput>(this);
         bus.Subscribe<PlayerState>(this);
+        bus.Subscribe<ActiveDevice>(this);
     }
 
     public void Handle(in PlayerInput message)
@@ -155,6 +183,12 @@ public sealed class TravelModule : IModule, IMessageHandler<PlayerInput>, IMessa
     {
         _player = message;
         _havePlayer = true;
+    }
+
+    public void Handle(in ActiveDevice message)
+    {
+        if (Array.IndexOf(s_devices, message.Kind) >= 0)
+            Device = message.Kind;
     }
 
     /// <summary>View: the mouse moved onto destination <paramref name="index"/>. Selects it at the next tick while open.</summary>
@@ -292,5 +326,32 @@ public sealed class TravelModule : IModule, IMessageHandler<PlayerInput>, IMessa
                 return i;
         }
         return -1;
+    }
+
+    private static string[] PerDevice(Func<DeviceKind, string> build)
+    {
+        var texts = new string[s_devices.Length];
+        for (int i = 0; i < texts.Length; i++)
+            texts[i] = build(s_devices[i]);
+        return texts;
+    }
+
+    private static string BuildPrompt(DeviceKind device) =>
+        Prompts.Rich(PromptAction.Interact, device, PromptIconSize) + " Map";
+
+    private static string BuildHint(DeviceKind device)
+    {
+        const string gap = "      ";
+        int size = HintIconSize;
+        string choose = Prompts.Rich(PromptAction.MenuLeft, device, size) + Prompts.Rich(PromptAction.MenuRight, device, size);
+        string pick = "";
+        if (device == DeviceKind.KeyboardMouse)
+            // Fire is the left click on keyboard and mouse: clicking a place picks it.
+            pick = Prompts.Rich(PromptAction.Fire, device, size) + " Pick a place" + gap;
+        else
+            choose += " " + Prompts.Rich(PromptAction.Move, device, size);
+        return pick + choose + " Choose" + gap
+            + Prompts.Rich(PromptAction.Confirm, device, size) + " Travel" + gap
+            + Prompts.Rich(PromptAction.Back, device, size) + " Close";
     }
 }

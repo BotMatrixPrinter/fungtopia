@@ -12,6 +12,8 @@ namespace Fungtopia.Travel.View;
 /// It runs a real <see cref="TravelModule"/> with a <see cref="TravelView"/> by the Town signpost
 /// on a patch of the Map's ground. <c>TRAVEL_PREVIEW=map</c> (default) opens the map with Mushroom
 /// Forest selected; <c>signpost</c> leaves it closed and shows the signpost and its prompt.
+/// <c>TRAVEL_DEVICE=keyboard</c> (default), <c>xbox</c>, <c>playstation</c> or <c>nintendo</c> picks
+/// the active device the prompts are shown for.
 /// </summary>
 public partial class TravelPreview : Node3D
 {
@@ -22,16 +24,26 @@ public partial class TravelPreview : Node3D
     }
 
     private readonly TravelModule _travel = new();
+    private readonly System.Collections.Generic.List<Texture2D> _icons = new();
     private System.Numerics.Vector3 _feet;
     private bool _map;
+    private DeviceKind _device;
     private long _tick;
 
     public override void _Ready()
     {
         _map = (OS.GetEnvironment("TRAVEL_PREVIEW") ?? "") != "signpost";
+        _device = (OS.GetEnvironment("TRAVEL_DEVICE") ?? "") switch
+        {
+            "xbox" => DeviceKind.Xbox,
+            "playstation" => DeviceKind.PlayStation,
+            "nintendo" => DeviceKind.Nintendo,
+            _ => DeviceKind.KeyboardMouse,
+        };
         var post = Places.SignpostTown;
         _feet = post.Position + new System.Numerics.Vector3(-1.4f, 0f, 1.2f);
         _travel.Start(new SilentBus());
+        LoadIcons();
         BuildStage(post);
 
         var view = (TravelView)GD.Load<PackedScene>("res://modules/Travel/Godot/Main.tscn").Instantiate();
@@ -47,6 +59,7 @@ public partial class TravelPreview : Node3D
 
     private void Step(bool openMap)
     {
+        _travel.Handle(new ActiveDevice(_device));
         _travel.Handle(new PlayerInput(System.Numerics.Vector2.Zero, System.Numerics.Vector2.Zero, false, false, false,
             System.Numerics.Vector3.Zero, false, openMap));
         _travel.Handle(new PlayerState(_feet, 0f, System.Numerics.Vector3.Zero, true, 10, 10, true, CharacterKind.Girl));
@@ -107,6 +120,26 @@ public partial class TravelPreview : Node3D
         var p = new Vector3(post.Position.X, post.Position.Y, post.Position.Z);
         camera.LookAtFromPosition(p + new Vector3(-3.2f, 2.2f, 4.2f), p + new Vector3(0.2f, 1.3f, 0f));
         camera.Current = true;
+    }
+
+    /// <summary>
+    /// In the game the Input view makes the prompt icons loadable (rasterizing the SVGs Godot has not
+    /// imported); the preview runs without it, so it does the same for itself.
+    /// </summary>
+    private void LoadIcons()
+    {
+        foreach (var file in DirAccess.GetFilesAt(Prompts.GlyphDirectory))
+        {
+            string path = Prompts.GlyphDirectory + file;
+            if (!file.EndsWith(".svg") || ResourceLoader.Exists(path))
+                continue;
+            var image = new Image();
+            if (image.LoadSvgFromString(FileAccess.GetFileAsString(path), 2f) != Error.Ok)
+                continue;
+            var texture = ImageTexture.CreateFromImage(image);
+            texture.TakeOverPath(path);
+            _icons.Add(texture);
+        }
     }
 
     private static Vector3 Ground(float x, float z) => new(x, Fungtopia.Map.Ground.HeightAt(x, z), z);

@@ -8,8 +8,8 @@ namespace Fungtopia.Travel.View;
 
 /// <summary>
 /// Draws the Travel module: a wooden signpost at each of the four <see cref="TravelModule.Signposts"/>
-/// with three arrow boards pointing at the three places, the "E / X: Map" prompt over a near
-/// signpost, the full-screen <see cref="MapCanvas"/> while the map is open (mouse, arrows / W A S D,
+/// with three arrow boards pointing at the three places, the "[Interact icon] Map" prompt (the
+/// active device's button) over a near signpost, the full-screen <see cref="MapCanvas"/> while the map is open (mouse, arrows / W A S D,
 /// D-pad and left stick, Enter / Space / A to confirm, Esc / B to go back all go to the Core, since
 /// Input stops reporting movement while the map holds UiFocus) and the fade around a trip.
 /// </summary>
@@ -25,6 +25,8 @@ public partial class TravelView : Node3D, IModuleView
     private MapCanvas _map = null!;
     private CanvasLayer _mapLayer = null!;
     private PanelContainer _prompt = null!;
+    private RichTextLabel _promptLabel = null!;
+    private string _promptText = "";
     private ColorRect _fade = null!;
     private bool _wasOpen;
     private int _hover = -1;
@@ -38,7 +40,7 @@ public partial class TravelView : Node3D, IModuleView
 
         var promptLayer = new CanvasLayer { Layer = 11 };
         AddChild(promptLayer);
-        _prompt = BuildPrompt();
+        _prompt = BuildPrompt(out _promptLabel);
         promptLayer.AddChild(_prompt);
 
         _mapLayer = new CanvasLayer { Layer = 20, Visible = false };
@@ -131,6 +133,13 @@ public partial class TravelView : Node3D, IModuleView
         _prompt.Visible = false;
         if (_travel == null || !_travel.ShowPrompt)
             return;
+        // Follows the active device; reset to its new (minimum) size when the text changes.
+        string text = _travel.Prompt;
+        if (!ReferenceEquals(text, _promptText))
+        {
+            _promptLabel.Text = _promptText = text;
+            _prompt.ResetSize();
+        }
         var camera = GetViewport().GetCamera3D();
         var size = _prompt.GetCombinedMinimumSize();
         var screen = GetViewport().GetVisibleRect().Size;
@@ -145,7 +154,7 @@ public partial class TravelView : Node3D, IModuleView
         _prompt.Visible = true;
     }
 
-    private static PanelContainer BuildPrompt()
+    private static PanelContainer BuildPrompt(out RichTextLabel label)
     {
         var box = new StyleBoxFlat
         {
@@ -157,10 +166,16 @@ public partial class TravelView : Node3D, IModuleView
         box.SetCornerRadiusAll(22);
         var panel = new PanelContainer { Visible = false, MouseFilter = Control.MouseFilterEnum.Ignore };
         panel.AddThemeStyleboxOverride("panel", box);
-        var label = new Label { Text = TravelModule.PromptText };
-        label.AddThemeFontSizeOverride("font_size", 28);
-        label.AddThemeColorOverride("font_color", Ink);
-        label.AddThemeFontOverride("font", new FontVariation { BaseFont = ThemeDB.FallbackFont, VariationEmbolden = 0.7f });
+        // The button icon is inline BBCode; FitContent sizes the pill to the icon and the word.
+        label = new RichTextLabel
+        {
+            BbcodeEnabled = true, FitContent = true, AutowrapMode = TextServer.AutowrapMode.Off,
+            ScrollActive = false, MouseFilter = Control.MouseFilterEnum.Ignore,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        label.AddThemeFontSizeOverride("normal_font_size", 28);
+        label.AddThemeColorOverride("default_color", Ink);
+        label.AddThemeFontOverride("normal_font", new FontVariation { BaseFont = ThemeDB.FallbackFont, VariationEmbolden = 0.7f });
         panel.AddChild(label);
         return panel;
     }
