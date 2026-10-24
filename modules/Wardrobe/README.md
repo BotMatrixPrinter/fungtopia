@@ -15,7 +15,7 @@ Some clothes are rewards. Adding a piece of clothing is one `Catalog` entry plus
   `Hair/<id>.py`: one script per item or hair style, each exporting `<id>.glb` next to itself.
 - `Tests/` — `WardrobeModuleTests.cs`: `CatalogTests` (the catalog and looks are well-formed, every
   model and its script exist) and `WardrobeModuleTests` (`WardrobeModule` with a fake `IMessageBus`
-  that also plays the wallet).
+  that also plays the wallet; saving and restoring round trips, bad save data keeps the defaults).
 
 Test it with `./test.sh Wardrobe` from the repository root.
 
@@ -54,8 +54,9 @@ check the model and the script exist.
 ## Core
 
 `WardrobeModule` reads `Fungtopia.Player.PlayerState` (the character: Girl or Boy),
-`Fungtopia.Monsters.MonsterKilled`, `Fungtopia.Wallet.WalletState` and `SpendResult`, and the
-messages above; it publishes `Fungtopia.Wallet.SpendCoins`.
+`Fungtopia.Monsters.MonsterKilled`, `Fungtopia.Wallet.WalletState` and `SpendResult`,
+`Fungtopia.Save.CollectSave` and `RestorePart`, and the messages above; it publishes
+`Fungtopia.Wallet.SpendCoins` and `Fungtopia.Save.SavePart`.
 
 - **Owning.** Every starter item is owned at the start; shop items by buying, rewards and anything
   else by `GrantItem`. Each new item publishes one `ItemReceived`.
@@ -79,6 +80,15 @@ messages above; it publishes `Fungtopia.Wallet.SpendCoins`.
   `Drag(pixels)` (a mouse drag, added up between ticks, `DragRadiansPerPixel` 0.01; ignored while
   closed). Opening a screen sets `Yaw` to 0.
 - **Screens.** `OpenWardrobe` / `OpenShop` open them, `Close()` (Done, Esc, B) closes them.
+- **Saving.** Each `CollectSave` is answered at once with one `SavePart` (Module `"Wardrobe"`):
+  `SaveJson()`, compact JSON `{"v":1,"look":[skin,hairStyle,hairColor,eyeColor],"owned":[ids],
+  "worn":[6 ids in Slot order, "" for none]}` (`SaveVersion` 1; `worn` keeps a bottom hidden under a
+  dress). A `RestorePart` for `"Wardrobe"` (`Restore(json)`) puts back exactly that look, owned and
+  worn items (starters stay owned; ids no longer in the catalog are skipped), closes an open screen,
+  forgets a pending purchase and counts the clothes as chosen, so the next `PlayerState` does not
+  dress the default outfit. It publishes nothing: no `ItemReceived`, no `SpendCoins`; the first
+  Tarantula / Ladybug rewards count as given when their item is owned. Missing or unreadable JSON, or
+  another version, changes nothing and writes one line to `Log` (the console) per game.
 - `Coins` (the latest `WalletState`), `Owns`, `Worn(slot)`, `BottomHidden`, `CanBuy`, `Appearance`
   are for the view. No allocations per tick.
 

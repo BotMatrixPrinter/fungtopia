@@ -1,6 +1,9 @@
 using System;
+using System.Collections.Generic;
+using System.Text.Json;
 using Fungtopia.Monsters;
 using Fungtopia.Player;
+using Fungtopia.Save;
 using Fungtopia.Shell;
 using Fungtopia.Wallet;
 
@@ -25,12 +28,13 @@ public enum BuyResult
 /// <see cref="SpendCoins"/>, trying the highlighted item on first. Publishes <see cref="AppearanceState"/>
 /// and <see cref="WardrobeState"/> every tick, <see cref="PreviewYaw"/> every tick a screen is open
 /// (the character turned by the view's drag, keys and stick), <see cref="ItemReceived"/> for each
-/// new item. No allocations per tick.
+/// new item. Saves its look, owned and worn items as one <see cref="SavePart"/> ("Wardrobe") on
+/// <see cref="CollectSave"/> and restores them from <see cref="RestorePart"/>. No allocations per tick.
 /// </summary>
 public sealed class WardrobeModule : IModule, IMessageHandler<SetLook>, IMessageHandler<Equip>,
     IMessageHandler<GrantItem>, IMessageHandler<OpenWardrobe>, IMessageHandler<OpenShop>,
     IMessageHandler<MonsterKilled>, IMessageHandler<PlayerState>, IMessageHandler<WalletState>,
-    IMessageHandler<SpendResult>
+    IMessageHandler<SpendResult>, IMessageHandler<CollectSave>, IMessageHandler<RestorePart>
 {
     /// <summary>The <see cref="SpendCoins.RequestId"/>s of the shop start here (other shops use their own).</summary>
     public const int RequestIdBase = 0x5744_0000;
@@ -48,7 +52,12 @@ public sealed class WardrobeModule : IModule, IMessageHandler<SetLook>, IMessage
     /// <summary>The right stick turns only past this deflection (then from 0 to full speed).</summary>
     public const float StickDeadZone = 0.2f;
 
+    /// <summary>The <see cref="SaveData.V"/> written; other versions are not restored.</summary>
+    public const int SaveVersion = 1;
+
     private const int Slots = 6;
+
+    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
     private readonly bool[] _owned = new bool[Catalog.Count];
     private readonly int[] _worn = new int[Slots];
@@ -63,6 +72,7 @@ public sealed class WardrobeModule : IModule, IMessageHandler<SetLook>, IMessage
     private bool _turnRight;
     private float _turnStick;
     private float _drag;
+    private bool _restoreProblemLogged;
 
     public WardrobeModule()
     {
@@ -94,10 +104,13 @@ public sealed class WardrobeModule : IModule, IMessageHandler<SetLook>, IMessage
     public BuyResult LastBuy { get; private set; }
     public int LastBuyItem { get; private set; } = -1;
 
-    /// <summary>Items received since the start (bought or granted), for the view.</summary>
+    /// <summary>Counts changes of the owned items (each item bought or granted, each restore), for the view.</summary>
     public int ReceivedCount { get; private set; }
 
     public long Ticks { get; private set; }
+
+    /// <summary>Where the one log line about an unreadable saved part goes (the console by default).</summary>
+    public Action<string> Log { get; set; } = Console.WriteLine;
 
     /// <summary>How the character is turned on the open screen (the <see cref="PreviewYaw"/> published), radians.</summary>
     public float Yaw { get; private set; }
@@ -148,6 +161,8 @@ public sealed class WardrobeModule : IModule, IMessageHandler<SetLook>, IMessage
         bus.Subscribe<PlayerState>(this);
         bus.Subscribe<WalletState>(this);
         bus.Subscribe<SpendResult>(this);
+        bus.Subscribe<CollectSave>(this);
+        bus.Subscribe<RestorePart>(this);
     }
 
     public void Tick(in TickContext context)
@@ -335,6 +350,107 @@ public sealed class WardrobeModule : IModule, IMessageHandler<SetLook>, IMessage
             LastBuy = BuyResult.NotEnough;
         }
     }
+
+    public void Handle(in CollectSave message) =>
+        _bus?.Publish(new SavePart(message.RequestId, SaveModules.Wardrobe, SaveJson()));
+
+    public void Handle(in RestorePart message)
+    {
+        if (message.Module == SaveModules.Wardrobe)
+            Restore(message.Json);
+    }
+
+    /// <summary>The look, owned and worn items as the JSON of one <see cref="SaveData"/>.</summary>
+    public string SaveJson()
+    {
+        var owned = new List<string>();
+        for (int i = 0; i < _owned.Length; i++)
+            if (_owned[i])
+                owned.Add(Catalog.Items[i].Id);
+        var worn = new string[Slots];
+        for (int s = 0; s < Slots; s++)
+            worn[s] = Id(_worn[s]);
+        var data = new SaveData(SaveVersion, new[] { Skin, HairStyle, HairColor, EyeColor }, owned.ToArray(), worn);
+        return JsonSerializer.Serialize(data, JsonOptions);
+    }
+
+    /// <summary>
+    /// Restores what <see cref="SaveJson"/> wrote, with no side effects (no <see cref="ItemReceived"/>,
+    /// no purchase) and closes any open screen. Missing or unreadable JSON or another version
+    /// changes nothing (logged once). Unknown item ids (no longer in the catalog) are skipped.
+    /// Returns whether it restored.
+    /// </summary>
+    public bool Restore(string? json)
+    {
+        string? problem = Parse(json, out var data);
+        if (problem != null)
+        {
+            if (!_restoreProblemLogged)
+            {
+                _restoreProblemLogged = true;
+                Log($"Fungtopia: Wardrobe: saved part not restored ({problem}), keeping the current clothes and look");
+            }
+            return false;
+        }
+        var look = data!.Look!;
+        Skin = look[0];
+        HairStyle = look[1];
+        HairColor = look[2];
+        EyeColor = look[3];
+        for (int i = 0; i < _owned.Length; i++)
+            _owned[i] = Catalog.Items[i].Source == Sources.Starter;
+        foreach (var id in data.Owned!)
+        {
+            int index = Catalog.IndexOf(id ?? "");
+            if (index >= 0)
+                _owned[index] = true;
+        }
+        for (int s = 0; s < Slots; s++)
+        {
+            int index = Catalog.IndexOf(data.Worn![s] ?? "");
+            _worn[s] = index >= 0 && _owned[index] && (int)Catalog.Items[index].Slot == s ? index : -1;
+        }
+        TarantulaRewarded = Owns(Catalog.SpiderSilkScarf);
+        LadybugRewarded = Owns(Catalog.LadybugBackpack);
+        _outfitChosen = true;
+        Close();
+        _buyQueued = -1;
+        _buyPending = -1;
+        LastBuy = BuyResult.None;
+        LastBuyItem = -1;
+        ReceivedCount++;
+        return true;
+    }
+
+    /// <summary>Reads <paramref name="json"/>; returns why it cannot be restored, or null.</summary>
+    private static string? Parse(string? json, out SaveData? data)
+    {
+        data = null;
+        if (string.IsNullOrWhiteSpace(json))
+            return "no data";
+        try
+        {
+            data = JsonSerializer.Deserialize<SaveData>(json, JsonOptions);
+        }
+        catch (JsonException e)
+        {
+            return "bad JSON: " + e.Message;
+        }
+        if (data == null)
+            return "no data";
+        if (data.V != SaveVersion)
+            return $"unknown version {data.V}";
+        if (data.Look is not { Length: 4 } look || !Looks.Valid(look[0], look[1], look[2], look[3]))
+            return "bad look";
+        if (data.Owned == null || data.Worn is not { Length: Slots })
+            return "bad items";
+        return null;
+    }
+
+    /// <summary>
+    /// The saved part: <c>{"v":1,"look":[skin,hairStyle,hairColor,eyeColor],"owned":[ids],"worn":[6 ids by Slot, "" for none]}</c>.
+    /// </summary>
+    private sealed record SaveData(int V, int[]? Look, string[]? Owned, string[]? Worn);
 
     private void SendBuy(int index)
     {

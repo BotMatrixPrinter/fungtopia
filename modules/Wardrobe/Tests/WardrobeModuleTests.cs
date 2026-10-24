@@ -5,6 +5,7 @@ using System.Numerics;
 using Fungtopia.Map;
 using Fungtopia.Monsters;
 using Fungtopia.Player;
+using Fungtopia.Save;
 using Fungtopia.Shell;
 using Fungtopia.Wallet;
 using Xunit;
@@ -171,6 +172,8 @@ public class WardrobeModuleTests
         public readonly List<SpendCoins> Spends = new();
         public readonly List<ItemReceived> Received = new();
         public readonly List<PreviewYaw> Yaws = new();
+        public readonly List<SavePart> Parts = new();
+        public readonly List<object> All = new();
         public int? Coins;
 
         public void Subscribe<T>(IMessageHandler<T> handler) where T : struct
@@ -182,6 +185,9 @@ public class WardrobeModuleTests
 
         public void Publish<T>(in T message) where T : struct
         {
+            All.Add(message);
+            if (message is SavePart part)
+                Parts.Add(part);
             if (message is AppearanceState appearance)
                 Appearances.Add(appearance);
             if (message is WardrobeState state)
@@ -707,6 +713,143 @@ public class WardrobeModuleTests
         wardrobe.WearOutfit(1); // the dress outfit does not fit the boy
         wardrobe.Tick(Step);
         Assert.Equal("overalls_top", bus.Appearances[^1].Top);
+    }
+
+    /// <summary>Everything a save keeps: the look, what is owned and what is put on in each slot.</summary>
+    private static (int, int, int, int, bool[], int[]) StateOf(WardrobeModule w)
+    {
+        var owned = new bool[Catalog.Count];
+        for (int i = 0; i < owned.Length; i++)
+            owned[i] = w.Owns(i);
+        var worn = new int[6];
+        for (int s = 0; s < worn.Length; s++)
+            worn[s] = w.Worn((Slot)s);
+        return (w.Skin, w.HairStyle, w.HairColor, w.EyeColor, owned, worn);
+    }
+
+    private static void AssertSameState(WardrobeModule expected, WardrobeModule actual)
+    {
+        var (a, b) = (StateOf(expected), StateOf(actual));
+        Assert.Equal((a.Item1, a.Item2, a.Item3, a.Item4), (b.Item1, b.Item2, b.Item3, b.Item4));
+        Assert.Equal(a.Item5, b.Item5);
+        Assert.Equal(a.Item6, b.Item6);
+        Assert.Equal(expected.Appearance, actual.Appearance);
+    }
+
+    [Fact]
+    public void SaveAndRestoreRoundTripsTheLookAndOwnedAndWornItemsWithoutSideEffects()
+    {
+        // A girl who bought the flower clip, got the spider silk scarf, changed her look, wears the
+        // flower clip, the scarf and a dress over hidden shorts, and took her shoes off.
+        var bus = new FakeBus { Coins = 1000 };
+        var original = Started(bus, CharacterKind.Girl);
+        bus.Publish(new SetLook(3, 4, 5, 2));
+        bus.Publish(new OpenShop());
+        original.Buy("flower_clip");
+        original.Tick(Step);
+        original.Close();
+        bus.Publish(Kill(1, MonsterKind.Tarantula));
+        bus.Publish(new Equip("flower_clip"));
+        bus.Publish(new Equip(Catalog.SpiderSilkScarf));
+        bus.Publish(new Equip("shorts"));
+        bus.Publish(new Equip("spotted_dress"));
+        bus.Publish(Equip.Unequip(Slot.Shoes));
+        Assert.True(original.Owns("flower_clip"));
+        Assert.True(original.BottomHidden);
+
+        bus.Publish(new CollectSave(42));
+        var part = Assert.Single(bus.Parts);
+        Assert.Equal(42, part.RequestId);
+        Assert.Equal(SaveModules.Wardrobe, part.Module);
+        Assert.Contains("\"v\":1", part.Json);
+
+        // A fresh game, with a screen open, restores it.
+        var loadBus = new FakeBus { Coins = 1000 };
+        var restored = Started(loadBus, CharacterKind.Girl);
+        loadBus.Publish(new OpenWardrobe());
+        loadBus.All.Clear();
+        loadBus.Publish(new RestorePart(SaveModules.Wallet, "{\"v\":1}"));
+        loadBus.Publish(new RestorePart(SaveModules.Wardrobe, part.Json));
+        AssertSameState(original, restored);
+        Assert.True(restored.BottomHidden);
+        Assert.Equal(-1, restored.Worn(Slot.Shoes));
+        Assert.False(restored.Open);
+        // Restoring published nothing: no ItemReceived, no SpendCoins.
+        Assert.Equal(2, loadBus.All.Count);
+
+        // The state stays restored: ticks, the player's state and the first tarantula give nothing new.
+        restored.Tick(Step);
+        loadBus.Publish(Player(CharacterKind.Girl));
+        loadBus.Publish(Kill(2, MonsterKind.Tarantula));
+        restored.Tick(Step);
+        Assert.Empty(loadBus.Received);
+        Assert.Empty(loadBus.Spends);
+        AssertSameState(original, restored);
+        Assert.Equal(original.Appearance, loadBus.Appearances[^1]);
+
+        // Saving the restored game writes the same part.
+        loadBus.Publish(new CollectSave(43));
+        Assert.Equal(part.Json, Assert.Single(loadBus.Parts).Json);
+    }
+
+    [Fact]
+    public void ABoysSaveRoundTripsIntoAFreshGame()
+    {
+        var bus = new FakeBus();
+        var original = Started(bus, CharacterKind.Boy);
+        original.WearOutfit(2);
+        bus.Publish(new GrantItem(Catalog.LadybugBackpack, "quest"));
+        bus.Publish(new Equip(Catalog.LadybugBackpack));
+        bus.Publish(new SetLook(5, 0, 7, 5));
+        bus.Publish(new CollectSave(1));
+
+        var loadBus = new FakeBus();
+        var restored = Started(loadBus);
+        loadBus.Publish(new RestorePart(SaveModules.Wardrobe, bus.Parts[^1].Json));
+        loadBus.Publish(Player(CharacterKind.Boy));
+        AssertSameState(original, restored);
+        Assert.True(restored.LadybugRewarded);
+        Assert.Empty(loadBus.Received);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("not json")]
+    [InlineData("{\"v\":1,\"look\":[0,0,0")]
+    [InlineData("[1,2,3]")]
+    [InlineData("null")]
+    [InlineData("{\"v\":2,\"look\":[1,1,1,1],\"owned\":[\"mushroom_hat\"],\"worn\":[\"\",\"\",\"\",\"mushroom_hat\",\"\",\"\"]}")]
+    [InlineData("{\"v\":1,\"look\":[99,1,1,1],\"owned\":[\"mushroom_hat\"],\"worn\":[\"\",\"\",\"\",\"mushroom_hat\",\"\",\"\"]}")]
+    [InlineData("{\"v\":1,\"look\":[1,1,1,1],\"owned\":[\"mushroom_hat\"],\"worn\":[\"mushroom_hat\"]}")]
+    [InlineData("{\"v\":1,\"look\":\"pink\",\"owned\":[],\"worn\":[]}")]
+    public void BadOrUnknownSaveDataKeepsTheDefaultsAndLogsOnce(string? json)
+    {
+        var defaults = Started(new FakeBus(), CharacterKind.Girl);
+        var bus = new FakeBus();
+        var wardrobe = Started(bus, CharacterKind.Girl);
+        var log = new List<string>();
+        wardrobe.Log = log.Add;
+        bus.All.Clear();
+        bus.Publish(new RestorePart(SaveModules.Wardrobe, json!));
+        bus.Publish(new RestorePart(SaveModules.Wardrobe, json!));
+        AssertSameState(defaults, wardrobe);
+        Assert.Single(log);
+        Assert.Contains("Wardrobe", log[0]);
+        Assert.Equal(2, bus.All.Count);
+        Assert.False(wardrobe.Restore(json));
+    }
+
+    [Fact]
+    public void RestoreSkipsItemsNoLongerInTheCatalog()
+    {
+        var wardrobe = Started(new FakeBus(), CharacterKind.Girl);
+        Assert.True(wardrobe.Restore("{\"v\":1,\"look\":[1,2,3,4],\"owned\":[\"gone_hat\",\"skirt\"]," +
+            "\"worn\":[\"striped_tee\",\"skirt\",\"\",\"gone_hat\",\"\",\"\"]}"));
+        Assert.True(wardrobe.Owns("skirt"));
+        Assert.Equal(Catalog.IndexOf("skirt"), wardrobe.Worn(Slot.Bottom));
+        Assert.Equal(-1, wardrobe.Worn(Slot.Head));
+        Assert.Equal((1, 2, 3, 4), (wardrobe.Skin, wardrobe.HairStyle, wardrobe.HairColor, wardrobe.EyeColor));
     }
 
     [Fact]
