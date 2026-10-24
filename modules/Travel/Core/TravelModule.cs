@@ -15,7 +15,7 @@ namespace Fungtopia.Travel;
 /// <see cref="FocusOwner"/>) when the map opens and when it closes, so Input stops walking meanwhile.
 /// </summary>
 public sealed class TravelModule : IModule, IMessageHandler<PlayerInput>, IMessageHandler<PlayerState>,
-    IMessageHandler<ActiveDevice>
+    IMessageHandler<ActiveDevice>, IMessageHandler<MenuNav>
 {
     /// <summary>How near a signpost (horizontal meters) its prompt shows and Interact opens the map.</summary>
     public const float PromptRadius = 2.5f;
@@ -34,9 +34,6 @@ public sealed class TravelModule : IModule, IMessageHandler<PlayerInput>, IMessa
 
     /// <summary>How far in front of the signpost (along its facing) the player arrives.</summary>
     public const float ArrivalGap = 1.5f;
-
-    /// <summary>Stick deflection that steps the map's selection; it must come back under half of it first.</summary>
-    public const float StickStep = 0.5f;
 
     /// <summary>The <see cref="UiFocus.Owner"/> of the travel map.</summary>
     public const int FocusOwner = 0x7472_6176; // "trav"
@@ -66,15 +63,13 @@ public sealed class TravelModule : IModule, IMessageHandler<PlayerInput>, IMessa
     private bool _haveInput;
     private PlayerState _player;
     private bool _havePlayer;
-    private bool _stickCentered = true;
     private Phase _phase;
     private float _phaseSeconds;
     private int _pendingPick = -1;
-    private int _pendingSteps;
     private bool _pendingClose;
     private int _hover = -1;
     private bool _pendingConfirm;
-    private Vector2 _navigate;
+    private MenuNav _nav;
     private bool _focused;
 
     /// <summary>The three places, in map order: Town, Forest, PetCity.</summary>
@@ -171,6 +166,7 @@ public sealed class TravelModule : IModule, IMessageHandler<PlayerInput>, IMessa
         bus.Subscribe<PlayerInput>(this);
         bus.Subscribe<PlayerState>(this);
         bus.Subscribe<ActiveDevice>(this);
+        bus.Subscribe<MenuNav>(this);
     }
 
     public void Handle(in PlayerInput message)
@@ -191,23 +187,17 @@ public sealed class TravelModule : IModule, IMessageHandler<PlayerInput>, IMessa
             Device = message.Kind;
     }
 
+    /// <summary>Input's paced menu step for this tick; the only way the keys, D-pad and stick move the selection.</summary>
+    public void Handle(in MenuNav message) => _nav = message;
+
     /// <summary>View: the mouse moved onto destination <paramref name="index"/>. Selects it at the next tick while open.</summary>
     public void Hover(int index) => _hover = index;
 
     /// <summary>View: destination <paramref name="index"/> was clicked. Applied at the next tick while open.</summary>
     public void Pick(int index) => _pendingPick = index;
 
-    /// <summary>View: arrow keys moved the selection by <paramref name="steps"/> (+ toward Pet City).</summary>
-    public void Step(int steps) => _pendingSteps += steps;
-
     /// <summary>View: Enter / Space / gamepad A was pressed: picks the selected place at the next tick while open.</summary>
     public void Confirm() => _pendingConfirm = true;
-
-    /// <summary>
-    /// View: the held direction of the left stick (x right, y up, length 0..1). Kept until the next
-    /// call; one push past <see cref="StickStep"/> steps the selection once.
-    /// </summary>
-    public void Navigate(Vector2 direction) => _navigate = direction;
 
     /// <summary>View: Esc / B was pressed. Applied at the next tick.</summary>
     public void Close() => _pendingClose = true;
@@ -227,7 +217,8 @@ public sealed class TravelModule : IModule, IMessageHandler<PlayerInput>, IMessa
 
         bool interact = _haveInput && _input.Interact;
         bool openMap = _haveInput && _input.OpenMap;
-        int stick = StickSteps();
+        // Right or up: toward Pet City; left or down: toward Town (at most one field is non-zero).
+        int step = _nav.Horizontal - _nav.Vertical;
         bool confirm = interact || _pendingConfirm;
 
         switch (_phase)
@@ -256,7 +247,7 @@ public sealed class TravelModule : IModule, IMessageHandler<PlayerInput>, IMessa
                 break;
             default:
                 if (Open)
-                    TickOpen(confirm, openMap, stick, outdoors);
+                    TickOpen(confirm, openMap, step, outdoors);
                 else if (outdoors && alive && (openMap || (interact && NearSignpost >= 0)))
                 {
                     Open = true;
@@ -267,7 +258,7 @@ public sealed class TravelModule : IModule, IMessageHandler<PlayerInput>, IMessa
 
         ShowPrompt = NearSignpost >= 0 && !Open && _phase == Phase.Idle && alive;
         _pendingPick = -1;
-        _pendingSteps = 0;
+        _nav = default;
         _pendingClose = false;
         _pendingConfirm = false;
         _hover = -1;
@@ -280,7 +271,7 @@ public sealed class TravelModule : IModule, IMessageHandler<PlayerInput>, IMessa
         _bus.Publish(new MapState(Open));
     }
 
-    private void TickOpen(bool confirm, bool openMap, int stick, bool outdoors)
+    private void TickOpen(bool confirm, bool openMap, int step, bool outdoors)
     {
         if (_pendingClose || openMap || !outdoors)
         {
@@ -289,7 +280,7 @@ public sealed class TravelModule : IModule, IMessageHandler<PlayerInput>, IMessa
         }
         if (_hover >= 0 && _hover < s_destinations.Length)
             Selected = _hover;
-        Selected = Math.Clamp(Selected + _pendingSteps + stick, 0, s_destinations.Length - 1);
+        Selected = Math.Clamp(Selected + step, 0, s_destinations.Length - 1);
         int pick = _pendingPick >= 0 && _pendingPick < s_destinations.Length ? _pendingPick : confirm ? Selected : -1;
         if (pick < 0)
             return;
@@ -297,23 +288,6 @@ public sealed class TravelModule : IModule, IMessageHandler<PlayerInput>, IMessa
         Traveling = pick;
         _phase = Phase.FadingOut;
         _phaseSeconds = 0f;
-    }
-
-    /// <summary>One step per stick push (right or up: +1, left or down: -1), after it came back near the center.</summary>
-    private int StickSteps()
-    {
-        // Input zeroes PlayerInput.Move while the map holds UiFocus, so the stick comes from the view.
-        var move = _navigate;
-        float main = MathF.Abs(move.X) >= MathF.Abs(move.Y) ? move.X : move.Y;
-        if (MathF.Abs(main) < StickStep * 0.5f)
-        {
-            _stickCentered = true;
-            return 0;
-        }
-        if (!_stickCentered || MathF.Abs(main) < StickStep)
-            return 0;
-        _stickCentered = false;
-        return main > 0f ? 1 : -1;
     }
 
     private static int FindSignpost(Vector3 position)

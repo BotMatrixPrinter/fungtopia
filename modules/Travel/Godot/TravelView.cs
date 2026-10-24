@@ -9,9 +9,9 @@ namespace Fungtopia.Travel.View;
 /// <summary>
 /// Draws the Travel module: a wooden signpost at each of the four <see cref="TravelModule.Signposts"/>
 /// with three arrow boards pointing at the three places, the "[Interact icon] Map" prompt (the
-/// active device's button) over a near signpost, the full-screen <see cref="MapCanvas"/> while the map is open (mouse, arrows / W A S D,
-/// D-pad and left stick, Enter / Space / A to confirm, Esc / B to go back all go to the Core, since
-/// Input stops reporting movement while the map holds UiFocus) and the fade around a trip.
+/// active device's button) over a near signpost, the full-screen <see cref="MapCanvas"/> while the map is open (mouse,
+/// Enter / Space / A to confirm, Esc / B to go back go to the Core; arrows, W A S D, the D-pad and the
+/// left stick reach it only as Input's paced <c>MenuNav</c>) and the fade around a trip.
 /// </summary>
 public partial class TravelView : Node3D, IModuleView
 {
@@ -59,9 +59,6 @@ public partial class TravelView : Node3D, IModuleView
     {
         if (_travel == null)
             return;
-        // The first pad's left stick, y up (Input reads the same pad); the Core steps once per push.
-        _travel.Navigate(new System.Numerics.Vector2(
-            GodotInput.GetJoyAxis(0, JoyAxis.LeftX), -GodotInput.GetJoyAxis(0, JoyAxis.LeftY)));
         bool open = _travel.Open;
         if (open != _wasOpen)
         {
@@ -100,18 +97,6 @@ public partial class TravelView : Node3D, IModuleView
                 GetViewport().SetInputAsHandled();
                 break;
             }
-            case InputEventKey { Keycode: Key.Left or Key.Down, Pressed: true }:
-            case InputEventKey { PhysicalKeycode: Key.A or Key.S, Pressed: true }:
-            case InputEventJoypadButton { ButtonIndex: JoyButton.DpadLeft or JoyButton.DpadDown, Pressed: true }:
-                _travel.Step(-1);
-                GetViewport().SetInputAsHandled();
-                break;
-            case InputEventKey { Keycode: Key.Right or Key.Up, Pressed: true }:
-            case InputEventKey { PhysicalKeycode: Key.D or Key.W, Pressed: true }:
-            case InputEventJoypadButton { ButtonIndex: JoyButton.DpadRight or JoyButton.DpadUp, Pressed: true }:
-                _travel.Step(1);
-                GetViewport().SetInputAsHandled();
-                break;
             case InputEventKey { Keycode: Key.Enter or Key.KpEnter or Key.Space, Pressed: true, Echo: false }:
             case InputEventJoypadButton { ButtonIndex: JoyButton.A, Pressed: true }:
                 _travel.Confirm();

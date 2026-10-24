@@ -13,6 +13,11 @@ public class TravelModuleTests
 {
     private const double Step = 1.0 / 60;
 
+    /// <summary>Input's MenuRepeatSeconds (0.2 s) in ticks.</summary>
+    private const int RepeatTicks = 12;
+
+    private static readonly (int V, int H) Right = (0, 1), Left = (0, -1), Up = (-1, 0), Down = (1, 0);
+
     /// <summary>Fake of the shell's bus: records subscriptions and the messages Travel publishes.</summary>
     private sealed class FakeBus : IMessageBus
     {
@@ -52,16 +57,27 @@ public class TravelModuleTests
         }
 
         /// <summary>
-        /// One tick. <paramref name="move"/> goes into PlayerInput.Move; <paramref name="stick"/> is the
-        /// view's held left stick (<see cref="TravelModule.Navigate"/>).
+        /// One tick. <paramref name="move"/> goes into PlayerInput.Move; <paramref name="nav"/> is Input's
+        /// <see cref="MenuNav"/> for the tick (vertical, horizontal).
         /// </summary>
-        public void Tick(bool interact = false, bool openMap = false, Vector2 move = default, Vector2 stick = default)
+        public void Tick(bool interact = false, bool openMap = false, Vector2 move = default, (int V, int H) nav = default)
         {
-            Travel.Navigate(stick);
             // Input and Player tick before Travel (modules tick in name order).
             Travel.Handle(new PlayerInput(move, Vector2.Zero, false, false, false, Vector3.Zero, interact, openMap));
+            Travel.Handle(new MenuNav(nav.V, nav.H));
             Travel.Handle(new PlayerState(Position, 0f, Vector3.Zero, true, 10, 10, Alive, CharacterKind.Girl));
             Travel.Tick(new TickContext(_tick++, Step));
+        }
+
+        /// <summary>
+        /// Holds a menu direction for <paramref name="seconds"/>, with MenuNav paced as Input publishes it:
+        /// a step on the first tick, then one every 0.2 s (12 ticks) while held, 0 on every other tick.
+        /// </summary>
+        public void Hold((int V, int H) direction, float seconds)
+        {
+            int ticks = (int)MathF.Round(seconds * 60f);
+            for (int i = 0; i < ticks; i++)
+                Tick(nav: i % RepeatTicks == 0 ? direction : default);
         }
 
         public void Wait(float seconds)
@@ -95,6 +111,7 @@ public class TravelModuleTests
         Assert.Contains(typeof(PlayerInput), rig.Bus.Subscribed);
         Assert.Contains(typeof(PlayerState), rig.Bus.Subscribed);
         Assert.Contains(typeof(ActiveDevice), rig.Bus.Subscribed);
+        Assert.Contains(typeof(MenuNav), rig.Bus.Subscribed);
     }
 
     [Fact]
@@ -345,32 +362,25 @@ public class TravelModuleTests
     }
 
     [Fact]
-    public void StickAndArrowsMoveTheSelectionThenInteractPicksIt()
+    public void MenuNavMovesTheSelectionThenInteractPicksIt()
     {
         var rig = new Rig(TownSquare);
         rig.Tick(openMap: true);
         Assert.Equal(0, rig.Travel.Selected);
 
-        // One push right is one step, however long it is held.
-        for (int i = 0; i < 20; i++)
-            rig.Tick(stick: new Vector2(1f, 0f));
+        rig.Tick(nav: Right);
         Assert.Equal(1, rig.Travel.Selected);
-        rig.Tick();
-        rig.Tick(stick: new Vector2(0f, 0.9f));
+        rig.Tick(nav: Up); // up is toward Pet City too
         Assert.Equal(2, rig.Travel.Selected);
-        rig.Tick();
-        rig.Tick(stick: new Vector2(1f, 0f));
+        rig.Tick(nav: Right);
         Assert.Equal(2, rig.Travel.Selected); // stays on the last one
-        rig.Tick();
-        rig.Tick(stick: new Vector2(-0.3f, 0f)); // under StickStep: no step
-        Assert.Equal(2, rig.Travel.Selected);
-        rig.Tick(stick: new Vector2(0f, -1f));
+        rig.Tick(nav: Down);
         Assert.Equal(1, rig.Travel.Selected);
-        rig.Travel.Step(-1);
-        rig.Tick();
+        rig.Tick(nav: Left);
         Assert.Equal(0, rig.Travel.Selected);
-        rig.Travel.Step(1);
-        rig.Tick();
+        rig.Tick(nav: Left);
+        Assert.Equal(0, rig.Travel.Selected); // and on the first one
+        rig.Tick(nav: Right);
         Assert.Equal(1, rig.Travel.Selected);
         Assert.Empty(rig.Bus.Teleports);
 
@@ -381,9 +391,63 @@ public class TravelModuleTests
     }
 
     [Fact]
+    public void AHeldDirectionMovesOnePlacePerFifthOfASecond()
+    {
+        var rig = new Rig(TownSquare);
+        rig.Tick(openMap: true);
+        var selected = new List<int>();
+        for (int i = 0; i < 2 * RepeatTicks; i++)
+        {
+            rig.Tick(nav: i % RepeatTicks == 0 ? Right : default);
+            selected.Add(rig.Travel.Selected);
+        }
+        // One step on the push, the next only 0.2 s later, not one per tick in between.
+        for (int i = 0; i < RepeatTicks; i++)
+            Assert.Equal(1, selected[i]);
+        for (int i = RepeatTicks; i < 2 * RepeatTicks; i++)
+            Assert.Equal(2, selected[i]);
+
+        // Held left for a whole 0.39 s from Pet City: back to Town, two steps, not 23.
+        rig.Hold(Left, 0.39f);
+        Assert.Equal(0, rig.Travel.Selected);
+        rig.Hold(Right, 0.1f);
+        Assert.Equal(1, rig.Travel.Selected);
+    }
+
+    [Fact]
+    public void AShortFlickMovesExactlyOnePlace()
+    {
+        var rig = new Rig(TownSquare);
+        rig.Tick(openMap: true);
+        // A flick past the threshold for a few ticks: Input sends one step, then zeros.
+        rig.Hold(Right, 4f / 60f);
+        Assert.Equal(1, rig.Travel.Selected);
+        rig.Wait(1f);
+        Assert.Equal(1, rig.Travel.Selected);
+
+        var down = new Rig(DeepForest);
+        down.Tick(openMap: true);
+        Assert.Equal(1, down.Travel.Selected);
+        down.Hold(Down, 1f / 60f);
+        Assert.Equal(0, down.Travel.Selected);
+    }
+
+    [Fact]
+    public void ANavStepIsUsedOnceNotRepeatedOnLaterTicks()
+    {
+        var rig = new Rig(TownSquare);
+        rig.Tick(openMap: true);
+        rig.Travel.Handle(new MenuNav(0, 1));
+        rig.Travel.Tick(new TickContext(100, Step)); // no newer MenuNav arrives after this one
+        rig.Travel.Tick(new TickContext(101, Step));
+        rig.Travel.Tick(new TickContext(102, Step));
+        Assert.Equal(1, rig.Travel.Selected);
+    }
+
+    [Fact]
     public void PlayerInputMoveDoesNotStepTheSelection()
     {
-        // Input zeroes Move while the map holds UiFocus; the map's choosing comes from the view.
+        // Only MenuNav moves the selection; Input zeroes Move while the map holds UiFocus anyway.
         var rig = new Rig(TownSquare);
         rig.Tick(openMap: true);
         rig.Tick(move: new Vector2(1f, 0f));
@@ -393,15 +457,13 @@ public class TravelModuleTests
     }
 
     [Fact]
-    public void AStickHeldWhenTheMapOpensDoesNotStep()
+    public void MenuNavIsIgnoredWhileClosedAndOnTheOpeningTick()
     {
         var rig = new Rig(TownSquare);
-        rig.Tick(stick: new Vector2(1f, 0f));
-        rig.Tick(openMap: true, stick: new Vector2(1f, 0f));
-        rig.Tick(stick: new Vector2(1f, 0f));
+        rig.Tick(nav: Right);
+        rig.Tick(openMap: true, nav: Right);
         Assert.Equal(0, rig.Travel.Selected);
-        rig.Tick();
-        rig.Tick(stick: new Vector2(1f, 0f));
+        rig.Tick(nav: Right);
         Assert.Equal(1, rig.Travel.Selected);
     }
 
@@ -414,8 +476,8 @@ public class TravelModuleTests
         rig.Tick(openMap: true);
         Assert.True(rig.Travel.Open);
         Assert.Equal(-1, rig.Travel.Traveling);
-        rig.Travel.Step(2);
-        rig.Tick();
+        rig.Tick(nav: Right);
+        rig.Tick(nav: Right);
         rig.Travel.Confirm();
         rig.Tick();
         Assert.Equal(2, rig.Travel.Traveling);
@@ -504,8 +566,8 @@ public class TravelModuleTests
         Assert.Empty(rig.Bus.Teleports);
         Assert.Equal(2, rig.Travel.Selected);
 
-        rig.Travel.Step(-2);
-        rig.Tick();
+        rig.Tick(nav: Left);
+        rig.Tick(nav: Left);
         rig.Tick(interact: true);
         rig.Wait(TravelModule.FadeOutSeconds);
         Assert.Single(rig.Bus.Teleports);
@@ -517,8 +579,7 @@ public class TravelModuleTests
     {
         var rig = new Rig(TownSquare);
         rig.Travel.Pick(2);
-        rig.Travel.Step(1);
-        rig.Tick();
+        rig.Tick(nav: Right);
         Assert.False(rig.Travel.Open);
         rig.Wait(1f);
         Assert.Empty(rig.Bus.Teleports);
@@ -529,8 +590,7 @@ public class TravelModuleTests
         rig.Tick();
         Assert.Equal(2, rig.Travel.Selected);
         // A resting mouse does not hold the selection against the keys.
-        rig.Travel.Step(-1);
-        rig.Tick();
+        rig.Tick(nav: Left);
         Assert.Equal(1, rig.Travel.Selected);
     }
 

@@ -24,7 +24,7 @@ Test it with `./test.sh Travel` from the repository root.
 
 ## Core
 
-`TravelModule` reads `Fungtopia.Input.PlayerInput` (`Interact`, `OpenMap`) and
+`TravelModule` reads `Fungtopia.Input.PlayerInput` (`Interact`, `OpenMap`), `Fungtopia.Input.MenuNav` and
 `Fungtopia.Player.PlayerState` (`Position`, `Area`, `Alive`), and the world from the Map Contract.
 It publishes `MapState` every tick, `UiFocus` when the map opens or closes, and
 `Fungtopia.Player.TeleportPlayer` once per trip. Each tick:
@@ -40,11 +40,11 @@ It publishes `MapState` every tick, `UiFocus` when the map opens or closes, and
 - **Opening.** While closed, alive and not in `Area.Home`: `OpenMap`, or `Interact` near a
   signpost, opens the map. `Here` ("you are here") is the destination nearest the player (the area
   it is in; on a road the one it is least outside of); the selection starts there.
-- **While open.** No teleport is sent until a place is chosen. Input zeroes `PlayerInput.Move`
-  while the map holds `UiFocus`, so the map's choosing comes from the view: the held left stick
-  (`Navigate`, kept until the next call) steps the selection once per push past `StickStep` (right /
-  up toward Pet City, left / down toward Town, no wrapping); arrows, W A S D and the D-pad (`Step`),
-  mouse hover (`Hover`), click (`Pick`) and confirm (`Confirm`) apply at the next tick.
+- **While open.** No teleport is sent until a place is chosen. The selection moves only by
+  `Fungtopia.Input.MenuNav`, Input's paced menu step (one on a push, then one per 0.2 s while held,
+  from the left stick, D-pad, arrow keys and W A S D alike): right / up toward Pet City, left / down
+  toward Town, no wrapping; each message counts for its own tick only. `PlayerInput.Move` never moves it.
+  Mouse hover (`Hover`), click (`Pick`) and confirm (`Confirm`) come from the view and apply at the next tick.
   `Interact` or `Confirm` picks the selected place. `Close()` (Esc / B), `OpenMap` again, or ending up indoors
   closes it without a trip.
 - **A trip.** On a pick: `FadeOutSeconds` (0.3 s) to black with the map still shown, then the map
@@ -77,9 +77,9 @@ Forest raised in the middle, Pet City right, radius 215; `Hit(point)`, `ToCanvas
 - the fade, a plum full-screen rect on canvas layer 21.
 
 While the map is open the mouse is freed (and captured again when it closes); mouse motion,
-left clicks (handled, so the Input module does not take them to recapture the mouse), arrow keys,
-W A S D (physical keys) and the D-pad (`Step`), Enter / Space / gamepad A (`Confirm`), Esc and gamepad
-B (`Close`) go to the Core, and the first pad's left stick goes to `Navigate` every frame.
+left clicks (handled, so the Input module does not take them to recapture the mouse), Enter / Space /
+gamepad A (`Confirm`), Esc and gamepad B (`Close`) go to the Core. The view reads no arrows, W A S D,
+D-pad or stick for choosing: those reach the Core only as `MenuNav`.
 
 Screenshots: `./screenshot.sh modules/Travel/Godot/Preview.tscn` shows the open map;
 `TRAVEL_PREVIEW=signpost` shows the Town signpost with its prompt instead; `TRAVEL_DEVICE=keyboard`

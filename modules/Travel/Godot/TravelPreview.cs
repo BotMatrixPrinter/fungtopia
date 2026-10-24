@@ -52,7 +52,7 @@ public partial class TravelPreview : Node3D
 
         Step(openMap: _map);
         if (_map)
-            _travel.Step(1);
+            _travel.Hover(1);
     }
 
     public override void _PhysicsProcess(double delta) => Step(false);
