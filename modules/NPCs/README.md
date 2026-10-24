@@ -1,7 +1,7 @@
 # NPCs module
 
 The townsfolk from Tony's drawing: **Dr. Jeremy** at his clinic, your best friend **Millie** next
-door, and **Lucy**, the Pet Store cashier. Each stands at their spot, turns to face you when you
+door, **Lucy**, the Pet Store cashier, and **Abby**, the clothing shopkeeper. Each stands at their spot, turns to face you when you
 come near, and idles a little. Within 2.5 m a small "E / X: Talk" prompt floats over them, and
 Interact starts a conversation in speech bubbles (the Dialogue module shows them).
 
@@ -11,14 +11,14 @@ Interact starts a conversation in speech bubbles (the Dialogue module shows them
     gives the first one.
 - `Core/` — `Fungtopia.NPCs.Core`: `NPCsModule`, the module's one `IModule`.
 - `Godot/` — `Main.tscn` with `NPCsView`; `NpcFigure` (loads a model, toon materials, idle and
-  talking animation); `Preview.tscn` (the three side by side, for screenshots); `Shaders/`
+  talking animation); `Preview.tscn` (the four side by side, for screenshots); `Shaders/`
   (toon surface, ink outline).
-- `Models/` — `npcs.py`, the Blender script that builds and exports `jeremy.glb`, `millie.glb`
-  and `lucy.glb` next to it.
+- `Models/` — `npcs.py`, the Blender script that builds and exports `jeremy.glb`, `millie.glb`,
+  `lucy.glb` and `abby.glb` next to it.
 - `Tests/` — `NPCsModuleTests.cs`: xUnit tests of `NPCsModule` with a fake `IMessageBus`, a fake
   Dialogue, player and wallet: the prompt, facing, conversation flow, Jeremy's wake-up greeting,
-  Millie's quests (progress, completion, payment, the next ones) and buying the crow (success,
-  not enough coins, walking away, already owned).
+  Millie's quests (progress, completion, payment, clothing rewards, the next ones), buying the
+  crow (success, not enough coins, walking away, already owned) and Abby opening her shop.
 
 Test it with `./test.sh NPCs` from the repository root.
 
@@ -27,22 +27,25 @@ Test it with `./test.sh NPCs` from the repository root.
 `NPCsModule` reads `Fungtopia.Input.PlayerInput` (`Interact`), `Fungtopia.Player.PlayerState`
 (`Position`, `Alive`), `Fungtopia.Dialogue` (`DialogueState`, `DialogueAdvanced`,
 `DialogueClosed`), `Fungtopia.DayNight.WokeUp`, `Fungtopia.Monsters.MonsterKilled`,
-`Fungtopia.Wallet` (`CoinsEarned`, `SpendResult`) and `Fungtopia.Pet.OwnedPets`, and the spots from
-`Fungtopia.Map.Places`. It publishes `SayLine`, `QuestState` (every tick), `GrantCoins`,
-`SpendCoins` and `AdoptPet`.
+`Fungtopia.Wallet` (`CoinsEarned`, `SpendResult`), `Fungtopia.Pet.OwnedPets` and
+`Fungtopia.Wardrobe.WardrobeState`, and the spots from `Fungtopia.Map.Places`. It publishes
+`SayLine`, `QuestState` (every tick), `GrantCoins`, `SpendCoins`, `AdoptPet`, and
+`Fungtopia.Wardrobe` `GrantItem` and `OpenShop`.
 
 | NPC (index) | Spot | Speaker id | Voice |
 | --- | --- | --- | --- |
 | Dr. Jeremy (0) | `Places.ClinicDoor` | 7100 | 2 kind |
 | Millie (1) | `Places.MillieSpot` | 7101 | 1 bubbly |
 | Lucy (2) | `Places.LucySpot` | 7102 | 0 deadpan |
+| Abby (3) | `Places.AbbySpot` | 7103 | 1 bubbly |
 
 Each tick:
 
 - **Facing.** Within `FaceRadius` (6 m) of a living player an NPC turns toward them at
   `TurnSpeed` (5 rad/s, the short way round), otherwise back to its spot's facing (`Yaw[i]`).
 - **Prompt.** `PromptNpc` is the nearest NPC within `PromptRadius` (2.5 m, horizontal) while the
-  player is alive and no speech bubble is open, else -1; `PromptText` is "E / X: Talk" (or the
+  player is alive and no speech bubble, wardrobe or shop screen (`WardrobeState.Open`) is open,
+  else -1; `PromptText` is "E / X: Talk" (or the
   buy prompt while Lucy offers the crow).
 - **Talking.** `Interact` with the prompt showing starts that NPC's conversation: its lines go out
   one `SayLine` at a time, the next on its `DialogueAdvanced`, the last one with `Last` set. The
@@ -59,13 +62,17 @@ Each tick:
   kind (by the player or the pet), or the `Amount` of each `CoinsEarned` whose `Position` is in
   `Area.Forest` or `Area.DeepForest` (so her own reward in town does not count); it stops at the
   goal, and then the quest is `Complete`. Talking to her before that tells the progress and a
-  tip; after it she pays the reward with one `GrantCoins` and gives the next quest.
+  tip; after it she pays the reward with one `GrantCoins` and gives the next quest. The second
+  quest also gives the Flower Clip and the fourth the Mushroom Backpack (`GrantItem`, "Millie's
+  quest"; `QuestItem(n)`, first round only), and she says so.
 - **Lucy.** If the player does not own the Mushroom Crow (from `OwnedPets`), talking to her
   offers it for 3,000 M¢, ending with "Press E / X again to buy." Once that line is dismissed she
   is `OfferingCrow`: Interact near her says yes and publishes `SpendCoins` (request ids from
   71000 up, "Mushroom Crow"); walking out of the prompt radius says no. On its `SpendResult`:
   `Ok` publishes `AdoptPet(Crow)` and she says "Congrats. It bites."; otherwise "Come back with
   3,000 M¢." When the crow is owned she just says so.
+- **Abby.** Talking to her says "Ooh, you'd look so cute in something new!"; once that line is
+  dismissed she publishes `OpenShop` (the Wardrobe module shows the shop).
 
 No allocations per tick (only the occasional dialogue lines are built when a talk starts).
 
@@ -77,20 +84,21 @@ over `PromptNpc`'s head. `NpcFigure` loads its `.glb` at run time from the file'
 checkout runs without an editor import), replaces each material with the toon shader plus an ink
 outline, and animates the parts: breathing, a gentle sway and head tilt, arm swing, and while
 talking a little bounce, nodding and a waving right arm. Jeremy is drawn 1.12 times as big (a
-grown-up); Millie is the liveliest, Lucy barely moves.
+grown-up); Millie is the liveliest, Abby nearly as lively, Lucy barely moves.
 
-Screenshots: `./screenshot.sh modules/NPCs/Godot/Preview.tscn` shows the three with Millie's
-prompt; `NPC_PREVIEW=jeremy`, `millie` or `lucy` shows only that one, closer.
+Screenshots: `./screenshot.sh modules/NPCs/Godot/Preview.tscn` shows the four with Millie's
+prompt; `NPC_PREVIEW=jeremy`, `millie`, `lucy` or `abby` shows only that one, closer.
 
 ## Models
 
 `blender -b --factory-startup --python modules/NPCs/Models/npcs.py` (from the repository root)
-writes `jeremy.glb`, `millie.glb` and `lucy.glb`; commit them with the script. Chibi folk in the
+writes `jeremy.glb`, `millie.glb`, `lucy.glb` and `abby.glb`; commit them with the script. Chibi folk in the
 player characters' style: a big round head, a rounded body, short arms with round hands, stubby
 legs. Dr. Jeremy: big dark eyes with sparkles, a neat side parting, a white doctor's coat with
 lapels, buttons and a name badge over a blue shirt and red tie, a stethoscope. Millie: cat ears
 with pink insides, happy ^ ^ closed eyes, honey hair in bunches, a pink bow at her neck, a mint
 dress with white spots and a frilly hem, a little cat tail. Lucy: a pink flower in her purple bob,
 half-lidded unimpressed eyes and a flat little mouth, a pale pink shirt saying "Pet Store" with little
-hearts. Objects with pivots where they move: `Body`, `Head` (neck), `LegL`/`LegR` (hip),
+hearts. Abby: big dark eyes with sparkles, a happy smile, auburn hair with a tall top bun, a pink
+triangle dress with a white collar and hem. Objects with pivots where they move: `Body`, `Head` (neck), `LegL`/`LegR` (hip),
 `ArmL`/`ArmR` (shoulder), `HandL`/`HandR`. Feet at the origin, facing -Z in Godot.

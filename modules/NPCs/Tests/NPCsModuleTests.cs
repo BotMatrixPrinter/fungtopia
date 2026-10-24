@@ -11,6 +11,7 @@ using Fungtopia.Pet;
 using Fungtopia.Player;
 using Fungtopia.Shell;
 using Fungtopia.Wallet;
+using Fungtopia.Wardrobe;
 using Xunit;
 
 namespace Fungtopia.NPCs.Tests;
@@ -18,7 +19,7 @@ namespace Fungtopia.NPCs.Tests;
 public class NPCsModuleTests
 {
     private const double Step = 1.0 / 60;
-    private const int Jeremy = NPCsModule.Jeremy, Millie = NPCsModule.Millie, Lucy = NPCsModule.Lucy;
+    private const int Jeremy = NPCsModule.Jeremy, Millie = NPCsModule.Millie, Lucy = NPCsModule.Lucy, Abby = NPCsModule.Abby;
 
     /// <summary>Fake of the shell's bus: records what NPCs publishes; a fake wallet answers purchases.</summary>
     private sealed class FakeBus : IMessageBus
@@ -145,6 +146,8 @@ public class NPCsModuleTests
         Assert.Equal(Places.ClinicDoor.Position, NPCsModule.Position(Jeremy));
         Assert.Equal(Places.MillieSpot.Position, NPCsModule.Position(Millie));
         Assert.Equal(Places.LucySpot.Position, NPCsModule.Position(Lucy));
+        Assert.Equal(Places.AbbySpot.Position, NPCsModule.Position(Abby));
+        Assert.Equal(4, NPCsModule.Count);
         var rig = new Rig(Far);
         rig.Wait(5);
         for (int i = 0; i < NPCsModule.Count; i++)
@@ -155,6 +158,7 @@ public class NPCsModuleTests
     [InlineData(Jeremy)]
     [InlineData(Millie)]
     [InlineData(Lucy)]
+    [InlineData(Abby)]
     public void PromptShowsWithinTwoAndAHalfMeters(int npc)
     {
         var rig = new Rig(Far);
@@ -328,6 +332,8 @@ public class NPCsModuleTests
         rig.Press();
         var grant = Assert.Single(rig.Bus.All<GrantCoins>());
         Assert.Equal(150, grant.Amount);
+        // The first quest pays coins only.
+        Assert.Empty(rig.Bus.All<GrantItem>());
         Assert.Contains(rig.ReadAll(), t => t.Contains("Defeat 3 Mushroom Ants"));
         Assert.Equal("Defeat 3 Mushroom Ants", rig.Quest.Title);
         Assert.Equal(0, rig.Quest.Progress);
@@ -342,8 +348,14 @@ public class NPCsModuleTests
         Kill(rig, MonsterKind.Ant, 3);
         Assert.True(rig.Quest.Complete);
         rig.Press();
-        rig.ReadAll();
+        var thanks = rig.ReadAll();
         Assert.Equal(150, rig.Bus.All<GrantCoins>()[^1].Amount);
+        // The second quest also gives the flower clip, once.
+        var clip = Assert.Single(rig.Bus.All<GrantItem>());
+        Assert.Equal("flower_clip", clip.ItemId);
+        Assert.Equal("Millie's quest", clip.Why);
+        Assert.True(Catalog.TryGet(clip.ItemId, out var clipItem));
+        Assert.Contains(thanks, t => t.Contains("150 M¢") && t.Contains(clipItem.Name));
         Assert.Equal(500, rig.Quest.Goal);
         Assert.Contains("earn 500 M¢ in the forest", rig.Quest.Title);
 
@@ -362,9 +374,85 @@ public class NPCsModuleTests
         rig.Press();
         rig.ReadAll();
         Assert.Equal(new[] { 150, 150, 200 }, rig.Bus.All<GrantCoins>().Select(g => g.Amount));
+        Assert.Single(rig.Bus.All<GrantItem>());
         Assert.Equal("Defeat 10 Mushroom Caterpillars", rig.Quest.Title);
         Assert.Equal(300, rig.Npcs.QuestReward);
         Assert.Equal(3, rig.Npcs.QuestsDone);
+
+        // The fourth quest gives the mushroom backpack besides 300 M¢.
+        Kill(rig, MonsterKind.Caterpillar, 10);
+        rig.Press();
+        var texts = rig.ReadAll();
+        Assert.Equal(300, rig.Bus.All<GrantCoins>()[^1].Amount);
+        Assert.Equal(new[] { "flower_clip", "mushroom_backpack" }, rig.Bus.All<GrantItem>().Select(g => g.ItemId));
+        Assert.Contains(texts, t => t.Contains("Mushroom Backpack"));
+    }
+
+    [Fact]
+    public void QuestClothesAreCatalogItemsOnTheSecondAndFourthQuests()
+    {
+        Assert.Equal("", NPCsModule.QuestItem(0));
+        Assert.Equal("flower_clip", NPCsModule.QuestItem(1));
+        Assert.Equal("", NPCsModule.QuestItem(2));
+        Assert.Equal("mushroom_backpack", NPCsModule.QuestItem(3));
+        Assert.Equal("", NPCsModule.QuestItem(4));
+        Assert.Equal("", NPCsModule.QuestItem(40));
+        Assert.True(Catalog.IndexOf(NPCsModule.QuestItem(1)) >= 0);
+        Assert.True(Catalog.IndexOf(NPCsModule.QuestItem(3)) >= 0);
+    }
+
+    [Fact]
+    public void AbbyGreetsYouThenOpensHerShop()
+    {
+        var rig = new Rig(Near(Abby));
+        rig.Tick();
+        Assert.Equal(Abby, rig.Npcs.PromptNpc);
+        Assert.Equal("E / X: Talk", rig.Npcs.PromptText);
+
+        rig.Tick(interact: true);
+        var line = Assert.Single(rig.Lines);
+        Assert.Equal("Abby", line.Speaker);
+        Assert.Equal(NPCsModule.SpeakerId(Abby), line.SpeakerId);
+        Assert.Equal(Voices.Bubbly, line.Voice);
+        Assert.Equal("Ooh, you'd look so cute in something new!", line.Text);
+        Assert.True(line.Last);
+        // The shop waits until the greeting is dismissed.
+        rig.Wait(10);
+        Assert.Empty(rig.Bus.All<OpenShop>());
+
+        rig.Press();
+        Assert.False(rig.Open);
+        Assert.Single(rig.Bus.All<OpenShop>());
+        Assert.Equal(-1, rig.Npcs.Talking);
+
+        // While the shop is open, no prompt and Interact does nothing.
+        rig.Npcs.Handle(new WardrobeState(true, true));
+        rig.Press();
+        Assert.Equal(-1, rig.Npcs.PromptNpc);
+        Assert.Single(rig.Lines);
+        Assert.Single(rig.Bus.All<OpenShop>());
+
+        // Closed again: she can be talked to again.
+        rig.Npcs.Handle(new WardrobeState(false, false));
+        rig.Tick();
+        Assert.Equal(Abby, rig.Npcs.PromptNpc);
+        rig.Press();
+        rig.Press();
+        Assert.Equal(2, rig.Lines.Count);
+        Assert.Equal(2, rig.Bus.All<OpenShop>().Count);
+    }
+
+    [Fact]
+    public void AbbyDoesNotOpenTheShopWhenSomeoneElseTakesTheBubble()
+    {
+        var rig = new Rig(Near(Abby));
+        rig.Tick(interact: true);
+        Assert.Equal(Abby, rig.Npcs.Talking);
+        rig.Shown = new SayLine(42, "Someone", "Hi", Voices.Neutral, true);
+        rig.Tick();
+        Assert.Equal(-1, rig.Npcs.Talking);
+        rig.Press();
+        Assert.Empty(rig.Bus.All<OpenShop>());
     }
 
     [Fact]
@@ -494,7 +582,7 @@ public class NPCsModuleTests
                  {
                      typeof(PlayerInput), typeof(PlayerState), typeof(DialogueState), typeof(DialogueAdvanced),
                      typeof(DialogueClosed), typeof(WokeUp), typeof(MonsterKilled), typeof(CoinsEarned),
-                     typeof(SpendResult), typeof(OwnedPets),
+                     typeof(SpendResult), typeof(OwnedPets), typeof(WardrobeState),
                  })
             Assert.Contains(type, rig.Bus.Subscribed);
     }

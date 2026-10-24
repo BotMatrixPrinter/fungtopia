@@ -5,7 +5,7 @@ using Godot;
 namespace Fungtopia.NPCs.View;
 
 /// <summary>
-/// Draws the NPCs module: Dr. Jeremy, Millie and Lucy at their spots, turned smoothly to the
+/// Draws the NPCs module: Dr. Jeremy, Millie, Lucy and Abby at their spots, turned smoothly to the
 /// Core's facing, with their idle and talking animation (<see cref="NpcFigure"/>), and the small
 /// "E / X: Talk" prompt floating over the one the player is near.
 /// </summary>

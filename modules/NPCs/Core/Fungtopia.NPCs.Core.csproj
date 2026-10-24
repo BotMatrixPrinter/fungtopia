@@ -15,5 +15,6 @@
     <ProjectReference Include="../../Wallet/Contract/Fungtopia.Wallet.Contract.csproj" />
     <ProjectReference Include="../../Monsters/Contract/Fungtopia.Monsters.Contract.csproj" />
     <ProjectReference Include="../../Pet/Contract/Fungtopia.Pet.Contract.csproj" />
+    <ProjectReference Include="../../Wardrobe/Contract/Fungtopia.Wardrobe.Contract.csproj" />
   </ItemGroup>
 </Project>

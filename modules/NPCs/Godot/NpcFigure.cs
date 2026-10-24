@@ -5,7 +5,7 @@ using Godot;
 namespace Fungtopia.NPCs.View;
 
 /// <summary>
-/// One NPC model (jeremy.glb, millie.glb or lucy.glb from modules/NPCs/Models), loaded at run
+/// One NPC model (jeremy.glb, millie.glb, lucy.glb or abby.glb from modules/NPCs/Models), loaded at run
 /// time from the file's bytes (so a fresh checkout runs without an editor import), drawn
 /// toon-shaded with ink outlines and animated procedurally: breathing, a gentle sway and head
 /// tilt, swinging arms, and a happy bounce with nodding while talking. Faces -Z at zero rotation.
@@ -15,14 +15,14 @@ public partial class NpcFigure : Node3D
     private const string Models = "res://modules/NPCs/Models/";
     private const string Shaders = "res://modules/NPCs/Godot/Shaders/";
 
-    /// <summary>The models, by NPC index (<see cref="NPCsModule.Jeremy"/>, Millie, Lucy).</summary>
-    private static readonly string[] Files = { "jeremy.glb", "millie.glb", "lucy.glb" };
+    /// <summary>The models, by NPC index (<see cref="NPCsModule.Jeremy"/>, Millie, Lucy, Abby).</summary>
+    private static readonly string[] Files = { "jeremy.glb", "millie.glb", "lucy.glb", "abby.glb" };
 
     /// <summary>Jeremy is a grown-up, a little taller than the kids.</summary>
-    private static readonly float[] Scales = { 1.12f, 1.0f, 1.04f };
+    private static readonly float[] Scales = { 1.12f, 1.0f, 1.04f, 1.02f };
 
-    /// <summary>How lively each one is: Millie bounces, Lucy barely moves.</summary>
-    private static readonly float[] Liveliness = { 0.8f, 1.3f, 0.45f };
+    /// <summary>How lively each one is: Millie bounces, Abby nearly as much, Lucy barely moves.</summary>
+    private static readonly float[] Liveliness = { 0.8f, 1.3f, 0.45f, 1.15f };
 
     /// <summary>Surfaces drawn without an ink outline (small soft details).</summary>
     private static readonly HashSet<string> NoOutline = new()

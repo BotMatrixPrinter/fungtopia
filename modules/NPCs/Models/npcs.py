@@ -1,5 +1,5 @@
-# Builds the three townsfolk and exports them next to this script:
-#   jeremy.glb  millie.glb  lucy.glb
+# Builds the four townsfolk and exports them next to this script:
+#   jeremy.glb  millie.glb  lucy.glb  abby.glb
 # Run from the repository root:
 #   blender -b --factory-startup --python modules/NPCs/Models/npcs.py
 #
@@ -10,6 +10,7 @@
 #   Millie:     cat ears, happy ^ ^ closed eyes, a bow at her neck, a dress (and a little tail).
 #   Lucy:       a flower in her hair, half-lidded unimpressed eyes, a shirt saying "Pet Store"
 #               with little hearts.
+#   Abby:       big dark eyes, a happy smile, hair in a tall top bun, a triangle dress.
 #
 # Meters, feet at the origin, facing Blender +Y (Godot's -Z, forward, after the glTF export).
 # Separate objects with pivots where they move, so the game can animate them: Body (hip), Head
@@ -419,6 +420,30 @@ def lucy(mats):
     limbs(mats, "Shirt", "Legs", shoulder_x=0.22)
 
 
+def abby(mats):
+    head = Part("Head", (0, 0, NECK_Z))
+    head.sphere(mats["Skin"], HEAD_C, (HEAD_R, HEAD_R * 0.96, HEAD_R * 0.94), segments=40, rings=24)
+    round_eyes(head, mats)
+    blush(head, mats)
+    smile(head, mats, big=True)
+    hair_cap(head, mats)
+    # A tall top bun: a round bun on a little hair stack, tied with a band.
+    top = HEAD_C + Vector((0, -0.03, HEAD_R * 0.98))
+    head.sphere(mats["Hair"], top, (0.14, 0.13, 0.1), segments=24, rings=12)
+    head.sphere(mats["Band"], top + Vector((0, 0, 0.08)), (0.1, 0.095, 0.035), segments=20, rings=8)
+    head.sphere(mats["Hair"], top + Vector((0, 0, 0.2)), (0.17, 0.16, 0.16), segments=28, rings=14)
+    head.build()
+
+    body = Part("Body", (0, 0, HIP_Z))
+    # A triangle dress: wide at the hem, narrowing up to the neck, with a white collar and a hem stripe.
+    body.cone(mats["Dress"], (0, 0, HIP_Z - 0.12), 0.36, 0.1, NECK_Z - HIP_Z + 0.13, segments=40)
+    body.sphere(mats["Dress"], (0, 0, NECK_Z - 0.01), (0.11, 0.1, 0.04), segments=24, rings=8)
+    body.torus(mats["Collar"], (0, 0, NECK_Z - 0.02), 0.11, 0.025, segments=36)
+    body.torus(mats["Hem"], (0, 0, HIP_Z - 0.08), 0.34, 0.022, segments=48)
+    body.build()
+    limbs(mats, "Skin", "Skin", shoulder_x=0.15)
+
+
 KINDS = {
     "jeremy": (jeremy, {
         "Hair": (0.35, 0.22, 0.14),
@@ -451,6 +476,13 @@ KINDS = {
         "Heart": (0.95, 0.3, 0.4),
         "Skirt": (0.35, 0.4, 0.62),
         "Legs": (0.35, 0.4, 0.62),
+    }),
+    "abby": (abby, {
+        "Hair": (0.55, 0.3, 0.18),
+        "Band": (1.0, 0.45, 0.6),
+        "Dress": (0.98, 0.5, 0.62),
+        "Collar": (1.0, 0.97, 0.9),
+        "Hem": (1.0, 0.97, 0.9),
     }),
 }
 

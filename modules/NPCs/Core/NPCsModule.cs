@@ -9,26 +9,30 @@ using Fungtopia.Pet;
 using Fungtopia.Player;
 using Fungtopia.Shell;
 using Fungtopia.Wallet;
+using Fungtopia.Wardrobe;
 
 namespace Fungtopia.NPCs;
 
 /// <summary>
-/// The townsfolk: Dr. Jeremy at his clinic, Millie next door and Lucy at the Pet Store. Each stands
+/// The townsfolk: Dr. Jeremy at his clinic, Millie next door, Lucy at the Pet Store and Abby at her
+/// clothing shop. Each stands
 /// at its <see cref="Places"/> spot and turns to face a near player; within <see cref="PromptRadius"/>
 /// a talk prompt shows and Interact starts a conversation, one <see cref="SayLine"/> at a time (the
 /// next on <see cref="DialogueAdvanced"/>). Jeremy greets the player on <see cref="WokeUp"/>, Millie
-/// gives quests (<see cref="QuestState"/> every tick) and pays them with <see cref="GrantCoins"/>,
-/// and Lucy sells the Mushroom Crow (<see cref="SpendCoins"/>, then <see cref="AdoptPet"/>).
+/// gives quests (<see cref="QuestState"/> every tick) and pays them with <see cref="GrantCoins"/> (some
+/// also with clothes, <see cref="GrantItem"/>), Lucy sells the Mushroom Crow (<see cref="SpendCoins"/>,
+/// then <see cref="AdoptPet"/>), and Abby greets you and opens her shop (<see cref="OpenShop"/>).
 /// </summary>
 public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessageHandler<PlayerState>,
     IMessageHandler<DialogueState>, IMessageHandler<DialogueAdvanced>, IMessageHandler<DialogueClosed>,
     IMessageHandler<WokeUp>, IMessageHandler<MonsterKilled>, IMessageHandler<CoinsEarned>,
-    IMessageHandler<SpendResult>, IMessageHandler<OwnedPets>
+    IMessageHandler<SpendResult>, IMessageHandler<OwnedPets>, IMessageHandler<WardrobeState>
 {
     public const int Jeremy = 0;
     public const int Millie = 1;
     public const int Lucy = 2;
-    public const int Count = 3;
+    public const int Abby = 3;
+    public const int Count = 4;
 
     /// <summary>The <see cref="SayLine.SpeakerId"/> of NPC i is <c>SpeakerIdBase + i</c>.</summary>
     public const int SpeakerIdBase = 7100;
@@ -54,6 +58,7 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
     public const string CrowCongrats = "Congrats. It bites.";
     public const string CrowTooPoor = "Come back with 3,000 M¢.";
     public const string CrowAskAgain = "Press E / X again to buy.";
+    public const string AbbyGreeting = "Ooh, you'd look so cute in something new!";
 
     /// <summary>Millie's quest kinds, given in this order and then again with bigger numbers.</summary>
     public enum QuestKind
@@ -63,9 +68,12 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
         ForestCoins,
     }
 
-    private static readonly string[] s_names = { "Dr. Jeremy", "Millie", "Lucy" };
-    private static readonly int[] s_voices = { Voices.Kind, Voices.Bubbly, Voices.Deadpan };
-    private static readonly Place[] s_spots = { Places.ClinicDoor, Places.MillieSpot, Places.LucySpot };
+    private static readonly string[] s_names = { "Dr. Jeremy", "Millie", "Lucy", "Abby" };
+    private static readonly int[] s_voices = { Voices.Kind, Voices.Bubbly, Voices.Deadpan, Voices.Bubbly };
+    private static readonly Place[] s_spots = { Places.ClinicDoor, Places.MillieSpot, Places.LucySpot, Places.AbbySpot };
+
+    /// <summary>The clothes Millie gives with her quests, by quest number (the first round only); empty for none.</summary>
+    private static readonly string[] s_questItems = { "", "flower_clip", "", "mushroom_backpack" };
 
     private static readonly string[] s_healthTips =
     {
@@ -117,13 +125,17 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
     private bool _spendOk;
     private bool _offerOnClose;
 
+    // Abby's shop.
+    private bool _shopOnClose;
+    private bool _wardrobeOpen;
+
     public NPCsModule()
     {
         for (int i = 0; i < Count; i++)
             _yaw[i] = s_spots[i].Yaw;
     }
 
-    /// <summary>Each NPC's spot, by index (<see cref="Jeremy"/>, <see cref="Millie"/>, <see cref="Lucy"/>).</summary>
+    /// <summary>Each NPC's spot, by index (<see cref="Jeremy"/>, <see cref="Millie"/>, <see cref="Lucy"/>, <see cref="Abby"/>).</summary>
     public static ReadOnlySpan<Place> Spots => s_spots;
 
     public static string Name(int npc) => s_names[npc];
@@ -173,6 +185,10 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
         };
     }
 
+    /// <summary>The <see cref="Catalog"/> id of the clothes Millie gives with quest <paramref name="number"/> besides coins, or empty.</summary>
+    public static string QuestItem(int number) =>
+        number >= 0 && number < s_questItems.Length ? s_questItems[number] : "";
+
     public static string QuestTitleOf(QuestKind kind, int goal) => kind switch
     {
         QuestKind.Caterpillars => $"Defeat {goal} Mushroom Caterpillars",
@@ -194,6 +210,7 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
         bus.Subscribe<CoinsEarned>(this);
         bus.Subscribe<SpendResult>(this);
         bus.Subscribe<OwnedPets>(this);
+        bus.Subscribe<WardrobeState>(this);
     }
 
     public void Handle(in PlayerInput message)
@@ -257,6 +274,8 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
 
     public void Handle(in OwnedPets message) => _ownsCrow |= message.Crow;
 
+    public void Handle(in WardrobeState message) => _wardrobeOpen = message.Open;
+
     public void Tick(in TickContext context)
     {
         if (_bus == null)
@@ -299,11 +318,11 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
 
         TurnAll(dt, alive);
 
-        bool free = !_dialogueOpen && !_closedThisTick && Talking < 0 && _pendingRequest < 0;
+        bool free = !_dialogueOpen && !_closedThisTick && Talking < 0 && _pendingRequest < 0 && !_wardrobeOpen;
         if (free && near >= 0 && _haveInput && _input.Interact)
             Interact(near);
 
-        free = !_dialogueOpen && !_closedThisTick && Talking < 0 && _pendingRequest < 0;
+        free = !_dialogueOpen && !_closedThisTick && Talking < 0 && _pendingRequest < 0 && !_wardrobeOpen;
         PromptNpc = free ? near : -1;
         PromptText = PromptNpc == Lucy && OfferingCrow ? BuyPrompt : TalkPrompt;
 
@@ -325,8 +344,13 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
             case Millie:
                 TalkToMillie();
                 break;
-            default:
+            case Lucy:
                 TalkToLucy();
+                break;
+            default:
+                // The shop opens once her greeting is dismissed.
+                Begin(Abby, AbbyGreeting);
+                _shopOnClose = true;
                 break;
         }
     }
@@ -344,10 +368,15 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
         {
             int reward = QuestReward;
             _bus!.Publish(new GrantCoins(reward, "Millie's quest"));
+            string thanks = "Yay, you did it! You're the best! Here's " + Format(reward) + " M¢!";
+            if (Catalog.TryGet(QuestItem(_questNumber), out var item))
+            {
+                _bus.Publish(new GrantItem(item.Id, "Millie's quest"));
+                thanks = "Yay, you did it! You're the best! Here's " + Format(reward) + " M¢ and my " + item.Name + "!";
+            }
             _questNumber++;
             GiveQuest();
-            Begin(Millie, "Yay, you did it! You're the best! Here's " + Format(reward) + " M¢!",
-                "Ooh, next one: " + _questTitle + "! That's " + Format(QuestReward) + " M¢!");
+            Begin(Millie, thanks, "Ooh, next one: " + _questTitle + "! That's " + Format(QuestReward) + " M¢!");
         }
         else
         {
@@ -414,6 +443,7 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
         Talking = npc;
         _lineIndex = 0;
         _offerOnClose = false;
+        _shopOnClose = false;
         Publish();
     }
 
@@ -437,7 +467,11 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
         // Lucy's offer stands once its last line ("Press E / X again to buy.") is dismissed.
         if (ended && Talking == Lucy && _offerOnClose && !_ownsCrow)
             OfferingCrow = true;
+        // Abby opens her shop once her greeting is dismissed.
+        if (ended && Talking == Abby && _shopOnClose)
+            _bus!.Publish(new OpenShop());
         _offerOnClose = false;
+        _shopOnClose = false;
         Talking = -1;
         _lineCount = 0;
         _lineIndex = 0;

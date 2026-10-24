@@ -5,8 +5,8 @@ namespace Fungtopia.NPCs.View;
 
 /// <summary>
 /// A stand-alone scene for screenshots: <c>./screenshot.sh modules/NPCs/Godot/Preview.tscn</c>.
-/// Dr. Jeremy, Millie and Lucy side by side on a patch of grass, Millie with her "E / X: Talk"
-/// prompt. <c>NPC_PREVIEW=jeremy</c>, <c>millie</c> or <c>lucy</c> shows only that one, closer.
+/// Dr. Jeremy, Millie, Lucy and Abby side by side on a patch of grass, Millie with her "E / X: Talk"
+/// prompt. <c>NPC_PREVIEW=jeremy</c>, <c>millie</c>, <c>lucy</c> or <c>abby</c> shows only that one, closer.
 /// </summary>
 public partial class NpcPreview : Node3D
 {
@@ -17,7 +17,7 @@ public partial class NpcPreview : Node3D
     public override void _Ready()
     {
         string only = (OS.GetEnvironment("NPC_PREVIEW") ?? "").ToLowerInvariant();
-        int single = only switch { "jeremy" => NPCsModule.Jeremy, "millie" => NPCsModule.Millie, "lucy" => NPCsModule.Lucy, _ => -1 };
+        int single = only switch { "jeremy" => NPCsModule.Jeremy, "millie" => NPCsModule.Millie, "lucy" => NPCsModule.Lucy, "abby" => NPCsModule.Abby, _ => -1 };
         BuildStage();
         _camera = new Camera3D { Fov = 40f };
         AddChild(_camera);
@@ -33,13 +33,13 @@ public partial class NpcPreview : Node3D
             for (int i = 0; i < NPCsModule.Count; i++)
             {
                 var figure = NpcFigure.Create(i);
-                figure.Position = new Vector3((i - 1) * 1.35f, 0f, 0f);
-                figure.Rotation = new Vector3(0f, MathF.PI + (1 - i) * 0.22f, 0f);
+                figure.Position = new Vector3((i - 1.5f) * 1.35f, 0f, 0f);
+                figure.Rotation = new Vector3(0f, MathF.PI + (1.5f - i) * 0.2f, 0f);
                 AddChild(figure);
                 if (i == NPCsModule.Millie)
                     _prompted = figure;
             }
-            _camera.LookAtFromPosition(new Vector3(0f, 1.5f, 5.4f), new Vector3(0f, 0.85f, 0f));
+            _camera.LookAtFromPosition(new Vector3(0f, 1.5f, 6.4f), new Vector3(0f, 0.85f, 0f));
             var layer = new CanvasLayer { Layer = 11 };
             AddChild(layer);
             (_prompt, _) = NPCsView.BuildPrompt();
