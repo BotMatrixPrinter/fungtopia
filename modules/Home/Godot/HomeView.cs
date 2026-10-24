@@ -126,6 +126,8 @@ public partial class HomeView : Node3D, IModuleView
                 model.Show(pet, dt);
         }
 
+        var (x, y) = HeldDirection();
+        _home.Navigate(x, y, dt);
         _panels.Refresh(_home);
     }
 
@@ -175,31 +177,42 @@ public partial class HomeView : Node3D, IModuleView
     {
         if (_home == null || !(_home.ShopOpen || _home.Decorating))
             return;
-        bool back = Pressed(e, Key.Q, JoyButton.B) || Pressed(e, Key.Backspace, JoyButton.B);
-        if (back)
-        {
+        // E / X come through the Input module as Interact; Up / Down are read each frame (Navigate).
+        if (Pressed(e, Key.Q, JoyButton.B) || Pressed(e, Key.Escape, JoyButton.B))
             _home.Back();
-            return;
-        }
-        int up = Pressed(e, Key.Up, JoyButton.DpadUp) ? 1 : 0, down = Pressed(e, Key.Down, JoyButton.DpadDown) ? 1 : 0;
-        if (_home.ShopOpen)
-        {
-            if (up + down > 0)
-                _home.MoveShopSelection(down - up);
-            return;
-        }
-        int left = Pressed(e, Key.Left, JoyButton.DpadLeft) ? 1 : 0, right = Pressed(e, Key.Right, JoyButton.DpadRight) ? 1 : 0;
-        if (up + down + left + right > 0)
-            _home.MoveCursor(right - left, down - up);
-        if (Pressed(e, Key.R, JoyButton.RightShoulder))
+        else if (Pressed(e, Key.Enter, JoyButton.A) || Pressed(e, Key.KpEnter, JoyButton.A))
+            _home.Confirm();
+        else if (_home.Decorating && Pressed(e, Key.R, JoyButton.RightShoulder))
             _home.Rotate();
-        if (Pressed(e, Key.Tab, JoyButton.LeftShoulder))
+        else if (_home.Decorating && Pressed(e, Key.Tab, JoyButton.LeftShoulder))
             _home.NextItem(1);
     }
 
+    /// <summary>The direction held now on the arrow keys, WASD, the first pad's D-pad or left stick (x right, y down).</summary>
+    private static (int x, int y) HeldDirection()
+    {
+        int x = 0, y = 0;
+        if (Held(Key.Left, Key.A, JoyButton.DpadLeft)) x--;
+        if (Held(Key.Right, Key.D, JoyButton.DpadRight)) x++;
+        if (Held(Key.Up, Key.W, JoyButton.DpadUp)) y--;
+        if (Held(Key.Down, Key.S, JoyButton.DpadDown)) y++;
+        if (x == 0 && y == 0)
+        {
+            float sx = Godot.Input.GetJoyAxis(0, JoyAxis.LeftX), sy = Godot.Input.GetJoyAxis(0, JoyAxis.LeftY);
+            if (MathF.Abs(sx) >= StickThreshold && MathF.Abs(sx) >= MathF.Abs(sy) * 0.5f) x = MathF.Sign(sx);
+            if (MathF.Abs(sy) >= StickThreshold && MathF.Abs(sy) >= MathF.Abs(sx) * 0.5f) y = MathF.Sign(sy);
+        }
+        return (x, y);
+    }
+
+    private const float StickThreshold = 0.5f;
+
+    private static bool Held(Key arrow, Key letter, JoyButton button) =>
+        Godot.Input.IsKeyPressed(arrow) || Godot.Input.IsPhysicalKeyPressed(letter) || Godot.Input.IsJoyButtonPressed(0, button);
+
     private static bool Pressed(InputEvent e, Key key, JoyButton button) => e switch
     {
-        InputEventKey k => k.Pressed && (k.PhysicalKeycode == key || k.Keycode == key),
+        InputEventKey k => k.Pressed && !k.Echo && (k.PhysicalKeycode == key || k.Keycode == key),
         InputEventJoypadButton j => j.Pressed && j.ButtonIndex == button,
         _ => false,
     };

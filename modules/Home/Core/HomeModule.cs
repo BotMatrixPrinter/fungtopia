@@ -127,6 +127,12 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
     /// <summary>The first <see cref="SpendCoins.RequestId"/> used (this module's own range).</summary>
     public const int FirstRequestId = 7460000;
 
+    /// <summary>The <see cref="UiFocus.Owner"/> of the furniture shop's panel.</summary>
+    public const int ShopFocusOwner = 7461001;
+
+    /// <summary>The <see cref="UiFocus.Owner"/> of placement mode (the decorating catalog and grid).</summary>
+    public const int DecorateFocusOwner = 7461002;
+
     private static readonly Vector3[] PetSpawns =
     {
         new(598f, Areas.HomeFloorY, 599f), new(602f, Areas.HomeFloorY, 599f), new(600f, Areas.HomeFloorY, 597.5f),
@@ -143,6 +149,8 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
     private int _pendingRequest = -1;
     private FurnitureKind _pendingKind;
     private uint _random = 0x9E3779B9u;
+    private bool _shopFocus, _decorateFocus;
+    private MenuRepeat _navigation;
 
     public HomeModule()
     {
@@ -265,6 +273,7 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
                 Prompt = HomePrompt.None;
         }
 
+        PublishFocus();
         TickPets((float)context.StepSeconds);
         _bus.Publish(new HomeState(ItemCount, ItemsPlaced, Decorating));
     }
@@ -324,6 +333,57 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
             }
             pet.Present = home;
         }
+    }
+
+    /// <summary>
+    /// Publishes <see cref="UiFocus"/> when the shop's panel or placement mode opened or closed since
+    /// the last tick (however it closed: Back, walking away, leaving the house, fainting or a screen
+    /// opening), so Input stops walking, looking, jumping and firing while one is open.
+    /// </summary>
+    private void PublishFocus()
+    {
+        if (ShopOpen != _shopFocus)
+        {
+            _shopFocus = ShopOpen;
+            _bus!.Publish(new UiFocus(ShopFocusOwner, _shopFocus));
+        }
+        if (Decorating != _decorateFocus)
+        {
+            _decorateFocus = Decorating;
+            _bus!.Publish(new UiFocus(DecorateFocusOwner, _decorateFocus));
+        }
+    }
+
+    /// <summary>
+    /// The view's confirm button (Enter, gamepad A), acted on at the next tick like an Interact
+    /// press: buys in the shop, places or picks up while decorating. Nothing when no panel is open.
+    /// </summary>
+    public void Confirm()
+    {
+        if (ShopOpen || Decorating)
+            _interact = true;
+    }
+
+    /// <summary>
+    /// The direction held in a panel (x right, y down, each -1, 0 or 1) after
+    /// <paramref name="seconds"/>: moves the shop's highlight (y) or the decorating cursor once when
+    /// pressed, then repeating after a short delay while held (<see cref="MenuRepeat"/>).
+    /// </summary>
+    public void Navigate(int x, int y, float seconds)
+    {
+        if (!ShopOpen && !Decorating)
+        {
+            _navigation.Reset();
+            return;
+        }
+        if (ShopOpen)
+            x = 0;
+        if (!_navigation.Step(Math.Sign(x), Math.Sign(y), seconds))
+            return;
+        if (ShopOpen)
+            MoveShopSelection(Math.Sign(y));
+        else
+            MoveCursor(Math.Sign(x), Math.Sign(y));
     }
 
     private HomePrompt PromptAt(Vector3 p)

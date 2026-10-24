@@ -24,8 +24,10 @@ public static class HomeText
         _ => "",
     };
 
-    public const string ShopHelp = "Up / Down: choose    E / X: buy    Q / B: close";
+    /// <summary>The shop panel's hint line; <c>HomeView</c> reads exactly these buttons.</summary>
+    public const string ShopHelp = "Up / Down, W / S, D-pad, stick: choose    E / Enter / A: buy    Q / Esc / B: close";
 
+    /// <summary>Placement mode's hint line; <c>HomeView</c> reads exactly these buttons.</summary>
     public const string DecorateHelp =
-        "Arrows / D-pad: move    R / RB: turn    Tab / LB: next item    E / X: place / pick up    Q / B: done";
+        "Arrows / WASD / D-pad / stick: move    R / RB: turn    Tab / LB: next item    E / Enter / A: place / pick up    Q / Esc / B: done";
 }

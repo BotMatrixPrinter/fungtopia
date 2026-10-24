@@ -9,7 +9,8 @@ later).
 
 - `Contract/` — `Fungtopia.Home.Contract` (namespace `Fungtopia.Home`): `HomeState`.
 - `Core/` — `Fungtopia.Home.Core`: `HomeModule`, the module's one `IModule`; `Furniture` (the
-  catalog), `HomeRoom` (the floor grid), `HomeText` (the texts).
+  catalog), `HomeRoom` (the floor grid), `HomeText` (the texts and hint lines), `MenuRepeat` (a held
+  menu direction: one step at once, repeating after a short delay).
 - `Godot/` — `Main.tscn` with `HomeView` (furniture, the catalog book, pets at home, the grid and
   cursor while decorating), `HomePanels` (prompt, shop catalog and decorating help, a
   `CanvasLayer` on layer 11), `HomePetModel`, `HomeModels` (loads .glb models at run time, toon
@@ -17,7 +18,7 @@ later).
   outline, floor grid).
 - `Models/` — `furniture.py`, the Blender script that builds and exports `furniture.glb` next to it.
 - `Tests/` — `HomeModuleTests.cs`: xUnit tests of `HomeModule` with a fake `IMessageBus` (which
-  also answers `SpendCoins` like the wallet).
+  also answers `SpendCoins` like the wallet and records `UiFocus`).
 
 Test it with `./test.sh Home` from the repository root.
 
@@ -32,7 +33,7 @@ Test it with `./test.sh Home` from the repository root.
 `HomeModule` reads `Fungtopia.Player.PlayerState`, `Fungtopia.Input.PlayerInput` (`Interact`),
 `Fungtopia.Wallet.WalletState` and `SpendResult`, `Fungtopia.Pet.OwnedPets`,
 `Fungtopia.Wardrobe.WardrobeState` and `Fungtopia.StartScreen.StartScreenState`; it publishes `Fungtopia.Player.TeleportPlayer`,
-`Fungtopia.Wallet.SpendCoins`, `Fungtopia.Wardrobe.OpenWardrobe` and `HomeState`, and takes the
+`Fungtopia.Wallet.SpendCoins`, `Fungtopia.Wardrobe.OpenWardrobe`, `Fungtopia.Input.UiFocus` and `HomeState`, and takes the
 world's spots from the Map Contract (`Places`, `Areas`). An Interact press is acted on at the
 next tick, for whatever `Prompt` shows then (only while the player is alive, and never while
 the start screen is open, below):
@@ -51,6 +52,15 @@ the start screen is open, below):
   item (`ShopSelection`, `MoveShopSelection`): one `SpendCoins(RequestId, price, name)`, and
   when its `SpendResult` is `Ok` the item goes into the inventory (owned, not placed);
   `LastShopResult` is `Bought`, `TooFewCoins` or `Full` (64 items at most).
+- **Menus and UiFocus.** The shop's panel (`ShopFocusOwner`) and placement mode
+  (`DecorateFocusOwner`) each publish `UiFocus(owner, true)` at the tick they open and
+  `UiFocus(owner, false)` at the tick they close, however they close (Back, walking away, leaving
+  the house, fainting, a wardrobe screen or the start screen), so the Input module stops walking,
+  looking, jumping and firing while one is open. `Navigate(x, y, seconds)` takes the direction
+  the view reads as held each frame: one step at once when pressed, then after
+  `MenuRepeat.Delay` (0.35 s) one every `MenuRepeat.Interval` (0.12 s) while held; in the shop it
+  moves the highlight (Up / Down, wrapping), while decorating the cursor. `Confirm()` (Enter, A)
+  acts like an Interact press at the next tick, only while a panel is open.
 - **Catalog.** `Furniture.ForSale`, prices in M¢: Mushroom Bed 300, Rug 120, Lamp 150, Table 200,
   Chair 100, Potted Mushroom 80, Painting (on an easel) 250, Pet Bed 180, Bookshelf 220,
   Toadstool Stool 90. The Basic Bed comes with the house and is not sold.
@@ -93,15 +103,17 @@ Input module):
 
 | Action | Keyboard | Gamepad |
 | --- | --- | --- |
-| Shop: choose | Up / Down | D-pad up / down |
-| Decorating: move | Arrow keys | D-pad |
+| Shop: choose | Up / Down, W / S (held: repeats) | D-pad up / down, left stick |
+| Decorating: move | Arrow keys, WASD (held: repeats) | D-pad, left stick |
 | Decorating: turn | R | RB |
 | Decorating: next item | Tab | LB |
-| Buy / place / pick up | E | X / Square |
-| Close / done | Q or Backspace | B / Circle |
+| Buy / place / pick up | E or Enter | A / Cross (X / Square, Interact, works too) |
+| Close / done | Q or Esc | B / Circle |
 
-The player can still walk while a panel is open (the Player module stops only for dialogue), and
-walks through furniture (it collides only with the Map's obstacles).
+The panels' hint lines (`HomeText.ShopHelp`, `DecorateHelp`) name exactly these buttons. E and
+X / Square arrive through the Input module's Interact; the rest the view reads itself. While a
+panel is open the player stands still (its `UiFocus` stops movement in the Input module); the
+player walks through furniture (it collides only with the Map's obstacles).
 
 ## Models
 

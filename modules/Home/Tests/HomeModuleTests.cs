@@ -25,6 +25,7 @@ public class HomeModuleTests
         public readonly List<TeleportPlayer> Teleports = new();
         public readonly List<SpendCoins> Spends = new();
         public readonly List<HomeState> States = new();
+        public readonly List<UiFocus> Focus = new();
         public int OpenWardrobes;
         public int? Coins;
 
@@ -41,6 +42,8 @@ public class HomeModuleTests
                 Teleports.Add(teleport);
             if (message is HomeState state)
                 States.Add(state);
+            if (message is UiFocus focus)
+                Focus.Add(focus);
             if (message is OpenWardrobe)
                 OpenWardrobes++;
             if (_handlers.TryGetValue(typeof(T), out var list))
@@ -245,6 +248,157 @@ public class HomeModuleTests
         Assert.Equal(1, home.ItemCount);
         bus.Publish(new SpendResult(bus.Spends[0].RequestId, true, 0));
         Assert.Equal(2, home.ItemCount);
+    }
+
+    // Menus: UiFocus and their own buttons
+
+    [Fact]
+    public void TheShopPanelPublishesUiFocusOpenAndReleasesItHoweverItCloses()
+    {
+        var (home, bus) = Started();
+        Interact(home, bus, Places.FurnitureShopSpot.Position);
+        Assert.True(home.ShopOpen);
+        Assert.Equal(new[] { new UiFocus(HomeModule.ShopFocusOwner, true) }, bus.Focus);
+        home.Tick(Step);
+        Assert.Single(bus.Focus); // once per opening, not every tick
+
+        // Back (Q / Esc / B).
+        home.Back();
+        home.Tick(Step);
+        Assert.Equal(new UiFocus(HomeModule.ShopFocusOwner, false), bus.Focus[^1]);
+        Assert.Equal(2, bus.Focus.Count);
+
+        // Walking away.
+        Interact(home, bus, Places.FurnitureShopSpot.Position);
+        Assert.Equal(new UiFocus(HomeModule.ShopFocusOwner, true), bus.Focus[^1]);
+        StandAt(bus, Places.FurnitureShopSpot.Position + new Vector3(0f, 0f, 5f));
+        home.Tick(Step);
+        Assert.Equal(new UiFocus(HomeModule.ShopFocusOwner, false), bus.Focus[^1]);
+
+        // Fainting.
+        Interact(home, bus, Places.FurnitureShopSpot.Position);
+        StandAt(bus, Places.FurnitureShopSpot.Position, alive: false);
+        home.Tick(Step);
+        Assert.False(home.ShopOpen);
+        Assert.Equal(new UiFocus(HomeModule.ShopFocusOwner, false), bus.Focus[^1]);
+
+        // The start screen opening.
+        Interact(home, bus, Places.FurnitureShopSpot.Position);
+        bus.Publish(new StartScreenState(true));
+        home.Tick(Step);
+        Assert.Equal(new UiFocus(HomeModule.ShopFocusOwner, false), bus.Focus[^1]);
+        Assert.Equal(8, bus.Focus.Count);
+    }
+
+    [Fact]
+    public void PlacementModePublishesUiFocusOpenAndReleasesItHoweverItEnds()
+    {
+        var (home, bus) = Started();
+        var book = HomeRoom.BookPosition + new Vector3(0f, 0f, -0.8f);
+        Interact(home, bus, book);
+        Assert.True(home.Decorating);
+        Assert.Equal(new[] { new UiFocus(HomeModule.DecorateFocusOwner, true) }, bus.Focus);
+        Assert.NotEqual(HomeModule.ShopFocusOwner, HomeModule.DecorateFocusOwner);
+
+        home.Back();
+        home.Tick(Step);
+        Assert.Equal(new UiFocus(HomeModule.DecorateFocusOwner, false), bus.Focus[^1]);
+
+        // Leaving the house.
+        Interact(home, bus, book);
+        StandAt(bus, Places.HomeDoor.Position);
+        home.Tick(Step);
+        Assert.Equal(new UiFocus(HomeModule.DecorateFocusOwner, false), bus.Focus[^1]);
+
+        // Fainting.
+        Interact(home, bus, book);
+        StandAt(bus, book, alive: false);
+        home.Tick(Step);
+        Assert.Equal(new UiFocus(HomeModule.DecorateFocusOwner, false), bus.Focus[^1]);
+
+        // A wardrobe screen opening.
+        Interact(home, bus, book);
+        bus.Publish(new WardrobeState(true, false));
+        home.Tick(Step);
+        Assert.Equal(new UiFocus(HomeModule.DecorateFocusOwner, false), bus.Focus[^1]);
+        Assert.Equal(8, bus.Focus.Count);
+    }
+
+    [Fact]
+    public void UpDownInTheShopPicksItemsAndRepeatsAfterAShortDelayWhenHeld()
+    {
+        var (home, bus) = Started(coins: 1000);
+        const float frame = 1f / 60f;
+        // No panel open: the direction does nothing.
+        home.Navigate(0, 1, frame);
+        Assert.Equal(0, home.ShopSelection);
+
+        Interact(home, bus, Places.FurnitureShopSpot.Position);
+        home.Navigate(0, 1, frame); // Down pressed: one step at once
+        Assert.Equal(1, home.ShopSelection);
+        home.Navigate(0, 1, MenuRepeat.Delay - 2 * frame); // still held, before the delay
+        Assert.Equal(1, home.ShopSelection);
+        home.Navigate(0, 1, 2 * frame); // the delay is over: repeats
+        Assert.Equal(2, home.ShopSelection);
+        home.Navigate(0, 1, MenuRepeat.Interval);
+        Assert.Equal(3, home.ShopSelection);
+        home.Navigate(0, 0, frame); // let go
+        home.Navigate(0, -1, frame); // Up
+        Assert.Equal(2, home.ShopSelection);
+        home.Navigate(0, 0, frame);
+        home.Navigate(1, 0, frame); // left / right do nothing in the shop
+        Assert.Equal(2, home.ShopSelection);
+        home.Navigate(0, 0, frame);
+        home.Navigate(0, -1, frame);
+        home.Navigate(0, 0, frame);
+        home.Navigate(0, -1, frame);
+        home.Navigate(0, 0, frame);
+        home.Navigate(0, -1, frame); // wraps to the last line
+        Assert.Equal(Furniture.ForSale.Length - 1, home.ShopSelection);
+
+        // Confirm (Enter / A) buys the highlighted item at the next tick, like E.
+        home.Confirm();
+        home.Tick(Step);
+        var spend = Assert.Single(bus.Spends);
+        Assert.Equal(Furniture.Name(Furniture.ForSale[^1]), spend.What);
+        Assert.Equal(ShopResult.Bought, home.LastShopResult);
+    }
+
+    [Fact]
+    public void DirectionsWhileDecoratingMoveTheCursorAndConfirmPlaces()
+    {
+        var (home, bus) = Started(coins: 1000);
+        home.Buy(FurnitureKind.PottedMushroom);
+        Inside(home, bus);
+        home.StartDecorating();
+        home.Tick(Step);
+        Assert.True(home.Decorating);
+        home.MoveCursor(-100, -100);
+        home.Navigate(1, 0, 0.016f);
+        home.Navigate(0, 0, 0.016f);
+        home.Navigate(0, 1, 0.016f);
+        home.Navigate(0, 1, MenuRepeat.Delay);
+        Assert.Equal((1, 2), (home.CursorColumn, home.CursorRow));
+        home.Confirm();
+        home.Tick(Step);
+        Assert.True(home.Items[1].Placed);
+        Assert.Equal((1, 2), (home.Items[1].Column, home.Items[1].Row));
+
+        // Confirm with no panel open does nothing (it is not an Interact press).
+        home.Back();
+        home.Confirm();
+        StandAt(bus, HomeRoom.BookPosition + new Vector3(0f, 0f, -0.8f));
+        home.Tick(Step);
+        Assert.False(home.Decorating);
+    }
+
+    [Fact]
+    public void TheHintLinesNameTheButtonsTheMenusRead()
+    {
+        Assert.Equal("Up / Down, W / S, D-pad, stick: choose    E / Enter / A: buy    Q / Esc / B: close", HomeText.ShopHelp);
+        Assert.Contains("E / Enter / A: place / pick up", HomeText.DecorateHelp);
+        Assert.Contains("Q / Esc / B: done", HomeText.DecorateHelp);
+        Assert.Contains("Arrows / WASD / D-pad / stick: move", HomeText.DecorateHelp);
     }
 
     // The house and placing furniture
