@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Numerics;
 using Fungtopia.Map;
 using Fungtopia.Player;
+using Fungtopia.Save;
 using Fungtopia.Shell;
 using Xunit;
 
@@ -20,6 +21,8 @@ public class DayNightModuleTests
         public readonly List<TimeOfDay> Times = new();
         public readonly List<TeleportPlayer> Teleports = new();
         public readonly List<WokeUp> Wakes = new();
+        public readonly List<SavePart> SaveParts = new();
+        public readonly List<Type> Published = new();
 
         public void Subscribe<T>(IMessageHandler<T> handler) where T : struct
         {
@@ -30,6 +33,9 @@ public class DayNightModuleTests
 
         public void Publish<T>(in T message) where T : struct
         {
+            Published.Add(typeof(T));
+            if (message is SavePart part)
+                SaveParts.Add(part);
             if (message is TimeOfDay time)
                 Times.Add(time);
             else if (message is TeleportPlayer teleport)
@@ -311,6 +317,149 @@ public class DayNightModuleTests
             clock.Tick(new TickContext(i + 1, Step));
         }
         Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
+    }
+
+    // ---- Saving and restoring ----
+
+    private SavePart Save(int requestId = 7)
+    {
+        int before = _bus.SaveParts.Count;
+        _bus.Publish(new CollectSave(requestId));
+        Assert.Equal(before + 1, _bus.SaveParts.Count);
+        return _bus.SaveParts[^1];
+    }
+
+    /// <summary>A fresh DayNight on its own bus, with its log lines collected.</summary>
+    private static (DayNightModule Clock, FakeBus Bus, List<string> Logs) Fresh()
+    {
+        var bus = new FakeBus();
+        var clock = new DayNightModule();
+        var logs = new List<string>();
+        clock.Log = logs.Add;
+        clock.Start(bus);
+        return (clock, bus, logs);
+    }
+
+    [Fact]
+    public void CollectSaveIsAnsweredAtOnceWithOneCompactVersionedPart()
+    {
+        _clock.SetTime(4, 13.25);
+        var part = Save(42);
+        Assert.Equal(42, part.RequestId);
+        Assert.Equal("DayNight", part.Module);
+        Assert.Equal(SaveModules.DayNight, part.Module);
+        Assert.DoesNotContain(" ", part.Json);
+        Assert.DoesNotContain("\n", part.Json);
+        using var doc = System.Text.Json.JsonDocument.Parse(part.Json);
+        Assert.Equal(DayNightModule.SaveVersion, doc.RootElement.GetProperty("v").GetInt32());
+        Assert.Equal(4, doc.RootElement.GetProperty("day").GetInt32());
+        Assert.Equal(13.25, doc.RootElement.GetProperty("hour").GetDouble());
+    }
+
+    [Theory]
+    [InlineData(1, 9.0)]
+    [InlineData(3, 0.0)]
+    [InlineData(12, 23.999)]
+    public void SaveThenRestoreRoundTripsTheDayAndHour(int day, double hour)
+    {
+        _clock.SetTime(day, hour);
+        Seconds(37.3); // an hour that is not a round number
+        int savedDay = _clock.Day;
+        double savedHour = _clock.Hour;
+        float savedHourF = _clock.HourF;
+        var part = Save();
+
+        var (other, otherBus, logs) = Fresh();
+        otherBus.Publish(new RestorePart(part.Module, part.Json));
+        Assert.Equal(savedDay, other.Day);
+        Assert.Equal(savedHour, other.Hour);
+        Assert.Equal(savedHourF, other.HourF);
+        Assert.Equal(_clock.IsNight, other.IsNight);
+        Assert.Empty(logs);
+
+        // Saving the restored clock gives the same JSON.
+        otherBus.Publish(new CollectSave(1));
+        Assert.Equal(part.Json, otherBus.SaveParts[^1].Json);
+
+        // Both clocks then run on identically.
+        _clock.Tick(new TickContext(0, Step));
+        other.Tick(new TickContext(0, Step));
+        Assert.Equal(_bus.Times[^1].Day, otherBus.Times[^1].Day);
+        Assert.Equal(_bus.Times[^1].Hour, otherBus.Times[^1].Hour);
+    }
+
+    [Fact]
+    public void RestoringPublishesNothingAndDropsAFaint()
+    {
+        var (other, otherBus, _) = Fresh();
+        other.SetTime(2, 10.0);
+        var part = Save();
+        Faint();
+        _clock.SetTime(5, 21.5);
+        var saved = Save();
+        Assert.NotEqual(part.Json, saved.Json);
+
+        otherBus.Publish(new PlayerDefeated(Vector3.Zero));
+        Assert.True(other.Fainting);
+        otherBus.Published.Clear();
+        otherBus.Publish(new RestorePart(saved.Module, saved.Json));
+        Assert.Equal(new[] { typeof(RestorePart) }, otherBus.Published);
+        Assert.False(other.Fainting);
+        Assert.Equal(5, other.Day);
+        Assert.Equal(21.5, other.Hour, 9);
+
+        // Ticking past the faint's three seconds wakes nobody at the clinic.
+        for (int i = 0; i < 5 * TicksPerSecond; i++)
+            other.Tick(new TickContext(i, Step));
+        Assert.Empty(otherBus.Teleports);
+        Assert.Empty(otherBus.Wakes);
+        Assert.Equal(5, otherBus.Times[^1].Day);
+    }
+
+    [Fact]
+    public void RestorePartsOfOtherModulesAreIgnored()
+    {
+        var (other, otherBus, logs) = Fresh();
+        other.SetTime(3, 15.0);
+        otherBus.Publish(new RestorePart("Wallet", "{\"v\":1,\"day\":9,\"hour\":2}"));
+        otherBus.Publish(new RestorePart("Player", "not json"));
+        Assert.Equal(3, other.Day);
+        Assert.Equal(15.0, other.Hour, 9);
+        Assert.Empty(logs);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("not json")]
+    [InlineData("{\"v\":1,\"day\":")]
+    [InlineData("[1,2,3]")]
+    [InlineData("null")]
+    [InlineData("{\"v\":\"one\",\"day\":2,\"hour\":3}")]
+    [InlineData("{\"v\":2,\"day\":5,\"hour\":12}")]
+    [InlineData("{\"v\":0,\"day\":5,\"hour\":12}")]
+    [InlineData("{\"day\":5,\"hour\":12}")]
+    [InlineData("{\"v\":1,\"day\":0,\"hour\":12}")]
+    [InlineData("{\"v\":1,\"day\":5,\"hour\":24}")]
+    [InlineData("{\"v\":1,\"day\":5,\"hour\":-1}")]
+    public void BadJsonOrUnknownVersionKeepsDefaultsAndLogsOnce(string json)
+    {
+        var (other, otherBus, logs) = Fresh();
+        otherBus.Publish(new RestorePart(SaveModules.DayNight, json));
+        Assert.Equal(1, other.Day);
+        Assert.Equal(DayNightModule.StartHour, other.Hour, 9);
+        Assert.Single(logs);
+        Assert.DoesNotContain("ERROR", logs[0]);
+        Assert.Equal(new[] { typeof(RestorePart) }, otherBus.Published);
+
+        // A clock that had run on is put back to the defaults too, not left at the old game's time.
+        other.SetTime(6, 2.0);
+        otherBus.Publish(new RestorePart(SaveModules.DayNight, json));
+        Assert.Equal(1, other.Day);
+        Assert.Equal(DayNightModule.StartHour, other.Hour, 9);
+        Assert.Equal(2, logs.Count);
+
+        other.Tick(new TickContext(0, Step));
+        Assert.Equal(1, otherBus.Times[^1].Day);
     }
 
     private sealed class NullBus : IMessageBus

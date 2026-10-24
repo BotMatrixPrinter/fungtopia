@@ -8,7 +8,7 @@ next morning. The view owns the one sun, sky and WorldEnvironment of the whole g
 - `Core/` — `Fungtopia.DayNight.Core`: `DayNightModule`, the module's one `IModule`; `VolumetricFog`, the
   global volumetric fog settings.
 - `Godot/` — `Main.tscn` with `DayNightView` (light, sky, environment); `Shaders/sky.gdshader`.
-- `Tests/` — `DayNightModuleTests.cs`: xUnit tests of `DayNightModule` with a fake `IMessageBus`, and of
+- `Tests/` — `DayNightModuleTests.cs`: xUnit tests of `DayNightModule` (clock, faint, save/restore) with a fake `IMessageBus`, and of
   `VolumetricFog`.
 
 Test it with `./test.sh DayNight` from the repository root.
@@ -23,7 +23,7 @@ Test it with `./test.sh DayNight` from the repository root.
 ## Core
 
 `DayNightModule` reads `Fungtopia.Player.PlayerDefeated` and `PlayerState` (only its `Area`, for
-the view) and uses `Fungtopia.Map.Places.ClinicDoor`. Each tick it adds the step to the clock
+the view) and `Fungtopia.Save.CollectSave` and `RestorePart`, and uses `Fungtopia.Map.Places.ClinicDoor`. Each tick it adds the step to the clock
 (50 real seconds per hour; the day counts up at midnight) and publishes `TimeOfDay`.
 
 On `PlayerDefeated` it starts a faint (more defeats while fainting are ignored). After
@@ -33,8 +33,16 @@ morning is that day's), then publishes, in this order, one `TeleportPlayer` to
 `Places.ClinicDoor` (position and yaw) and one `WokeUp`, and that tick's `TimeOfDay` already
 shows 7:00. The Player module restores health on the teleport.
 
+Saving (`Fungtopia.Save`): on `CollectSave` it answers at once with one `SavePart` (Module
+`"DayNight"`) whose Json is compact, e.g. `{"v":1,"day":3,"hour":14.25}` (`SaveVersion` 1; the hour
+as a double, so a round trip is exact). On `RestorePart` for `"DayNight"` it sets exactly that day
+and hour and drops a faint in progress, publishing nothing (no `WokeUp`, no teleport); the next
+tick's `TimeOfDay` shows the restored time. Bad or empty Json, another version, day < 1 or an hour
+outside 0..24 reset the clock to its defaults (Day 1, 9:00) and write one line to `Log` (the
+console by default). `RestorePart`s for other modules are ignored.
+
 For the view and tests: `Day`, `Hour` (double), `HourF` (as published), `IsNight`, `Fainting`,
-`FaintProgress` (0..1 over the faint), `PlayerArea`, `Ticks`, and `SetTime(day, hour)`. No
+`FaintProgress` (0..1 over the faint), `PlayerArea`, `Ticks`, `SetTime(day, hour)` and `Log`. No
 allocations per tick.
 
 ## View

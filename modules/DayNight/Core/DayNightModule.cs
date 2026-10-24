@@ -1,6 +1,9 @@
 using System;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Fungtopia.Map;
 using Fungtopia.Player;
+using Fungtopia.Save;
 using Fungtopia.Shell;
 
 namespace Fungtopia.DayNight;
@@ -11,9 +14,14 @@ namespace Fungtopia.DayNight;
 /// (<see cref="PlayerDefeated"/>) it waits <see cref="FaintSeconds"/>, skips to the next
 /// morning at <see cref="WakeHour"/>, and sends the player to Dr. Jeremy's clinic
 /// (<see cref="TeleportPlayer"/> to <see cref="Places.ClinicDoor"/>) with one <see cref="WokeUp"/>.
+/// It saves its day and hour as one <see cref="SavePart"/> and restores them from a <see cref="RestorePart"/>.
 /// </summary>
-public sealed class DayNightModule : IModule, IMessageHandler<PlayerDefeated>, IMessageHandler<PlayerState>
+public sealed class DayNightModule : IModule, IMessageHandler<PlayerDefeated>, IMessageHandler<PlayerState>,
+    IMessageHandler<CollectSave>, IMessageHandler<RestorePart>
 {
+    /// <summary>The version written in the saved JSON; other versions are not restored.</summary>
+    public const int SaveVersion = 1;
+
     /// <summary>The hour Day 1 starts at.</summary>
     public const double StartHour = 9.0;
 
@@ -52,12 +60,17 @@ public sealed class DayNightModule : IModule, IMessageHandler<PlayerDefeated>, I
     /// <summary>Number of fixed steps ticked.</summary>
     public long Ticks { get; private set; }
 
+    /// <summary>Where a refused <see cref="RestorePart"/> is logged (one line each); the console by default.</summary>
+    public Action<string> Log { get; set; } = Console.WriteLine;
+
     public void Start(IMessageBus bus)
     {
         ArgumentNullException.ThrowIfNull(bus);
         _bus = bus;
         bus.Subscribe<PlayerDefeated>(this);
         bus.Subscribe<PlayerState>(this);
+        bus.Subscribe<CollectSave>(this);
+        bus.Subscribe<RestorePart>(this);
     }
 
     /// <summary>Sets the clock (tests, screenshots). <paramref name="hour"/> wraps into 0..24.</summary>
@@ -79,6 +92,49 @@ public sealed class DayNightModule : IModule, IMessageHandler<PlayerDefeated>, I
     }
 
     public void Handle(in PlayerState message) => PlayerArea = message.Area;
+
+    /// <summary>Answers at once with this module's <see cref="SavePart"/>: the day and hour as compact JSON.</summary>
+    public void Handle(in CollectSave message)
+    {
+        if (_bus == null)
+            throw new InvalidOperationException("DayNightModule got CollectSave before Start.");
+        string json = JsonSerializer.Serialize(new DayNightSave(SaveVersion, Day, Hour));
+        _bus.Publish(new SavePart(message.RequestId, SaveModules.DayNight, json));
+    }
+
+    /// <summary>
+    /// Restores the day and hour saved by <see cref="Handle(in CollectSave)"/>, quietly: nothing is
+    /// published (no <see cref="WokeUp"/>, no teleport) and a faint in progress is dropped. Bad JSON, an
+    /// unknown version or out-of-range values put the clock back to its defaults (Day 1, 9:00) and log one line.
+    /// </summary>
+    public void Handle(in RestorePart message)
+    {
+        if (message.Module != SaveModules.DayNight)
+            return;
+        _faintElapsed = -1.0;
+        DayNightSave? save = null;
+        try
+        {
+            if (!string.IsNullOrEmpty(message.Json))
+                save = JsonSerializer.Deserialize<DayNightSave>(message.Json);
+        }
+        catch (JsonException)
+        {
+        }
+
+        if (save is { Version: SaveVersion, Day: >= 1 } s && double.IsFinite(s.Hour) && s.Hour >= 0.0 && s.Hour < 24.0)
+        {
+            Day = s.Day;
+            _secondsIntoDay = s.Hour * SecondsPerHour;
+            return;
+        }
+
+        Day = 1;
+        _secondsIntoDay = StartHour * SecondsPerHour;
+        Log(save == null
+            ? "Fungtopia: DayNight: saved time unreadable, starting at Day 1, 9:00."
+            : $"Fungtopia: DayNight: saved time version {save.Version} (day {save.Day}, hour {save.Hour}) not restored, starting at Day 1, 9:00.");
+    }
 
     public void Tick(in TickContext context)
     {
@@ -116,3 +172,9 @@ public sealed class DayNightModule : IModule, IMessageHandler<PlayerDefeated>, I
         _bus.Publish(new WokeUp(Day));
     }
 }
+
+/// <summary>DayNight's saved state: the version (<see cref="DayNightModule.SaveVersion"/>), the day and the hour.</summary>
+internal sealed record DayNightSave(
+    [property: JsonPropertyName("v")] int Version,
+    [property: JsonPropertyName("day")] int Day,
+    [property: JsonPropertyName("hour")] double Hour);
