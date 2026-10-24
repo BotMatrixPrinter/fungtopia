@@ -1,23 +1,30 @@
 using System;
 using System.Collections.Generic;
+using Fungtopia.Map;
 using Fungtopia.Shell;
 using Godot;
+using MapGround = Fungtopia.Map.Ground;
 
 namespace Fungtopia.Forest.View;
 
 /// <summary>
-/// Draws the Mushroom Forest from its Contract: the ground mesh from <see cref="Terrain.HeightAt"/>,
-/// a giant mushroom on every <see cref="Obstacles"/> circle, the wall of giant mushrooms around
-/// <see cref="ForestBounds"/>, and instanced small props (mushroom clusters, ferns, grass, logs,
-/// fireflies). Also a warm late-afternoon light, light fog, and a preview camera at the player's
-/// start that any other current camera replaces.
+/// Draws the Mushroom Forest: the forest square's floor from the Map's <see cref="MapGround.HeightAt"/>
+/// (the Map draws the ground around it on the same 1 m grid), a giant mushroom on every
+/// <see cref="Obstacles"/> circle, the ring of giant mushrooms around <see cref="ForestBounds"/>
+/// with the Map's gaps left open (<see cref="ForestRing"/>), and instanced small props (mushroom
+/// clusters, ferns, grass, logs, fireflies). The glowing caps glow brighter at night
+/// (<see cref="ForestModule.IsNight"/>). Sun, sky and environment are the DayNight module's. Also
+/// a preview camera at the player's start that any other current camera replaces.
 /// </summary>
 public partial class ForestView : Node3D, IModuleView
 {
     private const string Shaders = "res://modules/Forest/Godot/Shaders/";
 
-    /// <summary>The ground mesh reaches this far past the walkable square, under the mushroom wall.</summary>
-    private const float GroundBorder = 40f;
+    /// <summary>How much brighter the glowing caps shine at night.</summary>
+    private const float NightGlow = 2.4f;
+
+    /// <summary>How fast (per second) the glow follows day and night.</summary>
+    private const float GlowRate = 0.5f;
 
     private const float EyeHeight = 1.6f;
 
@@ -34,12 +41,13 @@ public partial class ForestView : Node3D, IModuleView
     };
 
     private ForestModule? _forest;
+    private ShaderMaterial? _capMaterial;
+    private float _glow = 1f;
 
     public void Bind(IModule module) => _forest = (ForestModule)module;
 
     public override void _Ready()
     {
-        BuildEnvironment();
         BuildGround();
         BuildMushrooms();
         BuildFoliage();
@@ -58,7 +66,19 @@ public partial class ForestView : Node3D, IModuleView
         return (h >> 8) * (1f / 16777216f);
     }
 
-    private static Vector3 Ground(float x, float z) => new(x, Terrain.HeightAt(x, z), z);
+    public override void _Process(double delta)
+    {
+        if (_capMaterial == null)
+            return;
+        float target = _forest != null && _forest.IsNight ? NightGlow : 1f;
+        if (_glow == target)
+            return;
+        float step = GlowRate * (NightGlow - 1f) * (float)delta;
+        _glow = _glow < target ? MathF.Min(_glow + step, target) : MathF.Max(_glow - step, target);
+        _capMaterial.SetShaderParameter("night_glow", _glow);
+    }
+
+    private static Vector3 Ground(float x, float z) => new(x, MapGround.HeightAt(x, z), z);
 
     /// <summary>Whether a prop of <paramref name="radius"/> at (x, z) stays off paths and trunks.</summary>
     private static bool Open(float x, float z, float radius) =>
@@ -71,50 +91,6 @@ public partial class ForestView : Node3D, IModuleView
         if (outline)
             material.NextPass = new ShaderMaterial { Shader = GD.Load<Shader>(Shaders + "outline.gdshader") };
         return material;
-    }
-
-    private void BuildEnvironment()
-    {
-        var sky = new ProceduralSkyMaterial
-        {
-            SkyTopColor = new Color(0.5f, 0.62f, 0.9f),
-            SkyHorizonColor = new Color(1.0f, 0.78f, 0.58f),
-            GroundBottomColor = new Color(0.3f, 0.32f, 0.25f),
-            GroundHorizonColor = new Color(0.95f, 0.78f, 0.62f),
-            SunAngleMax = 30f,
-        };
-        var environment = new Godot.Environment
-        {
-            BackgroundMode = Godot.Environment.BGMode.Sky,
-            Sky = new Sky { SkyMaterial = sky },
-            AmbientLightSource = Godot.Environment.AmbientSource.Color,
-            AmbientLightColor = new Color(0.62f, 0.55f, 0.72f),
-            AmbientLightEnergy = 0.9f,
-            TonemapMode = Godot.Environment.ToneMapper.Filmic,
-            TonemapWhite = 6f,
-            GlowEnabled = true,
-            GlowIntensity = 0.6f,
-            GlowBloom = 0.05f,
-            FogEnabled = true,
-            FogLightColor = new Color(0.86f, 0.74f, 0.7f),
-            FogDensity = 0.009f,
-            AdjustmentEnabled = true,
-            AdjustmentSaturation = 1.2f,
-            FogSkyAffect = 0.25f,
-        };
-        AddChild(new WorldEnvironment { Name = "WorldEnvironment", Environment = environment });
-
-        // A low, warm late-afternoon sun from the west; the caps' shadows dapple the ground.
-        var sun = new DirectionalLight3D
-        {
-            Name = "Sun",
-            LightColor = new Color(1.0f, 0.84f, 0.62f),
-            LightEnergy = 1.35f,
-            ShadowEnabled = true,
-            DirectionalShadowMaxDistance = 90f,
-            RotationDegrees = new Vector3(-34f, -112f, 0f),
-        };
-        AddChild(sun);
     }
 
     private static Color GroundColor(float x, float z)
@@ -135,8 +111,9 @@ public partial class ForestView : Node3D, IModuleView
 
     private void BuildGround()
     {
+        // Just the forest square, on the 1 m grid the Map's ground continues outside it.
         const float step = 1f;
-        float extent = ForestBounds.HalfSize + GroundBorder;
+        float extent = ForestBounds.HalfSize;
         int n = (int)(2 * extent / step) + 1;
         var vertices = new Vector3[n * n];
         var normals = new Vector3[n * n];
@@ -148,8 +125,8 @@ public partial class ForestView : Node3D, IModuleView
             int k = i * n + j;
             vertices[k] = Ground(x, z);
             const float e = 0.25f;
-            float dx = Terrain.HeightAt(x + e, z) - Terrain.HeightAt(x - e, z);
-            float dz = Terrain.HeightAt(x, z + e) - Terrain.HeightAt(x, z - e);
+            float dx = MapGround.HeightAt(x + e, z) - MapGround.HeightAt(x - e, z);
+            float dz = MapGround.HeightAt(x, z + e) - MapGround.HeightAt(x, z - e);
             normals[k] = new Vector3(-dx, 2f * e, -dz).Normalized();
             colors[k] = GroundColor(x, z);
         }
@@ -277,17 +254,18 @@ public partial class ForestView : Node3D, IModuleView
             Mushroom(o.X, o.Z, o.Radius, height, o.Radius * (2.6f + 1.2f * Rand(id, 21)), Rand(id, 22) < 0.45f);
         }
 
-        // The wall: dense giant mushrooms in a band just outside the square.
-        const float cell = 5.5f, depth = 26f;
-        float outer = ForestBounds.HalfSize + depth;
+        // The ring: dense giant mushrooms in a band just outside the square, open where the Map's
+        // roads and the Deep Forest path pass through.
+        const float cell = 5.5f;
+        float outer = ForestBounds.HalfSize + ForestRing.Depth;
         for (float gx = -outer; gx < outer; gx += cell)
         for (float gz = -outer; gz < outer; gz += cell)
         {
             int id = seed;
             float x = gx + cell * (0.15f + 0.7f * Rand(id, 30)), z = gz + cell * (0.15f + 0.7f * Rand(id, 31));
             float r = 1.1f + 1.5f * Rand(id, 32);
-            if (ForestBounds.Contains(x, z, -(r + 0.5f)))
-                continue; // inside the square (or touching it): walkers stay inside instead
+            if (!ForestRing.Keeps(x, z, r))
+                continue; // inside the square, in a gap, or where the Map draws its own
             float height = 7f + 9f * Rand(id, 33);
             Mushroom(x, z, r, height, r * (2.4f + 1.4f * Rand(id, 34)), Rand(id, 35) < 0.12f);
         }
@@ -311,7 +289,8 @@ public partial class ForestView : Node3D, IModuleView
         }
 
         AddChild(stems.Build("MushroomStems", ForestMeshes.Stem(), Material("toon_color.gdshader", outline: true)));
-        AddChild(caps.Build("MushroomCaps", ForestMeshes.Cap(), Material("mushroom_cap.gdshader", outline: true)));
+        _capMaterial = Material("mushroom_cap.gdshader", outline: true);
+        AddChild(caps.Build("MushroomCaps", ForestMeshes.Cap(), _capMaterial));
         AddChild(eyes.Build("MushroomEyes", ForestMeshes.Eye(), Material("eye.gdshader", outline: true), shadows: false));
     }
 
@@ -347,6 +326,8 @@ public partial class ForestView : Node3D, IModuleView
             float x = (Rand(k, 60) * 2f - 1f) * (ForestBounds.HalfSize + 6f), z = (Rand(k, 61) * 2f - 1f) * (ForestBounds.HalfSize + 6f);
             if (ForestLayout.PathDistance(x, z) < ForestLayout.PathHalfWidth + 0.2f || Obstacles.Blocks(x, z, 0.1f))
                 continue;
+            if (!ForestBounds.Contains(x, z) && Areas.Walkable(x, z, -0.5f))
+                continue; // the Map's roads and the Deep Forest path run out through the gaps
             grass.Add(Placed(Ground(x, z), Rand(k, 62) * MathF.Tau, Vector3.One * (0.8f + 0.8f * Rand(k, 63))),
                 GroundColor(x, z).Lightened(0.08f));
         }
@@ -369,7 +350,7 @@ public partial class ForestView : Node3D, IModuleView
             if (!Open(x, z, length * 0.5f + radius) || ForestLayout.ClearingDepth(x, z) > -1f)
                 continue;
             var center = Ground(x, z) + Vector3.Up * (radius * 0.75f);
-            center.Y = MathF.Max(Terrain.HeightAt(a.X, a.Z), Terrain.HeightAt(b.X, b.Z)) * 0.5f + center.Y * 0.5f;
+            center.Y = MathF.Max(MapGround.HeightAt(a.X, a.Z), MapGround.HeightAt(b.X, b.Z)) * 0.5f + center.Y * 0.5f;
             // The log's local Y (its length) lies along the ground.
             var basis = new Basis(new Quaternion(Vector3.Up, along)) * Basis.FromScale(new Vector3(radius, length, radius));
             logs.Add(new Transform3D(basis, center), Colors.White);

@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
+using Fungtopia.DayNight;
+using Fungtopia.Map;
 using Fungtopia.Shell;
 using Xunit;
 
@@ -8,24 +10,72 @@ namespace Fungtopia.Forest.Tests;
 
 public class ForestTests
 {
-    /// <summary>Fake of the shell's bus: counts every message published and every subscription.</summary>
+    /// <summary>Fake of the shell's bus: counts every message published and every subscription, and delivers TimeOfDay.</summary>
     private sealed class FakeBus : IMessageBus
     {
         public int Published;
         public int Subscriptions;
+        public IMessageHandler<TimeOfDay>? Time;
 
-        public void Subscribe<T>(IMessageHandler<T> handler) where T : struct => Subscriptions++;
+        public void Subscribe<T>(IMessageHandler<T> handler) where T : struct
+        {
+            Subscriptions++;
+            if (handler is IMessageHandler<TimeOfDay> time)
+                Time = time;
+        }
 
         public void Publish<T>(in T message) where T : struct => Published++;
     }
 
-    /// <summary>Every 0.5 m over the walkable square plus a 20 m border around it.</summary>
-    private static IEnumerable<(float X, float Z)> Grid(float step = 0.5f, float border = 20f)
+    /// <summary>Every 0.5 m over the walkable square (plus a border around it, beyond which the Map's roads and cliffs begin).</summary>
+    private static IEnumerable<(float X, float Z)> Grid(float step = 0.5f, float border = 0f)
     {
         float limit = ForestBounds.HalfSize + border;
         for (float x = -limit; x <= limit; x += step)
         for (float z = -limit; z <= limit; z += step)
             yield return (x, z);
+    }
+
+    // Forwarding to the Map
+
+    [Fact]
+    public void TerrainForwardsToTheMapGround()
+    {
+        // Everywhere: the forest square, its ring, the roads, the towns and the cliffs.
+        foreach (var (x, z) in Grid(step: 3.7f, border: 200f))
+            Assert.Equal(Ground.HeightAt(x, z), Terrain.HeightAt(x, z));
+        Assert.Equal(Ground.HeightAt(0f, 215f), Terrain.HeightAt(0f, 215f));
+    }
+
+    [Fact]
+    public void ObstaclesAreTheMapForestTrunks()
+    {
+        Assert.Equal(Ground.ForestTrunkCount, Obstacles.Count);
+        var map = Ground.Obstacles;
+        var forest = Obstacles.All;
+        for (int i = 0; i < forest.Length; i++)
+        {
+            Assert.Equal(map[i].X, forest[i].X);
+            Assert.Equal(map[i].Z, forest[i].Z);
+            Assert.Equal(map[i].Radius, forest[i].Radius);
+        }
+        foreach (var (x, z) in Grid(step: 1.3f))
+            Assert.Equal(Obstacles.Blocks(x, z, 0.4f), Ground.Blocks(x, z, 0.4f));
+    }
+
+    [Fact]
+    public void BoundsForwardToTheMapForestArea()
+    {
+        Assert.Equal(Areas.ForestHalfSize, ForestBounds.HalfSize);
+        Assert.Equal(ForestBounds.HalfSize, Areas.Forest.MaxX);
+        Assert.Equal(ForestBounds.HalfSize, -Areas.Forest.MinZ);
+        Assert.Equal(new Vector3(0f, Ground.HeightAt(0f, 84f), 84f), ForestBounds.PlayerStart);
+        Assert.Equal(Area.Forest, Areas.At(ForestBounds.PlayerStart.X, ForestBounds.PlayerStart.Z));
+        foreach (var (x, z) in Grid(step: 4.9f, border: 30f))
+        {
+            Assert.Equal(Areas.Forest.Contains(x, z), ForestBounds.Contains(x, z));
+            Assert.Equal(Areas.Forest.Contains(x, z, 2.5f), ForestBounds.Contains(x, z, 2.5f));
+        }
     }
 
     // Terrain
@@ -172,6 +222,53 @@ public class ForestTests
         Assert.Equal(0f, ForestLayout.PathDistance(5f, 70f), 3);
     }
 
+    // The mushroom ring around the square
+
+    [Fact]
+    public void RingLeavesTheMapRoadGapsOpen()
+    {
+        foreach (var gap in new[] { Areas.ForestGapSouth, Areas.ForestGapNorth })
+        {
+            float outward = MathF.Sign(gap.Y);
+            for (float d = 0f; d <= ForestRing.Depth; d += 0.5f)
+            for (float dx = -Areas.ForestGapHalfWidth + 0.05f; dx < Areas.ForestGapHalfWidth; dx += 0.5f)
+            for (float r = 0.5f; r <= 3f; r += 0.5f)
+                Assert.False(ForestRing.Keeps(gap.X + dx, gap.Y + outward * d, r), $"a ring mushroom in the gap at ({gap.X + dx}, {gap.Y + outward * d})");
+            Assert.True(ForestRing.InGap(gap.X, gap.Y + outward * 3f, 0f));
+            Assert.True(ForestRing.InGap(gap.X + Areas.ForestGapHalfWidth - 0.1f, gap.Y + outward * 3f, 0f));
+            Assert.False(ForestRing.InGap(gap.X + Areas.ForestGapHalfWidth + 0.1f, gap.Y + outward * 3f, 0f));
+        }
+    }
+
+    [Fact]
+    public void RingStaysOffTheRoadsAndAllWalkableGroundOutsideTheSquare()
+    {
+        foreach (var (x, z) in Grid(step: 0.7f, border: ForestRing.Depth))
+        {
+            if (ForestBounds.Contains(x, z) || !Areas.Walkable(x, z))
+                continue;
+            for (float r = 0.5f; r <= 3f; r += 0.5f)
+                Assert.False(ForestRing.Keeps(x, z, r), $"a ring mushroom on walkable ground at ({x}, {z})");
+        }
+        // Also with its stem: never within the stem's radius of a road's edge.
+        Assert.False(ForestRing.Keeps(0f, 110f + 0f, 1f));
+        Assert.False(ForestRing.Keeps(Areas.RoadHalfWidth + 1.2f, 104f, 1f));
+    }
+
+    [Fact]
+    public void RingClosesTheEdgeAwayFromTheGaps()
+    {
+        Assert.True(ForestRing.Keeps(50f, 103f, 1.5f));
+        Assert.True(ForestRing.Keeps(-50f, -103f, 1.5f));
+        Assert.True(ForestRing.Keeps(103f, 20f, 1.5f));
+        Assert.True(ForestRing.Keeps(-103f, 40f, 1.5f));
+        Assert.True(ForestRing.Keeps(Areas.ForestGapHalfWidth + 2.6f, 102.2f, 1.5f));
+        Assert.False(ForestRing.Keeps(50f, 99f, 1.5f)); // inside the square
+        Assert.False(ForestRing.Keeps(50f, 100f + ForestRing.Depth + 1f, 1.5f)); // past the ring
+        // The west gap (the Deep Forest path) is the Map's too.
+        Assert.False(ForestRing.Keeps(Areas.ForestGapWest.X - 3f, Areas.ForestGapWest.Y, 1f));
+    }
+
     // Core
 
     [Fact]
@@ -181,6 +278,25 @@ public class ForestTests
         var forest = new ForestModule();
         forest.Start(bus);
         Assert.True(forest.Started);
+        Assert.Equal(0, bus.Published);
+        Assert.False(forest.IsNight);
+    }
+
+    [Fact]
+    public void ModuleFollowsTheTimeOfDay()
+    {
+        var bus = new FakeBus();
+        var forest = new ForestModule();
+        forest.Start(bus);
+        Assert.NotNull(bus.Time);
+        bus.Time!.Handle(new TimeOfDay(1, 21f, true));
+        Assert.True(forest.IsNight);
+        bus.Time.Handle(new TimeOfDay(2, 7f, false));
+        Assert.False(forest.IsNight);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 1000; i++)
+            bus.Time.Handle(new TimeOfDay(2, i % 24, TimeOfDay.IsNightAt(i % 24)));
+        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
         Assert.Equal(0, bus.Published);
     }
 

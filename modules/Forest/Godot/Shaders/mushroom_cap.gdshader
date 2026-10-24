@@ -1,5 +1,6 @@
 // Giant and small mushroom caps: instance color on top with cream spots, pale gills below.
-// INSTANCE_CUSTOM.x picks the spot pattern, INSTANCE_CUSTOM.y makes the cap glow softly.
+// INSTANCE_CUSTOM.x picks the spot pattern, INSTANCE_CUSTOM.y makes the cap glow softly;
+// night_glow (set by the view, brighter at night) scales that glow.
 shader_type spatial;
 render_mode specular_disabled;
 
@@ -7,6 +8,7 @@ render_mode specular_disabled;
 
 uniform vec3 gill_color : source_color = vec3(0.98, 0.88, 0.76);
 uniform vec3 spot_color : source_color = vec3(1.0, 0.97, 0.9);
+uniform float night_glow = 1.0;
 
 varying vec3 local_pos;
 varying vec2 custom;
@@ -44,5 +46,5 @@ void fragment() {
 	vec3 cap = COLOR.rgb;
 	vec3 gills = gill_color * mix(vec3(1.0), cap, 0.18);
 	ALBEDO = mix(gills, mix(cap, spot_color, spot), top);
-	EMISSION = (cap * 0.8 * top + gills * 0.25 * (1.0 - top) + spot_color * spot * 0.5) * custom.y;
+	EMISSION = (cap * 0.8 * top + gills * 0.25 * (1.0 - top) + spot_color * spot * 0.5) * custom.y * night_glow;
 }

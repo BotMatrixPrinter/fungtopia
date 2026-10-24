@@ -12,6 +12,8 @@
   <ItemGroup>
     <ProjectReference Include="../Core/Fungtopia.Forest.Core.csproj" />
     <ProjectReference Include="../Contract/Fungtopia.Forest.Contract.csproj" />
+    <ProjectReference Include="../../Map/Contract/Fungtopia.Map.Contract.csproj" />
+    <ProjectReference Include="../../DayNight/Contract/Fungtopia.DayNight.Contract.csproj" />
     <ProjectReference Include="../../../shell/Contract/Fungtopia.Shell.Contract.csproj" />
   </ItemGroup>
 </Project>

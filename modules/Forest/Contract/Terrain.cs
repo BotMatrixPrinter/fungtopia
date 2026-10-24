@@ -1,22 +1,19 @@
-using System;
-
 namespace Fungtopia.Forest;
 
-/// <summary>The Mushroom Forest's ground.</summary>
+/// <summary>
+/// The Mushroom Forest's ground. Forwards to the Map module, which owns the world's ground:
+/// use <see cref="Fungtopia.Map.Ground"/> in new code.
+/// </summary>
 public static class Terrain
 {
-    /// <summary>Largest |height| the ground ever reaches, in meters.</summary>
+    /// <summary>Largest |height| the ground reaches inside <see cref="ForestBounds"/>, in meters.</summary>
     public const float MaxAbsHeight = 1.9f;
 
     /// <summary>
-    /// Ground height (meters, Y up) at world position (x, z): gentle rolling hills made of a few
-    /// fixed sine waves. Pure, deterministic and allocation-free; defined everywhere, also
-    /// outside <see cref="ForestBounds"/>. Never steeper than about 1 in 6.
+    /// Ground height (meters, Y up) at world position (x, z): forwards to
+    /// <see cref="Fungtopia.Map.Ground.HeightAt"/>. Inside <see cref="ForestBounds"/> gentle rolling
+    /// hills (never steeper than about 1 in 6); beyond it the Map's roads, towns and cliffs.
+    /// Pure, deterministic and allocation-free; defined everywhere.
     /// </summary>
-    public static float HeightAt(float x, float z)
-    {
-        return 1.1f * MathF.Sin(0.031f * x + 0.4f) * MathF.Cos(0.027f * z - 1.1f)
-             + 0.5f * MathF.Sin(0.052f * x - 0.061f * z + 2.3f)
-             + 0.3f * MathF.Sin(0.13f * x + 1.7f) * MathF.Sin(0.11f * z + 0.3f);
-    }
+    public static float HeightAt(float x, float z) => Fungtopia.Map.Ground.HeightAt(x, z);
 }
