@@ -34,9 +34,19 @@ positive turns left; the direction of yaw `a` is `(-sin a, 0, -cos a)`.
 ## Core
 
 `PlayerModule` reads `Fungtopia.Input.PlayerInput`, `Fungtopia.Dialogue.DialogueState`,
-`Fungtopia.Bow.BowState`, `TeleportPlayer` and `DamagePlayer`, and the world from the Map Contract (`Ground`, `Areas`,
+`Fungtopia.Bow.BowState`, `Fungtopia.StartScreen.GameStart` and `StartScreenState`,
+`TeleportPlayer` and `DamagePlayer`, and the world from the Map Contract (`Ground`, `Areas`,
 `Places`). The Player Contract references the Map Contract (for `Area`). The game starts at
-`Places.HomeDoor`, facing out. Each tick:
+`Places.HomeDoor`, facing out.
+
+- **Start screen.** Until the first `GameStart` the player is hidden (`Visible` false: the view
+  hides the model) and stands still at the home door: `PlayerInput` and `DamagePlayer` are
+  ignored. `GameStart` sets `Character` from its `Character` (`GameStart.Girl` 0 or `Boy` 1,
+  replacing the setting), puts the player at `Places.HomeDoor` and shows it; later `GameStart`s
+  are ignored. While `StartScreenState.Open` is true input is ignored too. It still publishes
+  `PlayerState` every tick. Without the StartScreen module the player never appears.
+
+Each tick:
 
 - **Camera yaw.** When the input has an aim (`HasAim`), the camera's yaw is the aim direction's
   horizontal part; otherwise `Look.X` (yaw right) is added up.
@@ -59,16 +69,18 @@ positive turns left; the direction of yaw `a` is `(-sin a, 0, -cos a)`.
 - **Archery.** `Archery` (an `ArcheryState`) is advanced every tick by `ArcheryPose.Advance`
   from the latest `BowState.Draw` (see the View for what it means).
 
-Settings and helpers: `Character` (the character setting, Girl by default), `PlaceAt(feet,
+Settings and helpers: `Character` (the character setting, Girl by default, until `GameStart`
+picks it), `PlaceAt(feet,
 facing)` puts the player on the ground somewhere. The view also reads `CameraYaw`,
-`InvulnerableSeconds`, `DefeatedSeconds`, `Ticks`, `Archery`, `AimDirection` and `HasAim` (the
+`Visible`, `InvulnerableSeconds`, `DefeatedSeconds`, `Ticks`, `Archery`, `AimDirection` and `HasAim` (the
 latest input's aim). No allocations per tick.
 
 ## View
 
 `PlayerView` sets the Core's `Character` from its exported `Character` property (`"Girl"` in
 `Main.tscn`), which the user argument `--character=boy` overrides (for example
-`godot --path . -- --character=boy`). It places the model between the last two ticks
+`godot --path . -- --character=boy`), until the start screen's choice replaces it. The model is
+hidden while `Visible` is false (behind the start screen). It places the model between the last two ticks
 (`Engine.GetPhysicsInterpolationFraction`), turned to `Facing`; a teleport jumps instead of
 gliding. The view has no camera: the camera module follows `PlayerState`.
 

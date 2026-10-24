@@ -5,6 +5,7 @@ using Fungtopia.Dialogue;
 using Fungtopia.Input;
 using Fungtopia.Map;
 using Fungtopia.Shell;
+using Fungtopia.StartScreen;
 
 namespace Fungtopia.Player;
 
@@ -13,10 +14,12 @@ namespace Fungtopia.Player;
 /// Town, walks relative to the camera, turns smoothly, jumps, follows the ground, slides along
 /// trunks, buildings and the edge of the walkable ground, stands still while a dialogue is open,
 /// takes damage, stays down after defeat until the next <see cref="TeleportPlayer"/>.
+/// Hidden and still until the start screen's <see cref="GameStart"/>, which picks the character.
 /// Publishes <see cref="PlayerState"/> every tick and <see cref="PlayerDefeated"/> once per defeat.
 /// </summary>
 public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessageHandler<DamagePlayer>,
-    IMessageHandler<TeleportPlayer>, IMessageHandler<DialogueState>, IMessageHandler<BowState>
+    IMessageHandler<TeleportPlayer>, IMessageHandler<DialogueState>, IMessageHandler<BowState>,
+    IMessageHandler<GameStart>, IMessageHandler<StartScreenState>
 {
     public const float WalkSpeed = 5f;
     public const float JumpHeight = 1.2f;
@@ -34,8 +37,9 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
     private bool _defeatPending;
     private bool _talking;
     private float _bowDraw;
+    private bool _screenOpen;
 
-    /// <summary>The setting that picks the character (Girl by default).</summary>
+    /// <summary>The setting that picks the character (Girl by default) until <see cref="GameStart"/> picks it.</summary>
     public CharacterKind Character { get; set; } = CharacterKind.Girl;
 
     public Vector3 Position { get; private set; } = Places.HomeDoor.Position;
@@ -44,6 +48,15 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
     public bool Grounded { get; private set; } = true;
     public int Health { get; private set; } = MaxHealth;
     public bool Alive { get; private set; } = true;
+
+    /// <summary>
+    /// False until <see cref="GameStart"/> arrives: the view hides the player, and input and
+    /// damage are ignored. Input is also ignored while <see cref="StartScreenState.Open"/>.
+    /// </summary>
+    public bool Visible { get; private set; }
+
+    /// <summary>Whether the player takes input: shown and the start screen closed.</summary>
+    private bool InPlay => Visible && !_screenOpen;
 
     /// <summary>The camera's yaw as the player knows it (Godot's convention, like <see cref="Facing"/>).</summary>
     public float CameraYaw { get; private set; }
@@ -78,6 +91,8 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
         bus.Subscribe<TeleportPlayer>(this);
         bus.Subscribe<DialogueState>(this);
         bus.Subscribe<BowState>(this);
+        bus.Subscribe<GameStart>(this);
+        bus.Subscribe<StartScreenState>(this);
         State = MakeState();
     }
 
@@ -93,6 +108,12 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
 
     public void Handle(in PlayerInput message)
     {
+        if (!InPlay)
+        {
+            _input = default;
+            _jumpQueued = false;
+            return;
+        }
         _input = message;
         if (message.Jump)
             _jumpQueued = true;
@@ -124,9 +145,23 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
 
     public void Handle(in BowState message) => _bowDraw = message.Draw;
 
+    public void Handle(in StartScreenState message) => _screenOpen = message.Open;
+
+    /// <summary>The first one picks the character and shows the player at the home door; later ones are ignored.</summary>
+    public void Handle(in GameStart message)
+    {
+        if (Visible)
+            return;
+        Character = message.Character == GameStart.Boy ? CharacterKind.Boy : CharacterKind.Girl;
+        Visible = true;
+        _input = default;
+        _jumpQueued = false;
+        PlaceAt(Places.HomeDoor.Position, Places.HomeDoor.Yaw);
+    }
+
     public void Handle(in DamagePlayer message)
     {
-        if (!Alive || message.Amount <= 0 || InvulnerableSeconds > 0f)
+        if (!Visible || !Alive || message.Amount <= 0 || InvulnerableSeconds > 0f)
             return;
         Health = Math.Max(0, Health - message.Amount);
         InvulnerableSeconds = InvulnerableAfterHit;

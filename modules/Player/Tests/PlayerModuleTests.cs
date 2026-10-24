@@ -6,6 +6,7 @@ using Fungtopia.Dialogue;
 using Fungtopia.Input;
 using Fungtopia.Map;
 using Fungtopia.Shell;
+using Fungtopia.StartScreen;
 using Xunit;
 
 namespace Fungtopia.Player.Tests;
@@ -44,7 +45,19 @@ public class PlayerModuleTests
     private readonly PlayerModule _player = new();
     private long _tick;
 
-    public PlayerModuleTests() => _player.Start(_bus);
+    /// <summary>Most tests play after the start screen: "Start!" pressed with the Girl.</summary>
+    public PlayerModuleTests()
+    {
+        _player.Start(_bus);
+        PressStart(_bus, GameStart.Girl);
+    }
+
+    /// <summary>The tick "Start!" is pressed, as StartScreen publishes it: GameStart, then the screen closed.</summary>
+    private static void PressStart(FakeBus bus, int character)
+    {
+        bus.Publish(new GameStart(character, GameStart.Cat));
+        bus.Publish(new StartScreenState(false));
+    }
 
     private static PlayerInput Moving(float x, float y, bool fire = false, Vector3? aim = null, bool jump = false) =>
         new(new Vector2(x, y), Vector2.Zero, jump, fire, aim.HasValue, aim.HasValue ? Vector3.Normalize(aim.Value) : Vector3.Zero);
@@ -102,12 +115,94 @@ public class PlayerModuleTests
     [Fact]
     public void PublishesOneStateEveryTickWithTheChosenCharacter()
     {
-        _player.Character = CharacterKind.Boy;
         Run(0.5, Moving(0f, 1f));
         Assert.Equal(30, _bus.States.Count);
-        Assert.All(_bus.States, s => Assert.Equal(CharacterKind.Boy, s.Character));
+        Assert.All(_bus.States, s => Assert.Equal(CharacterKind.Girl, s.Character));
         Assert.Equal(_player.Position, _bus.States[^1].Position);
         Assert.Empty(_bus.Defeats);
+    }
+
+    // ---- The start screen ----
+
+    /// <summary>A player whose game has not started yet (the start screen is open).</summary>
+    private static (FakeBus bus, PlayerModule player) BehindTheStartScreen()
+    {
+        var bus = new FakeBus();
+        var player = new PlayerModule();
+        player.Start(bus);
+        return (bus, player);
+    }
+
+    /// <summary>One tick behind the start screen: StartScreen and Input publish, then the player ticks.</summary>
+    private static void TickOpen(FakeBus bus, PlayerModule player, long tick, in PlayerInput input)
+    {
+        bus.Publish(new StartScreenState(true));
+        bus.Publish(input);
+        player.Tick(new TickContext(tick, Step));
+    }
+
+    [Fact]
+    public void IsHiddenAndStillBeforeGameStart()
+    {
+        var (bus, player) = BehindTheStartScreen();
+        Assert.False(player.Visible);
+        var input = new PlayerInput(new Vector2(0.6f, 0.8f), new Vector2(0.3f, 0f), true, true, true, Vector3.Normalize(new Vector3(1f, 0f, -1f)));
+        for (int i = 0; i < 120; i++)
+        {
+            TickOpen(bus, player, i, input);
+            player.Handle(new DamagePlayer(3, Vector3.Zero));
+        }
+        Assert.False(player.Visible);
+        Assert.Equal(120, bus.States.Count);
+        Assert.All(bus.States, s =>
+        {
+            Assert.Equal(Places.HomeDoor.Position, s.Position);
+            Assert.Equal(Places.HomeDoor.Yaw, s.Facing);
+            Assert.Equal(Vector3.Zero, s.Velocity);
+            Assert.True(s.Grounded);
+            Assert.Equal(10, s.Health);
+        });
+        Assert.Equal(0f, player.CameraYaw);
+        Assert.False(player.HasAim);
+    }
+
+    [Fact]
+    public void IgnoresInputWhileTheStartScreenIsOpenEvenWhenShown()
+    {
+        var (bus, player) = BehindTheStartScreen();
+        bus.Publish(new GameStart(GameStart.Girl, GameStart.Cat));
+        for (int i = 0; i < 30; i++)
+            TickOpen(bus, player, i, Moving(0f, 1f, jump: true));
+        Assert.Equal(Places.HomeDoor.Position, player.Position);
+        Assert.True(player.Grounded);
+    }
+
+    [Theory]
+    [InlineData(GameStart.Girl, CharacterKind.Girl)]
+    [InlineData(GameStart.Boy, CharacterKind.Boy)]
+    public void OnGameStartShowsTheChosenCharacterAtTheHomeDoorAndWalks(int chosen, CharacterKind expected)
+    {
+        var (bus, player) = BehindTheStartScreen();
+        // The setting says the other one: the start screen's choice wins.
+        player.Character = expected == CharacterKind.Boy ? CharacterKind.Girl : CharacterKind.Boy;
+        for (int i = 0; i < 10; i++)
+            TickOpen(bus, player, i, Moving(0f, 1f));
+        PressStart(bus, chosen);
+        Assert.True(player.Visible);
+        Assert.Equal(expected, player.Character);
+        Assert.Equal(Places.HomeDoor.Position, player.Position);
+        Assert.Equal(Places.HomeDoor.Yaw, player.Facing);
+
+        bus.Publish(Moving(0f, 1f));
+        player.Tick(new TickContext(10, Step));
+        var s = bus.States[^1];
+        Assert.Equal(expected, s.Character);
+        Assert.True(Vector3.Distance(Places.HomeDoor.Position, s.Position) > 0.05f, "walks after the start");
+
+        // A second GameStart changes nothing.
+        bus.Publish(new GameStart(1 - chosen, GameStart.Dog));
+        Assert.Equal(expected, player.Character);
+        Assert.Equal(s.Position, player.Position);
     }
 
     [Fact]
@@ -955,6 +1050,7 @@ public class PlayerModuleTests
         var bus = new NullBus();
         var player = new PlayerModule();
         player.Start(bus);
+        player.Handle(new GameStart(GameStart.Girl, GameStart.Cat));
         var input = Moving(0.6f, 0.8f, fire: true, aim: new Vector3(0.3f, 0f, -1f), jump: true);
         player.Handle(input);
         player.Tick(new TickContext(0, Step)); // warm up
@@ -965,6 +1061,7 @@ public class PlayerModuleTests
             player.Handle(new DamagePlayer(1, Vector3.Zero));
             player.Handle(new DialogueState(i % 200 < 100, 1));
             player.Handle(new BowState(i % 60 < 40 ? (i % 60) / 36f : 0f, 0));
+            player.Handle(new StartScreenState(false));
             player.Tick(new TickContext(i + 1, Step));
         }
         Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());

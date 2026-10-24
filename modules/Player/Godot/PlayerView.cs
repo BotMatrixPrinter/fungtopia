@@ -9,7 +9,8 @@ namespace Fungtopia.Player.View;
 /// turned to face <see cref="PlayerState.Facing"/>, and animated from the player's motion and its
 /// archery pose (<see cref="PlayerModule.Archery"/>, aimed along the input's aim).
 /// The character setting is <see cref="Character"/> ("Girl" or "Boy"), which the command-line
-/// user argument <c>--character=boy</c> (after <c>--</c>) overrides.
+/// user argument <c>--character=boy</c> (after <c>--</c>) overrides, and the start screen's
+/// choice replaces once the game starts. Hidden until then (<see cref="PlayerModule.Visible"/>).
 /// </summary>
 public partial class PlayerView : Node3D, IModuleView
 {
@@ -69,6 +70,10 @@ public partial class PlayerView : Node3D, IModuleView
         }
         if (_current.Character != _model.Kind)
             ShowModel(_current.Character);
+        // Hidden behind the start screen until GameStart (which also picks the character).
+        _model.Visible = _player.Visible;
+        if (!_model.Visible)
+            return;
 
         float alpha = (float)Engine.GetPhysicsInterpolationFraction();
         var from = ToGodot(_previous.Position);
