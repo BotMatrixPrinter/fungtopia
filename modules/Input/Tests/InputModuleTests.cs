@@ -388,6 +388,33 @@ public class InputModuleTests
         Assert.Equal(Vector3.Zero, msg.AimDirection);
     }
 
+    // --- view ---
+
+    private static string ViewSource([System.Runtime.CompilerServices.CallerFilePath] string here = "") =>
+        System.IO.File.ReadAllText(System.IO.Path.Combine(
+            System.IO.Path.GetDirectoryName(here)!, "..", "Godot", "InputView.cs"));
+
+    [Fact]
+    public void ViewDrawsNoCrosshairDot()
+    {
+        // The HUD owns the crosshair; InputView only reads devices and casts the aim ray.
+        var source = ViewSource();
+        Assert.DoesNotContain("_Draw", source);
+        Assert.DoesNotContain("DrawCircle", source);
+        Assert.DoesNotContain("QueueRedraw", source);
+        Assert.DoesNotContain("DotRadius", source);
+    }
+
+    [Fact]
+    public void ViewStillAimsThroughTheScreenCenter()
+    {
+        var source = ViewSource();
+        Assert.Contains("GetVisibleRect().Size * 0.5f", source);
+        Assert.Contains("ProjectRayNormal(center)", source);
+        Assert.Contains("_input.SetAim(", source);
+        Assert.Contains("_input.ClearAim()", source);
+    }
+
     // --- allocations ---
 
     [Fact]

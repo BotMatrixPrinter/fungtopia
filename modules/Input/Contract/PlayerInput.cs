@@ -29,7 +29,7 @@ public readonly struct PlayerInput
     public readonly bool HasAim;
 
     /// <summary>
-    /// World-space unit vector from the current 3D camera through the screen-center crosshair;
+    /// World-space unit vector from the current 3D camera through the screen center;
     /// zero when <see cref="HasAim"/> is false.
     /// </summary>
     public readonly Vector3 AimDirection;

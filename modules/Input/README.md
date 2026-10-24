@@ -14,15 +14,15 @@ Other modules (player, camera, bow) read it from the bus.
   - `OpenMap`: true on the one tick after a map press.
   - The six-argument constructor still works and leaves `Interact` and `OpenMap` false.
   - `HasAim` / `AimDirection`: the world-space unit ray from the current 3D camera through the
-    screen-center crosshair. When there is no camera, `HasAim` is false and `AimDirection` is zero.
+    screen center (where the HUD's crosshair sits). When there is no camera, `HasAim` is false and `AimDirection` is zero.
 - `Core/`: `Fungtopia.Input.Core`, `InputModule`. It keeps the latest device state its view
   reports. Mouse motion and jump, interact and map presses that arrive between ticks are added up and handed out
   once. Settings: `StickDeadZone` (0.2), `StickLookRadiansPerSecond` (3),
   `MouseRadiansPerPixel` (0.003), `TriggerThreshold` (0.5).
 - `Godot/`: `Main.tscn` with `InputView`, a full-screen `Control` that ignores the mouse. It
   reads the devices before each tick, casts the aim ray with
-  `GetViewport().GetCamera3D().ProjectRayNormal(center)`, and draws a small crosshair dot at the
-  center of the screen.
+  `GetViewport().GetCamera3D().ProjectRayNormal(center)`. It draws nothing on screen: the
+  crosshair (shown only while a weapon is in use) belongs to the HUD.
 - `Tests/`: xUnit tests of `InputModule` with a fake `IMessageBus`.
 
 ## Controls

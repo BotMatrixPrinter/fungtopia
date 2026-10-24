@@ -6,15 +6,11 @@ namespace Fungtopia.Input.View;
 
 /// <summary>
 /// Reads mouse, keyboard and gamepad into the Input module's Core, finds the aim ray from the
-/// current 3D camera through the screen center, and draws the crosshair dot there.
+/// current 3D camera through the screen center. It draws nothing: the HUD owns the crosshair.
 /// </summary>
 public partial class InputView : Control, IModuleView
 {
     private const int Pad = 0;
-    private static readonly Color DotFill = new(1f, 1f, 1f, 0.9f);
-    private static readonly Color DotInk = new(0.12f, 0.07f, 0.05f, 0.9f);
-
-    [Export] public float DotRadius { get; set; } = 3.5f;
 
     private InputModule? _input;
     private bool _ignoreFireUntilRelease;
@@ -96,19 +92,6 @@ public partial class InputView : Control, IModuleView
         var center = GetViewport().GetVisibleRect().Size * 0.5f;
         var ray = camera.ProjectRayNormal(center);
         _input.SetAim(new System.Numerics.Vector3(ray.X, ray.Y, ray.Z));
-    }
-
-    public override void _Notification(int what)
-    {
-        if (what == NotificationResized)
-            QueueRedraw();
-    }
-
-    public override void _Draw()
-    {
-        var center = Size * 0.5f;
-        DrawCircle(center, DotRadius + 1.5f, DotInk);
-        DrawCircle(center, DotRadius, DotFill);
     }
 
     private static float Held(Key key) => GodotInput.IsPhysicalKeyPressed(key) ? 1f : 0f;
