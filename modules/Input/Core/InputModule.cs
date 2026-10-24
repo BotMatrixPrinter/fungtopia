@@ -35,6 +35,7 @@ public sealed class InputModule : IModule
     private float _fireTrigger;
     private bool _hasAim;
     private Vector3 _aim;
+    private Vector3 _aimOrigin;
 
     /// <summary>The input published on the latest tick.</summary>
     public PlayerInput Latest { get; private set; }
@@ -76,17 +77,22 @@ public sealed class InputModule : IModule
     /// <summary>The fire trigger's value, 0..1.</summary>
     public void SetFireTrigger(float value) => _fireTrigger = float.IsFinite(value) ? value : 0f;
 
-    /// <summary>The ray from the camera through the screen center; any length, normalized here.</summary>
-    public void SetAim(Vector3 direction)
+    /// <summary>
+    /// The ray from the camera through the screen center: <paramref name="origin"/> is the camera's
+    /// world position, <paramref name="direction"/> any length (normalized here).
+    /// </summary>
+    public void SetAim(Vector3 origin, Vector3 direction)
     {
         float length = direction.Length();
-        if (!float.IsFinite(length) || length < 1e-6f)
+        if (!float.IsFinite(length) || length < 1e-6f
+            || !float.IsFinite(origin.X) || !float.IsFinite(origin.Y) || !float.IsFinite(origin.Z))
         {
             ClearAim();
             return;
         }
         _hasAim = true;
         _aim = direction / length;
+        _aimOrigin = origin;
     }
 
     /// <summary>No camera: HasAim is false until the next <see cref="SetAim"/>.</summary>
@@ -94,6 +100,7 @@ public sealed class InputModule : IModule
     {
         _hasAim = false;
         _aim = Vector3.Zero;
+        _aimOrigin = Vector3.Zero;
     }
 
     public void Tick(in TickContext context)
@@ -106,7 +113,7 @@ public sealed class InputModule : IModule
         Vector2 look = _mouseLook + ApplyDeadZone(_lookStick, StickDeadZone) * (StickLookRadiansPerSecond * (float)context.StepSeconds);
         bool fire = _fireButton || _fireTrigger >= TriggerThreshold;
 
-        Latest = new PlayerInput(move, look, _jumpPressed, fire, _hasAim, _aim, _interactPressed, _openMapPressed);
+        Latest = new PlayerInput(move, look, _jumpPressed, fire, _hasAim, _aim, _interactPressed, _openMapPressed, _aimOrigin);
         _mouseLook = Vector2.Zero;
         _jumpPressed = false;
         _interactPressed = false;

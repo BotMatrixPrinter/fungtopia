@@ -90,8 +90,10 @@ public partial class InputView : Control, IModuleView
             return;
         }
         var center = GetViewport().GetVisibleRect().Size * 0.5f;
+        var origin = camera.ProjectRayOrigin(center);
         var ray = camera.ProjectRayNormal(center);
-        _input.SetAim(new System.Numerics.Vector3(ray.X, ray.Y, ray.Z));
+        _input.SetAim(new System.Numerics.Vector3(origin.X, origin.Y, origin.Z),
+            new System.Numerics.Vector3(ray.X, ray.Y, ray.Z));
     }
 
     private static float Held(Key key) => GodotInput.IsPhysicalKeyPressed(key) ? 1f : 0f;

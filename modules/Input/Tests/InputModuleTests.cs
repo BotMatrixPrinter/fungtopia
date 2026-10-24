@@ -73,6 +73,7 @@ public class InputModuleTests
         Assert.False(msg.OpenMap);
         Assert.False(msg.HasAim);
         Assert.Equal(Vector3.Zero, msg.AimDirection);
+        Assert.Equal(Vector3.Zero, msg.AimOrigin);
     }
 
     [Fact]
@@ -342,10 +343,27 @@ public class InputModuleTests
     {
         var bus = new FakeBus();
         var input = Started(bus);
-        input.SetAim(new Vector3(0, 0, -5));
+        input.SetAim(new Vector3(1, 2, 3), new Vector3(0, 0, -5));
         var msg = TickOnce(input, bus);
         Assert.True(msg.HasAim);
         AssertNear(new Vector3(0, 0, -1), msg.AimDirection);
+    }
+
+    [Fact]
+    public void AimOriginIsTheCameraPositionPublishedWithTheDirection()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        input.SetAim(new Vector3(4, 1.5f, -2), new Vector3(0, 0, -5));
+        var msg = TickOnce(input, bus);
+        Assert.True(msg.HasAim);
+        Assert.Equal(new Vector3(4, 1.5f, -2), msg.AimOrigin);
+        Assert.Equal(msg.AimOrigin, input.Latest.AimOrigin);
+
+        input.SetAim(new Vector3(-1, 3, 7), new Vector3(1, 0, 0));
+        msg = TickOnce(input, bus, 1);
+        Assert.Equal(new Vector3(-1, 3, 7), msg.AimOrigin);
+        AssertNear(new Vector3(1, 0, 0), msg.AimDirection);
     }
 
     [Fact]
@@ -353,11 +371,12 @@ public class InputModuleTests
     {
         var bus = new FakeBus();
         var input = Started(bus);
-        input.SetAim(new Vector3(3, 0, 4));
+        input.SetAim(new Vector3(5, 6, 7), new Vector3(3, 0, 4));
         TickOnce(input, bus);
         var msg = TickOnce(input, bus, 1);
         Assert.True(msg.HasAim);
         AssertNear(new Vector3(0.6f, 0, 0.8f), msg.AimDirection);
+        Assert.Equal(new Vector3(5, 6, 7), msg.AimOrigin);
     }
 
     [Fact]
@@ -365,12 +384,13 @@ public class InputModuleTests
     {
         var bus = new FakeBus();
         var input = Started(bus);
-        input.SetAim(new Vector3(0, 0, -1));
+        input.SetAim(new Vector3(1, 2, 3), new Vector3(0, 0, -1));
         TickOnce(input, bus);
         input.ClearAim();
         var msg = TickOnce(input, bus, 1);
         Assert.False(msg.HasAim);
         Assert.Equal(Vector3.Zero, msg.AimDirection);
+        Assert.Equal(Vector3.Zero, msg.AimOrigin);
     }
 
     [Theory]
@@ -381,11 +401,46 @@ public class InputModuleTests
     {
         var bus = new FakeBus();
         var input = Started(bus);
-        input.SetAim(new Vector3(0, 0, -1));
-        input.SetAim(new Vector3(x, y, z));
+        input.SetAim(new Vector3(1, 2, 3), new Vector3(0, 0, -1));
+        input.SetAim(new Vector3(1, 2, 3), new Vector3(x, y, z));
         var msg = TickOnce(input, bus);
         Assert.False(msg.HasAim);
         Assert.Equal(Vector3.Zero, msg.AimDirection);
+        Assert.Equal(Vector3.Zero, msg.AimOrigin);
+    }
+
+    [Theory]
+    [InlineData(float.NaN, 0f, 0f)]
+    [InlineData(0f, float.PositiveInfinity, 0f)]
+    [InlineData(0f, 0f, float.NegativeInfinity)]
+    public void InvalidAimOriginMeansNoAim(float x, float y, float z)
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        input.SetAim(new Vector3(1, 2, 3), new Vector3(0, 0, -1));
+        input.SetAim(new Vector3(x, y, z), new Vector3(0, 0, -1));
+        var msg = TickOnce(input, bus);
+        Assert.False(msg.HasAim);
+        Assert.Equal(Vector3.Zero, msg.AimDirection);
+        Assert.Equal(Vector3.Zero, msg.AimOrigin);
+    }
+
+    [Fact]
+    public void OlderConstructorsLeaveAimOriginZero()
+    {
+        var aim = new Vector3(0, 0, -1);
+        Assert.Equal(Vector3.Zero, new PlayerInput(Vector2.Zero, Vector2.Zero, false, false, true, aim).AimOrigin);
+        Assert.Equal(Vector3.Zero, new PlayerInput(Vector2.Zero, Vector2.Zero, false, false, true, aim, true, true).AimOrigin);
+    }
+
+    [Fact]
+    public void ConstructorKeepsAimOriginOnlyWithAim()
+    {
+        var origin = new Vector3(1, 2, 3);
+        var withAim = new PlayerInput(Vector2.Zero, Vector2.Zero, false, false, true, new Vector3(0, 0, -1), false, false, origin);
+        Assert.Equal(origin, withAim.AimOrigin);
+        var noAim = new PlayerInput(Vector2.Zero, Vector2.Zero, false, false, false, Vector3.Zero, false, false, origin);
+        Assert.Equal(Vector3.Zero, noAim.AimOrigin);
     }
 
     // --- view ---
@@ -411,6 +466,7 @@ public class InputModuleTests
         var source = ViewSource();
         Assert.Contains("GetVisibleRect().Size * 0.5f", source);
         Assert.Contains("ProjectRayNormal(center)", source);
+        Assert.Contains("ProjectRayOrigin(center)", source);
         Assert.Contains("_input.SetAim(", source);
         Assert.Contains("_input.ClearAim()", source);
     }
@@ -424,7 +480,7 @@ public class InputModuleTests
         input.Start(new NullBus());
         input.SetKeyboardMove(new Vector2(1, 1));
         input.SetLookStick(new Vector2(0.5f, 0.5f));
-        input.SetAim(new Vector3(1, 1, 1));
+        input.SetAim(new Vector3(2, 3, 4), new Vector3(1, 1, 1));
         for (int i = 0; i < 10; i++)
             input.Tick(new TickContext(i, Step));
         long before = GC.GetAllocatedBytesForCurrentThread();

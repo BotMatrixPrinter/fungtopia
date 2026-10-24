@@ -34,6 +34,12 @@ public readonly struct PlayerInput
     /// </summary>
     public readonly Vector3 AimDirection;
 
+    /// <summary>
+    /// World-space start of the aim ray: the current 3D camera's position;
+    /// zero when <see cref="HasAim"/> is false.
+    /// </summary>
+    public readonly Vector3 AimOrigin;
+
     public PlayerInput(Vector2 move, Vector2 look, bool jump, bool fire, bool hasAim, Vector3 aimDirection)
         : this(move, look, jump, fire, hasAim, aimDirection, false, false)
     {
@@ -41,6 +47,12 @@ public readonly struct PlayerInput
 
     public PlayerInput(Vector2 move, Vector2 look, bool jump, bool fire, bool hasAim, Vector3 aimDirection,
         bool interact, bool openMap)
+        : this(move, look, jump, fire, hasAim, aimDirection, interact, openMap, Vector3.Zero)
+    {
+    }
+
+    public PlayerInput(Vector2 move, Vector2 look, bool jump, bool fire, bool hasAim, Vector3 aimDirection,
+        bool interact, bool openMap, Vector3 aimOrigin)
     {
         Move = move;
         Look = look;
@@ -48,6 +60,7 @@ public readonly struct PlayerInput
         Fire = fire;
         HasAim = hasAim;
         AimDirection = aimDirection;
+        AimOrigin = hasAim ? aimOrigin : Vector3.Zero;
         Interact = interact;
         OpenMap = openMap;
     }

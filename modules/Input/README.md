@@ -15,13 +15,18 @@ Other modules (player, camera, bow) read it from the bus.
   - The six-argument constructor still works and leaves `Interact` and `OpenMap` false.
   - `HasAim` / `AimDirection`: the world-space unit ray from the current 3D camera through the
     screen center (where the HUD's crosshair sits). When there is no camera, `HasAim` is false and `AimDirection` is zero.
+  - `AimOrigin`: the world-space start of that ray, the current 3D camera's position, published with
+    `AimDirection` (zero when `HasAim` is false). The nine-argument constructor sets it; the older
+    constructors leave it zero.
 - `Core/`: `Fungtopia.Input.Core`, `InputModule`. It keeps the latest device state its view
   reports. Mouse motion and jump, interact and map presses that arrive between ticks are added up and handed out
-  once. Settings: `StickDeadZone` (0.2), `StickLookRadiansPerSecond` (3),
+  once. `SetAim(origin, direction)` takes the camera ray (a non-finite origin or a zero or
+  non-finite direction means no aim). Settings: `StickDeadZone` (0.2), `StickLookRadiansPerSecond` (3),
   `MouseRadiansPerPixel` (0.003), `TriggerThreshold` (0.5).
 - `Godot/`: `Main.tscn` with `InputView`, a full-screen `Control` that ignores the mouse. It
   reads the devices before each tick, casts the aim ray with
-  `GetViewport().GetCamera3D().ProjectRayNormal(center)`. It draws nothing on screen: the
+  `GetViewport().GetCamera3D()`: `ProjectRayOrigin(center)` (the camera's position) and
+  `ProjectRayNormal(center)`. It draws nothing on screen: the
   crosshair (shown only while a weapon is in use) belongs to the HUD.
 - `Tests/`: xUnit tests of `InputModule` with a fake `IMessageBus`.
 
