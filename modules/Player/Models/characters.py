@@ -46,8 +46,13 @@ COLORS = {
     "Fletch": (0.5, 0.85, 0.45),
 }
 
+# Shoulder to hand center; the game keeps ArcheryPose.cs in step.
+ARM_LENGTH = 0.42
+# The held bow is this much bigger than the slung one, so it reads in the hand.
+HAND_BOW_SCALE = 1.3
+
 # The nocked arrow, nock to tip; the game keeps CharacterModel.cs and ArcheryPose.cs in step.
-NOCK_ARROW_LENGTH = 0.66
+NOCK_ARROW_LENGTH = 0.78
 
 KINDS = {
     "girl": {
@@ -305,12 +310,13 @@ def build(kind):
         shoe.sphere(mats["Shoe"], (x, 0.04, 0.06), (0.085, 0.12, 0.065), segments=20, rings=10)
         shoe.build(leg_obj)
 
-    # Arms: short and round with little round hands; pivot at the shoulder.
-    shoulder_z = neck_z - 0.1
+    # Arms: round, hanging to the hips, with little round hands; pivot at the shoulder. The game
+    # only turns them at the shoulder (ArcheryPose.ArmLength, ShoulderLRest, ArmLRestDirection).
+    shoulder_z = neck_z - 0.07
     for side, name in ((-1, "ArmL"), (1, "ArmR")):
-        sx = side * 0.22
+        sx = side * 0.23
         arm = Part(name, (sx, 0, shoulder_z))
-        hand = Vector((sx + side * 0.13, 0.02, shoulder_z - 0.22))
+        hand = Vector((sx, 0, shoulder_z)) + Vector((side * 0.13, 0.02, -0.22)).normalized() * ARM_LENGTH
         arm.capsule(mats["Skin"], (sx, 0, shoulder_z), hand, 0.05)
         arm_obj = arm.build()
         if not girl:
@@ -331,19 +337,35 @@ def build(kind):
     frame = Matrix(((0, 0, 1, 0), (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 0, 1)))  # x->+Y, y->+Z, z->+X
     slant = Matrix.Rotation(math.radians(38), 4, "Y")
     sling = slant @ frame
-    for name in ("BackBow", "HandBow"):
-        bow = Part(name, grip, rotation=slant if name == "HandBow" else Matrix.Identity(4))
-        bow.torus(mats["Wood"], bow.pivot, major, 0.028,
-                  rotation=sling @ Matrix.Translation((-major, 0, 0)), arc=half_arc / math.pi)
-        tips = []
-        for sign in (-1, 1):
-            local = Vector((major * math.cos(half_arc) - major, sign * major * math.sin(half_arc), 0, 1))
-            tips.append(bow.pivot + (sling @ local).to_3d())
-        if name == "BackBow":
-            bow.capsule(mats["String"], tips[0], tips[1], 0.009, segments=6)
-        for tip in tips:
-            bow.sphere(mats["Ribbon"], tip, (0.045, 0.045, 0.04), segments=12, rings=6)
-        bow.build()
+    bow = Part("BackBow", grip)
+    bow.torus(mats["Wood"], bow.pivot, major, 0.028,
+              rotation=sling @ Matrix.Translation((-major, 0, 0)), arc=half_arc / math.pi)
+    tips = []
+    for sign in (-1, 1):
+        local = Vector((major * math.cos(half_arc) - major, sign * major * math.sin(half_arc), 0, 1))
+        tips.append(bow.pivot + (sling @ local).to_3d())
+    bow.capsule(mats["String"], tips[0], tips[1], 0.009, segments=6)
+    for tip in tips:
+        bow.sphere(mats["Ribbon"], tip, (0.045, 0.045, 0.04), segments=12, rings=6)
+    bow.build()
+    # HandBow: HAND_BOW_SCALE times the size, a grip wrap at its pivot, and its two limbs as child
+    # objects at the same pivot (HandBowLimbTop / HandBowLimbBottom), which the game bends back
+    # with the draw (turning them about the grip's X axis, never stretching them).
+    k = HAND_BOW_SCALE
+    hmajor = major * k
+    held = Part("HandBow", grip, rotation=slant)
+    wrap_a = held.pivot + (sling @ Vector((0, -0.06, 0, 1))).to_3d() - held.pivot
+    wrap_b = held.pivot + (sling @ Vector((0, 0.06, 0, 1))).to_3d() - held.pivot
+    held.capsule(mats["Ribbon"], held.pivot + wrap_a, held.pivot + wrap_b, 0.04 * k, segments=12)
+    held_obj = held.build()
+    for sign, name in ((1, "HandBowLimbTop"), (-1, "HandBowLimbBottom")):
+        limb = piece(name, held)
+        limb.torus(mats["Wood"], limb.pivot, hmajor, 0.028 * k,
+                   rotation=sling @ Matrix.Translation((-hmajor, 0, 0)) @ Matrix.Rotation(sign * half_arc / 2, 4, "Z"),
+                   arc=half_arc / (2 * math.pi), segments=120)
+        local = Vector((hmajor * math.cos(half_arc) - hmajor, sign * hmajor * math.sin(half_arc), 0, 1))
+        limb.sphere(mats["Ribbon"], limb.pivot + (sling @ local).to_3d(), (0.045 * k, 0.045 * k, 0.04 * k), segments=12, rings=6)
+        limb.build(held_obj)
 
     # The nocked arrow: a poison mushroom tip (a purple cap with glowing green spots on a cream
     # stem), a wooden shaft and soft green fletching. Built pointing up (+Z) from its nock inside

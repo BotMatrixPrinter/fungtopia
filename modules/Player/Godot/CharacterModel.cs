@@ -34,14 +34,14 @@ public partial class CharacterModel : Node3D
     private static ShaderMaterial? s_outline;
     private static CylinderMesh? s_stringMesh;
 
-    /// <summary>The held bow leans a little (radians about its forward axis, mirrored by <see cref="ArcheryPose.HoldSide"/>), like a cute archer's.</summary>
-    private const float BowCant = 0.22f;
+    /// <summary>The held bow is this much bigger than the slung one (characters.py's HAND_BOW_SCALE); it grows as it swings into the hand.</summary>
+    private const float HandBowScale = 1.3f;
 
     private readonly Node3D _rig = new() { Name = "Rig" };
     private readonly List<GeometryInstance3D> _meshes = new();
     private readonly List<(string Name, ShaderMaterial Material, Color Color)> _tints = new();
     private readonly List<Node3D> _worn = new();
-    private Part _head, _body, _legL, _legR, _armL, _armR, _handL, _handR, _backBow, _handBow;
+    private Part _head, _body, _legL, _legR, _armL, _armR, _handL, _handR, _backBow, _handBow, _limbTop, _limbBottom;
     private Node3D? _scene;
     private Node3D? _arrow;
     private MeshInstance3D? _stringTop, _stringBottom;
@@ -108,6 +108,8 @@ public partial class CharacterModel : Node3D
         _handR = new Part(Find(scene, "HandR"));
         _backBow = new Part(Find(scene, "BackBow"));
         _handBow = new Part(Find(scene, "HandBow"));
+        _limbTop = new Part(Find(scene, "HandBowLimbTop"));
+        _limbBottom = new Part(Find(scene, "HandBowLimbBottom"));
         _scene = scene;
         BuildHandBow(Find(scene, "NockArrow"));
     }
@@ -342,30 +344,26 @@ public partial class CharacterModel : Node3D
         float breathe = MathF.Sin(_time * 2.4f) * 0.012f * (1f - _walkAmount);
         float airLegs = grounded ? 0f : 0.35f;
 
-        // Squash and stretch scale the whole rig from the feet, keeping its volume about the same.
+        // Squash and stretch scale the body and head only (keeping their volume about the same);
+        // arms and legs are never scaled, the arms only ride up and down on the shoulders.
         float aim = ArcheryPose.Eased(archery.Weight);
         float s = _squash * _squash + 0.25f * ArcheryPose.FullDrawSquash(archery) * aim;
         float up = 1f - 0.28f * s + 0.12f * _stretch + breathe;
         float wide = 1f + 0.18f * s - 0.05f * _stretch;
         float fall = Mathf.SmoothStep(0f, 1f, _tipOver);
         var lie = Basis.FromEuler(new Vector3(fall * Mathf.Pi * 0.5f, 0f, 0f));
-        _rig.Transform = new Transform3D(lie * Basis.FromScale(new Vector3(wide, up, wide)), new Vector3(0f, bob, 0f));
+        _rig.Transform = new Transform3D(lie, new Vector3(0f, bob, 0f));
 
         _legL.Pose(new Vector3(swing + airLegs * 0.6f, 0f, 0f));
         _legR.Pose(new Vector3(-swing - airLegs * 0.4f, 0f, 0f));
         float armsUp = grounded ? 0f : 0.9f;
-        // Drawing: the upper body turns side-on (left shoulder toward the aim) and both turn and
-        // pitch with the aim; the legs keep walking.
-        _body.Pose(new Vector3(-0.08f * _walkAmount + aim * aimPitch * 0.3f,
-            MathF.Sin(_walkPhase) * 0.08f * _walkAmount * (1f - aim) + aim * (aimYaw * 0.5f - 0.25f), 0f));
-        // The head also tilts away from the hold point's side, making room for the string hand at the cheek.
-        _head.Pose(new Vector3(0.05f * _walkAmount - 0.06f * s + aim * aimPitch * 0.7f, aim * aimYaw,
-            MathF.Sin(_walkPhase) * 0.05f * _walkAmount * (1f - aim) + aim * ArcheryPose.HeadRoll));
+        var walkBody = Basis.FromEuler(new Vector3(-0.08f * _walkAmount, MathF.Sin(_walkPhase) * 0.08f * _walkAmount, 0f));
+        var walkHead = Basis.FromEuler(new Vector3(0.05f * _walkAmount - 0.06f * s, 0f, MathF.Sin(_walkPhase) * 0.05f * _walkAmount));
         var backRotation = new Vector3(-0.08f * _walkAmount, MathF.Sin(_walkPhase) * 0.08f * _walkAmount, 0f);
         var backOffset = new Vector3(0f, bob * 0.3f, 0f) + _bowPush;
         _backBow.Pose(backRotation, backOffset);
-        PoseArchery(archery, aimYaw, aimPitch, new Vector3(-swing * 0.9f, 0f, -armsUp), new Vector3(swing * 0.9f, 0f, armsUp),
-            backRotation, backOffset);
+        PoseArchery(archery, aimYaw, aimPitch, walkBody, walkHead, new Vector3(-swing * 0.9f, 0f, -armsUp),
+            new Vector3(swing * 0.9f, 0f, armsUp), new Vector3(wide, up, wide), backRotation, backOffset);
 
         if (MathF.Abs(flash - _shownFlash) > 0.01f)
         {
@@ -375,46 +373,66 @@ public partial class CharacterModel : Node3D
         }
     }
 
+    private static Vector3 G(System.Numerics.Vector3 v) => new(v.X, v.Y, v.Z);
+
+    private static Quaternion G(System.Numerics.Quaternion q) => new(q.X, q.Y, q.Z, q.W);
+
     /// <summary>
-    /// The arms, hands and the bow: walking arms and the bow on the back blended by the archery
-    /// weight into the archery pose, computed in the model frame (feet, facing) so the bow's grip
-    /// lands exactly on <see cref="ArcheryPose.HoldLocal"/> whatever the rig's squash.
+    /// The body, head, arms, hands and the bow: walking (the bow on the back) blended by the
+    /// archery weight into <see cref="ArcheryPose.Solve"/>'s pose, in the model frame (feet,
+    /// facing). The body turns and leans about the hips, carrying the neck and the shoulders;
+    /// the arms only turn at the shoulders, so the hands stay at their ends: on the bow's grip at
+    /// the hold point and on the string in the full pose. Only the body and head are squashed.
     /// </summary>
-    private void PoseArchery(in ArcheryState archery, float aimYaw, float aimPitch, Vector3 armLWalk, Vector3 armRWalk,
-        Vector3 backRotation, Vector3 backOffset)
+    private void PoseArchery(in ArcheryState archery, float aimYaw, float aimPitch, Basis walkBody, Basis walkHead,
+        Vector3 armLWalk, Vector3 armRWalk, Vector3 squash, Vector3 backRotation, Vector3 backOffset)
     {
         float weight = Math.Clamp(archery.Weight, 0f, 1f);
         float w = ArcheryPose.Eased(weight);
         bool inHand = ArcheryPose.BowInHand(archery) && _handBow.Node != null;
         var fromParts = _rig.Transform * (_scene?.Transform ?? Transform3D.Identity); // parts' parent -> model
         var toParts = fromParts.AffineInverse();
+        var frame = ArcheryPose.Solve(archery, aimYaw, aimPitch);
+        Quaternion ToPartsRotation(Quaternion model) => (toParts.Basis * new Basis(model) * fromParts.Basis).GetRotationQuaternion();
 
-        // The bow: from its place on the back (swaying like BackBow) to the hold point, aimed.
+        // The body about the hips, the head on its neck.
+        var pivot = G(ArcheryPose.BodyPivot);
+        var body = walkBody.GetRotationQuaternion().Slerp(ToPartsRotation(G(frame.Body)), w);
+        if (_body.Node != null)
+            _body.Node.Transform = new Transform3D(new Basis(body) * Basis.FromScale(squash) * _body.Rest.Basis, _body.Rest.Origin);
+        Vector3 OnBody(System.Numerics.Vector3 rest) => pivot + new Basis(body) * ((G(rest) - pivot) * new Vector3(1f, squash.Y, 1f));
+        if (_head.Node != null)
+        {
+            var head = walkHead.GetRotationQuaternion().Slerp(ToPartsRotation(G(frame.Head)), w);
+            _head.Node.Transform = new Transform3D(new Basis(head) * Basis.FromScale(squash) * _head.Rest.Basis, OnBody(ArcheryPose.NeckRest));
+        }
+
+        // The bow: from its place on the back (swaying like BackBow) to the hold point, along the arrow.
         var back = new Transform3D(Basis.FromEuler(backRotation) * _handBow.Rest.Basis, _handBow.Rest.Origin + backOffset);
-        var forwardLocal = ArcheryPose.BowForward(ArcheryPose.AimLocal(aimYaw, aimPitch));
-        var z = -new Vector3(forwardLocal.X, forwardLocal.Y, forwardLocal.Z);
-        var x = Vector3.Up.Cross(z).Normalized();
-        var holdBasis = new Basis(x, z.Cross(x), z) * new Basis(Vector3.Back, ArcheryPose.HoldSide * BowCant);
         var backModel = fromParts * back.Origin;
         var gripLocal = ArcheryPose.BowGrip(weight, new System.Numerics.Vector3(backModel.X, backModel.Y, backModel.Z));
-        var grip = new Vector3(gripLocal.X, gripLocal.Y, gripLocal.Z);
-        var backRotationParts = back.Basis.GetRotationQuaternion();
-        var holdRotationParts = (toParts.Basis * holdBasis).Orthonormalized().GetRotationQuaternion();
-        var bowRotation = backRotationParts.Slerp(holdRotationParts, w);
-        float pull = ArcheryPose.StringPull(archery);
+        var bowRotation = back.Basis.GetRotationQuaternion().Slerp(ToPartsRotation(G(frame.Bow)), w);
+        float bowScale = Mathf.Lerp(1f / HandBowScale, 1f, w);
         if (_handBow.Node != null)
         {
             _handBow.Node.Visible = inHand;
             if (inHand)
-                _handBow.Node.Transform = new Transform3D(new Basis(bowRotation), toParts * grip);
+                _handBow.Node.Transform = new Transform3D(new Basis(bowRotation).Scaled(Vector3.One * bowScale), toParts * G(gripLocal));
         }
         if (_backBow.Node != null)
             _backBow.Node.Visible = !inHand;
         if (inHand)
         {
-            var nock = new Vector3(0f, 0f, ArcheryPose.StringRest + pull);
-            PlaceString(_stringTop, new Vector3(0f, ArcheryPose.TipHalfSpan, ArcheryPose.StringRest), nock);
-            PlaceString(_stringBottom, new Vector3(0f, -ArcheryPose.TipHalfSpan, ArcheryPose.StringRest), nock);
+            // The limbs bend back about the grip with the draw; the string runs from their tips to the nock.
+            var top = new Basis(Vector3.Right, frame.Flex);
+            var bottom = new Basis(Vector3.Right, -frame.Flex);
+            if (_limbTop.Node != null)
+                _limbTop.Node.Transform = new Transform3D(top * _limbTop.Rest.Basis, _limbTop.Rest.Origin);
+            if (_limbBottom.Node != null)
+                _limbBottom.Node.Transform = new Transform3D(bottom * _limbBottom.Rest.Basis, _limbBottom.Rest.Origin);
+            var nock = new Vector3(0f, 0f, ArcheryPose.StringRest + frame.Pull);
+            PlaceString(_stringTop, top * new Vector3(0f, ArcheryPose.TipHalfSpan, ArcheryPose.StringRest), nock);
+            PlaceString(_stringBottom, bottom * new Vector3(0f, -ArcheryPose.TipHalfSpan, ArcheryPose.StringRest), nock);
             if (_arrow != null)
             {
                 _arrow.Visible = ArcheryPose.ArrowVisible(archery);
@@ -422,40 +440,26 @@ public partial class CharacterModel : Node3D
             }
         }
 
-        // The left hand holds the grip; the right hand is on the string (or following through).
-        var rightLocal = ArcheryPose.RightHand(archery, gripLocal, forwardLocal);
-        PoseArm(_armL, _handL, armLWalk, toParts * grip, w);
-        PoseArm(_armR, _handR, armRWalk, toParts * new Vector3(rightLocal.X, rightLocal.Y, rightLocal.Z), w);
+        // The arms turn at the shoulders (which ride on the body) toward the grip and the string.
+        PoseArm(_armL, _handL, OnBody(ArcheryPose.ShoulderLRest), Basis.FromEuler(armLWalk).GetRotationQuaternion(),
+            ToPartsRotation(G(frame.ArmL)), w);
+        PoseArm(_armR, _handR, OnBody(new System.Numerics.Vector3(-ArcheryPose.ShoulderLRest.X, ArcheryPose.ShoulderLRest.Y, ArcheryPose.ShoulderLRest.Z)),
+            Basis.FromEuler(armRWalk).GetRotationQuaternion(), ToPartsRotation(G(frame.ArmR)), w);
     }
 
     /// <summary>
-    /// An arm from its walking rotation toward reaching <paramref name="target"/> (parts' parent
-    /// frame) with its hand: turned toward it and stretched to reach it (a rubbery chibi arm),
-    /// by <paramref name="w"/>. The hand stays round at the arm's end.
+    /// An arm at <paramref name="shoulder"/> (parts' frame), turned from its walking rotation
+    /// toward the pose's by <paramref name="w"/>; never scaled: the hand stays at its end.
     /// </summary>
-    private static void PoseArm(Part arm, Part hand, Vector3 walkRotation, Vector3 target, float w)
+    private static void PoseArm(Part arm, Part hand, Vector3 shoulder, Quaternion walk, Quaternion pose, float w)
     {
         if (arm.Node == null)
             return;
-        var reach = hand.Node != null ? hand.Rest.Origin - arm.Rest.Origin : new Vector3(0f, -0.22f, 0f);
-        var rotation = Basis.FromEuler(walkRotation).GetRotationQuaternion();
-        float stretch = 1f;
-        var toTarget = target - arm.Rest.Origin;
-        if (w > 0f && toTarget.LengthSquared() > 1e-6f)
-        {
-            var reachRotation = new Quaternion(reach.Normalized(), toTarget.Normalized());
-            rotation = rotation.Slerp(reachRotation, w);
-            stretch = Mathf.Lerp(1f, toTarget.Length() / reach.Length(), w);
-        }
-        // Scale by `stretch` along the arm's rest axis only.
-        var a = reach.Normalized();
-        float k = stretch - 1f;
-        var along = new Basis(new Vector3(1f, 0f, 0f) + a * (k * a.X), new Vector3(0f, 1f, 0f) + a * (k * a.Y),
-            new Vector3(0f, 0f, 1f) + a * (k * a.Z));
-        var basis = new Basis(rotation);
-        arm.Node.Transform = new Transform3D(basis * along * arm.Rest.Basis, arm.Rest.Origin);
+        var rotation = walk.Slerp(pose, w);
+        var reach = hand.Node != null ? hand.Rest.Origin - arm.Rest.Origin : new Vector3(0f, -ArcheryPose.ArmLength, 0f);
+        arm.Node.Transform = new Transform3D(new Basis(rotation) * arm.Rest.Basis, shoulder);
         if (hand.Node != null)
-            hand.Node.Transform = new Transform3D(hand.Rest.Basis, arm.Rest.Origin + basis * (reach * stretch));
+            hand.Node.Transform = new Transform3D(hand.Rest.Basis, shoulder + new Basis(rotation) * reach);
     }
 
     /// <summary>A straight piece of the string from <paramref name="from"/> to <paramref name="to"/> in the bow's frame.</summary>

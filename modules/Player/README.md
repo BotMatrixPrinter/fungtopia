@@ -8,8 +8,8 @@ wardrobe or Abby's shop is open, takes damage from monsters and stays down
 after defeat until it is teleported (to the clinic the next morning).
 
 - `Contract/` — `Fungtopia.Player.Contract` (namespace `Fungtopia.Player`), see below.
-- `Core/` — `Fungtopia.Player.Core`: `PlayerModule`, the module's one `IModule`; `ArcheryPose`
-  and `ArcheryState` (the archery pose as pure functions, for the view); `CharacterLook`, `Rig`
+- `Core/` — `Fungtopia.Player.Core`: `PlayerModule`, the module's one `IModule`; `ArcheryPose`,
+  `ArcheryState` and `ArcheryPose.Frame` (the archery pose as pure functions, for the view); `CharacterLook`, `Rig`
   and `BuiltinPieces` (what the character looks like from the Wardrobe's `AppearanceState`).
 - `Godot/` — `Main.tscn` with `PlayerView`, which draws the character; `CharacterModel` (the
   model, toon materials and procedural animation); `Preview.tscn` (both characters side by side,
@@ -134,7 +134,7 @@ the built-in colors.
 Settings and helpers: `Character` (the character setting, Girl by default, until `GameStart`
 picks it), `PlaceAt(feet,
 facing)` puts the player on the ground somewhere. The view also reads `CameraYaw`,
-`Visible`, `ShownFacing`, `InvulnerableSeconds`, `DefeatedSeconds`, `Ticks`, `Archery`, `AimDirection` and `HasAim` (the
+`Visible`, `ShownFacing`, `InvulnerableSeconds`, `DefeatedSeconds`, `Ticks`, `Archery`, `BowTarget`, `AimDirection` and `HasAim` (the
 latest input's aim). No allocations per tick.
 
 ## View
@@ -164,26 +164,37 @@ invulnerable, and tipping over on its back when defeated.
 
 **Archery** (the Bow module draws only the arrows in flight; the character holds and draws the
 bow). `ArcheryPose` (Core, pure functions, positions in the model frame: X right, Y up, -Z the
-facing) says what `CharacterModel` draws:
+facing) says what `CharacterModel` draws; `ArcheryPose.Solve` gives the whole pose (`Frame`):
 
 - Idle and walking (`Weight` 0): the bow stays slung on the back (`BackBow`).
 - As soon as `Draw` > 0 the pose blends in over 0.15 s (`Weight`, eased): `BackBow` is hidden and
-  `HandBow` (the same bow) swings from the back over the left shoulder into the left hand, its
-  grip and the left hand exactly at `BowGeometry`'s hold point (`HoldLocal`, where the Bow
-  module's arrows start). The right hand is on the string, pulled back `Draw` ×
-  `BowGeometry.FullDrawPull` behind its rest, with the nocked arrow (`NockArrow`, a poison
-  mushroom tip) on it. Everything follows the side of the head the hold point is on, wherever
-  `BowGeometry` puts it (`HoldSide`: 1 for `HoldRight` ≥ 0, -1 left of the head): the bow points
-  along the aim turned `BowSkew` (0.35 rad) away from that side (to the left for a hold point on
-  the right) and leans (`BowCant`) the same way, so the string hand comes back outward beside the
-  big head, which tilts the other way (`HeadRoll`, `HeadTilt` 0.45 rad). The upper body and
-  head turn and pitch toward `AimDirection` (`AimAngles`: yaw within ±0.7 rad of the facing,
-  pitch within -0.6..0.7 rad); the feet keep the facing logic and the legs keep walking. The arms
-  stretch (rubbery chibi arms) to reach. A slight squash pulses as the draw reaches full.
+  `HandBow` (the same bow, 1.3 times bigger; it grows as it comes) swings from the back over the
+  left shoulder into the left hand, its grip and the left hand at `BowGeometry`'s hold point
+  (`HoldLocal`, where the Bow module's arrows start).
+- The arrow points from the hold point at `BowState.Target` (`ArrowAim`; along the input's aim
+  when there is no target or it is within a meter), yaw within ±0.7 rad of the facing, pitch
+  within -0.2..0.7 rad (steeper down, the nock would come up past the right shoulder). The bow
+  stands upright along it (`BowTurn`: limbs up, the string toward the character), its top tilted
+  `BowCant` (0.15 rad) away from the head. The right hand pinches the string at the nock with the
+  arrow (`NockArrow`, a poison mushroom tip), pulled back `Draw` × `BowGeometry.FullDrawPull`
+  behind the string's rest (`StringRest`); the string bends into a V and each limb
+  (`HandBowLimbTop` / `Bottom`) bends back about the grip by up to `MaxLimbFlex` (0.1 rad).
+- The arms are never scaled or stretched: they keep `ArmLength` (0.42 m) and only turn at the
+  shoulders (`ReachArm`), the hands at their ends. The body turns side-on, left shoulder toward
+  the target (near `SideOn` to the right of the aim, less at the start of a draw), and leans about
+  the hips (`BodyTurn`) just enough that the shoulders put both hands where they belong: a small
+  damped least-squares solve (bow hand first; within 2 cm of the grip, 3 cm of the nock), started
+  from a half draw's pose so the pose moves smoothly. The legs keep walking and the feet keep the
+  facing logic. The head rides on the neck, looks along the arrow, and tilts on it to stay over the
+  feet (`HeadMiddle`), clear of the bow and the string hand. Since the hold point is 0.45 m left
+  of the head, the string comes back beside the head's left cheek. A slight squash pulses as the
+  draw reaches full (body and head only; squash and stretch never scale arms or legs).
 - On release (`Draw` back to 0): the arrow is gone, the string snaps forward with a little
-  overshoot, the right hand follows through back and outward (away from the head); after 0.6 s without drawing the bow
-  swings back onto the back (0.15 s). Drawing again meanwhile keeps the bow in hand.
-- `PlayerView` blends `Weight` between ticks, so the pose glides at any frame rate.
+  overshoot and the limbs straighten, the body holds the drawn pose and the right arm swings back
+  off the string (`StringHandTarget`); after 0.6 s without drawing the bow swings back onto the
+  back (0.15 s). Drawing again meanwhile keeps the bow in hand.
+- `PlayerView` blends `Weight` between ticks, so the pose glides at any frame rate, and reads
+  `BowTarget` (the latest `BowState.Target`) from the Core.
 
 ## Models
 
@@ -197,13 +208,16 @@ hair as separate child objects of their part, at its pivot, for the game to hide
 ribbon). The Wardrobe's clothes are sized for it (its `kit.py`). Chibi kids from
 the drawing: a big round head with large dark oval eyes with sparkles, rosy cheeks, a small
 smile and hair; a simple rounded body; short arms with little round hands; stubby legs with round
-shoes; a wooden bow slung on the back with mushroom-red tips, and for shooting the same bow
-without its string (the game draws the string) and a nocked poison mushroom-tipped arrow. The Girl has a ribbon bow on her
+shoes; arms that hang to the hips (0.42 m, shoulder to hand); a wooden bow slung on the back with
+mushroom-red tips, and for shooting the same bow 1.3 times bigger, without its string (the game
+draws the string), its two limbs separate children for bending, and a nocked poison
+mushroom-tipped arrow (0.78 m). The Girl has a ribbon bow on her
 head, pigtail puffs and a pink triangle dress with white spots; the Boy a red bow tie, a
 rounded blue shirt and trousers. Separate objects with pivots where they move: `Body`, `Head`
 (neck), `LegL`/`LegR` (hip), `ArmL`/`ArmR` (shoulder), `HandL`/`HandR` (hand center; the
 game keeps them at the arms' ends), `BackBow`, `HandBow` (grip; it rests exactly where `BackBow`
-is, its own frame being the held bow's: tips up and down, arc bulging forward) and `NockArrow`
+is, its own frame being the held bow's: tips up and down, arc bulging forward; children
+`HandBowLimbTop` / `HandBowLimbBottom` at the same pivot) and `NockArrow`
 (nock; at rest it hides upright inside the body, its own frame points forward). Feet at the
 origin, facing -Z in Godot.
 
@@ -212,6 +226,9 @@ origin, facing -Z in Godot.
 `./screenshot.sh modules/Player/Godot/Preview.tscn` shows both characters; the environment
 variable `PLAYER_PREVIEW` picks the pose: `front` (default), `back`, `walk`, `jump`, `hit`,
 `draw` (full draw), `drawback` (full draw from behind, like the game camera), `release` (just
-after a shot) or `swing` (the bow on its way back); `PLAYER_PREVIEW_CHARACTER=girl` or `boy`
+after a shot), `swing` (the bow on its way back), or `aim`, `side` and `facing`: a held draw
+(`PLAYER_PREVIEW_DRAW`, 0..1, default 1) at a level aim from the Camera module's aim camera (0.9 m
+left of and 0.25 m above the head, 2.75 m back, 62 degrees), from the left side and from the front
+(`PLAYER_PREVIEW_WALK=1` walks meanwhile); `PLAYER_PREVIEW_CHARACTER=girl` or `boy`
 shows only that character, larger; `PLAYER_PREVIEW_LOOKS=1` shows four characters dressed from
 different Wardrobe looks (skin, hair style and color, eyes, clothes) in the chosen pose.

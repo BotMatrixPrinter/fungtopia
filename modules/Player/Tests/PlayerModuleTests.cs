@@ -1316,23 +1316,178 @@ public class PlayerModuleTests
         Assert.True(ArcheryPose.Eased(0.1f) < 0.1f);
     }
 
-    [Fact]
-    public void TheStringIsPulledBackByTheDrawWithTheRightHandAndArrowOnIt()
+    /// <summary>The pose's states to check: a quick tap, half and full draws, just after a shot and following through.</summary>
+    private static ArcheryState[] PoseStates()
     {
-        var s = DrawFor(ArcheryState.Relaxed, 0.3);
-        Assert.Equal(0.5f, s.Draw, 3);
-        Assert.Equal(0.5f * BowGeometry.FullDrawPull, ArcheryPose.StringPull(s), 4);
-        var aim = ArcheryPose.BowForward(ArcheryPose.AimLocal(0.2f, 0.1f));
-        var grip = ArcheryPose.HoldLocal;
-        var hand = ArcheryPose.RightHand(s, grip, aim);
-        AssertNear(ArcheryPose.Nock(grip, aim, ArcheryPose.StringPull(s)), hand);
-        // Straight behind the bow along its forward, the string's rest plus the pull.
-        AssertNear(grip - aim * (ArcheryPose.StringRest + 0.5f * BowGeometry.FullDrawPull), hand);
+        var full = DrawFor(ArcheryState.Relaxed, 1.0);
+        var shot = ArcheryPose.Advance(full, 0f, Dt);
+        return new[]
+        {
+            DrawFor(ArcheryState.Relaxed, 0.05), DrawFor(ArcheryState.Relaxed, 0.3), full,
+            shot, Pose(shot, 0f, 0.05), Pose(shot, 0f, 0.2), Pose(shot, 0f, 0.5),
+        };
+    }
 
-        s = DrawFor(ArcheryState.Relaxed, 1.0);
-        Assert.Equal(1f, s.Draw);
-        AssertNear(grip - aim * (ArcheryPose.StringRest + BowGeometry.FullDrawPull), ArcheryPose.RightHand(s, grip, aim));
-        Assert.True(ArcheryPose.ArrowVisible(s));
+    private static readonly float[] s_pitches = { ArcheryPose.MinAimPitch, 0f, 0.35f, ArcheryPose.MaxAimPitch };
+
+    [Fact]
+    public void AtALevelAimTheHeldBowStandsUprightTiltedALittleAwayFromTheHead()
+    {
+        var f = ArcheryPose.Solve(DrawFor(ArcheryState.Relaxed, 0.3), 0f, 0f);
+        var up = Vector3.Transform(Vector3.UnitY, f.Bow);
+        float tilt = MathF.Acos(Math.Clamp(up.Y, -1f, 1f));
+        Assert.True(tilt > 0.05f && tilt < 0.25f, $"bow up {up}, {tilt} rad off world up");
+        // The top leans out, away from the head (which is on the other side of the hold point).
+        Assert.True(ArcheryPose.HoldSide * up.X > 0f, $"bow up {up}");
+        // The bow's -Z (its arc's bulge) points along the arrow, its string (+Z) toward the character.
+        AssertNear(f.Forward, Vector3.Transform(-Vector3.UnitZ, f.Bow), 1e-3f);
+        AssertNear(-Vector3.UnitZ, f.Forward);
+        // Aiming up the limbs stay square to the arrow, still about upright.
+        var high = ArcheryPose.Solve(DrawFor(ArcheryState.Relaxed, 0.3), 0f, 0.5f);
+        Assert.Equal(0f, Vector3.Dot(Vector3.Transform(Vector3.UnitY, high.Bow), high.Forward), 3);
+        Assert.True(Vector3.Transform(Vector3.UnitY, high.Bow).Y > 0.8f);
+    }
+
+    [Fact]
+    public void TheBowHandIsOnTheGripAtTheHoldPointWhateverTheAimAndDraw()
+    {
+        foreach (float pitch in s_pitches)
+            foreach (float yaw in new[] { -0.3f, 0f, 0.3f })
+                foreach (var s in PoseStates())
+                {
+                    var f = ArcheryPose.Solve(s, yaw, pitch);
+                    Assert.Equal(ArcheryPose.HoldLocal, f.Grip);
+                    Assert.True(Vector3.Distance(f.HandL, ArcheryPose.HoldLocal) < 0.02f,
+                        $"pitch {pitch} yaw {yaw} draw {s.Draw}: left hand {f.HandL}, hold {ArcheryPose.HoldLocal}");
+                }
+    }
+
+    [Fact]
+    public void TheArrowPointsFromTheHoldPointAtTheBowsTarget()
+    {
+        var feet = new Vector3(3f, 0.4f, -7f);
+        const float facing = 0.6f;
+        var forward = new Vector3(-MathF.Sin(facing), 0f, -MathF.Cos(facing));
+        var target = BowGeometry.HoldPoint(feet, facing) + forward * 12f + new Vector3(0f, 2f, 0f) + new Vector3(forward.Z, 0f, -forward.X) * 1.5f;
+        var (yaw, pitch) = ArcheryPose.ArrowAim(feet, facing, target, -Vector3.UnitZ, true);
+        var f = ArcheryPose.Solve(DrawFor(ArcheryState.Relaxed, 0.5), yaw, pitch);
+        var arrowWorld = ArcheryPose.ToWorld(Vector3.Zero, facing, f.Forward);
+        AssertNear(Vector3.Normalize(target - BowGeometry.HoldPoint(feet, facing)), arrowWorld, 1e-3f);
+        // The nock is straight behind the grip along the arrow.
+        AssertNear(f.Grip - f.Forward * (ArcheryPose.StringRest + f.Pull), f.Nock);
+        // Without a target (zero) it is the input's aim.
+        var aim = Vector3.Normalize(forward + Vector3.UnitY * 0.2f);
+        Assert.Equal(ArcheryPose.AimAngles(aim, true, facing), ArcheryPose.ArrowAim(feet, facing, Vector3.Zero, aim, true));
+    }
+
+    [Theory]
+    [InlineData(0f)]
+    [InlineData(0.35f)]
+    [InlineData(ArcheryPose.MaxAimPitch)]
+    [InlineData(ArcheryPose.MinAimPitch)]
+    public void TheStringHandPullsTheNockBackFurtherAsTheDrawGrows(float pitch)
+    {
+        float previous = float.MinValue;
+        for (int i = 1; i <= 36; i++)
+        {
+            var s = ArcheryPose.Advance(DrawFor(ArcheryState.Relaxed, (i - 1) * Step), Math.Min(1f, i * Dt / 0.6f), Dt);
+            var f = ArcheryPose.Solve(s, 0f, pitch);
+            Assert.Equal(s.Draw * BowGeometry.FullDrawPull, f.Pull, 4);
+            Assert.True(Vector3.Distance(f.HandR, f.Nock) < 0.03f, $"draw {s.Draw}: right hand {f.HandR}, nock {f.Nock}");
+            float back = Vector3.Dot(f.HandR - f.Grip, -f.Forward);
+            Assert.True(back > previous, $"draw {s.Draw}: {back} after {previous}");
+            previous = back;
+            // The string bends into a V at the nock and the limbs flex with the draw.
+            Assert.Equal(ArcheryPose.MaxLimbFlex * s.Draw, f.Flex, 4);
+        }
+        Assert.True(previous > ArcheryPose.StringRest + 0.8f * BowGeometry.FullDrawPull, $"full draw {previous}");
+    }
+
+    [Fact]
+    public void ArmsKeepTheirLengthAndOnlyTurnAtTheShoulders()
+    {
+        foreach (float pitch in s_pitches)
+            foreach (var s in PoseStates())
+            {
+                var f = ArcheryPose.Solve(s, 0.2f, pitch);
+                foreach (var (shoulder, turn, hand, side) in new[] { (f.ShoulderL, f.ArmL, f.HandL, -1f), (f.ShoulderR, f.ArmR, f.HandR, 1f) })
+                {
+                    Assert.Equal(1f, turn.Length(), 4); // a pure rotation, no scale
+                    Assert.Equal(ArcheryPose.ArmLength, Vector3.Distance(shoulder, hand), 4);
+                    AssertNear(shoulder + Vector3.Transform(ArcheryPose.ArmRestDirection(side), turn) * ArcheryPose.ArmLength, hand);
+                    AssertNear(ArcheryPose.Shoulder(f.Body, side), shoulder);
+                }
+                Assert.Equal(1f, f.Body.Length(), 4);
+                Assert.Equal(1f, f.Head.Length(), 4);
+                Assert.Equal(1f, f.Bow.Length(), 4);
+            }
+        // At rest the arms hang down to the hips.
+        var restHand = ArcheryPose.ShoulderLRest + ArcheryPose.ArmLRestDirection * ArcheryPose.ArmLength;
+        Assert.InRange(restHand.Y, 0.2f, 0.35f);
+    }
+
+    [Theory]
+    [InlineData(0f, 0f)]
+    [InlineData(0.3f, 0.35f)]
+    [InlineData(-0.3f, ArcheryPose.MinAimPitch)]
+    public void TheBodyTurnsSideOnWithTheLeftShoulderTowardTheAim(float yaw, float pitch)
+    {
+        var aim = ArcheryPose.AimLocal(yaw, pitch);
+        var flatAim = Vector3.Normalize(new Vector3(aim.X, 0f, aim.Z));
+        foreach (var s in PoseStates())
+        {
+            var f = ArcheryPose.Solve(s, yaw, pitch);
+            var across = f.ShoulderL - f.ShoulderR;
+            var flat = Vector3.Normalize(new Vector3(across.X, 0f, across.Z));
+            // Within about 45 degrees of pointing the left shoulder at the target.
+            Assert.True(Vector3.Dot(flat, flatAim) > 0.7f, $"draw {s.Draw}: shoulders {flat}, aim {flatAim}");
+            // Upright enough: the body leans (back toward the bow) less than about 45 degrees.
+            Assert.True(Vector3.Transform(Vector3.UnitY, f.Body).Y > 0.7f, $"body up {Vector3.Transform(Vector3.UnitY, f.Body)}");
+            // The head looks along the arrow (yaw and most of the pitch).
+            var look = Vector3.Transform(-Vector3.UnitZ, f.Head);
+            Assert.True(Vector3.Dot(look, aim) > 0.95f, $"head looks {look}, aim {aim}");
+        }
+    }
+
+    [Fact]
+    public void TheHeadStaysOnTheNeckClearOfTheBowAndTheStringHand()
+    {
+        foreach (float pitch in s_pitches)
+            foreach (var s in PoseStates())
+            {
+                var f = ArcheryPose.Solve(s, 0f, pitch);
+                AssertNear(ArcheryPose.BodyPivot + Vector3.Transform(ArcheryPose.NeckRest - ArcheryPose.BodyPivot, f.Body), f.Neck);
+                var head = ArcheryPose.HeadCenter(f);
+                Assert.True(Vector3.Distance(head, f.Grip) > ArcheryPose.HeadRadius + 0.1f, $"pitch {pitch}: grip {f.Grip}, head {head}");
+                Assert.True(Vector3.Distance(head, f.HandR) > ArcheryPose.HeadRadius, $"pitch {pitch} draw {s.Draw}: hand {f.HandR}, head {head}");
+                // Seen from the aim camera (left of the head) the bow is out beside it.
+                Assert.True(ArcheryPose.HoldSide * (f.Grip.X - head.X) > 0.35f, $"grip {f.Grip}, head {head}");
+            }
+    }
+
+    [Theory]
+    [InlineData(0.1f)]
+    [InlineData(0f)]
+    [InlineData(0.35f)]
+    [InlineData(ArcheryPose.MaxAimPitch)]
+    [InlineData(ArcheryPose.MinAimPitch)]
+    public void ThePoseMovesSmoothlyThroughADrawAndAShot(float pitch)
+    {
+        var s = ArcheryState.Relaxed;
+        var previous = ArcheryPose.Solve(DrawFor(ArcheryState.Relaxed, Step), 0f, pitch);
+        for (int i = 2; i <= 36 + 40; i++)
+        {
+            s = ArcheryPose.Advance(s, i <= 36 ? Math.Min(1f, i * Dt / 0.6f) : 0f, Dt);
+            var f = ArcheryPose.Solve(s, 0f, pitch);
+            if (i == 37) // the shot: the string snaps, the hand flies off it
+            {
+                previous = f;
+                continue;
+            }
+            Assert.True(Vector3.Distance(f.HandR, previous.HandR) < 0.06f, $"tick {i}: right hand jumps {previous.HandR} -> {f.HandR}");
+            Assert.True(Vector3.Distance(f.ShoulderL, previous.ShoulderL) < 0.04f, $"tick {i}: shoulder jumps {previous.ShoulderL} -> {f.ShoulderL}");
+            previous = f;
+        }
     }
 
     [Fact]
@@ -1371,70 +1526,18 @@ public class PlayerModuleTests
         Assert.True(ArcheryPose.StringPull(Pose(s, 0f, 0.1)) < BowGeometry.FullDrawPull * 0.1f);
         Assert.Equal(0f, ArcheryPose.StringPull(Pose(s, 0f, 0.35)));
 
-        // The right hand follows through, back and outward: away from the head, on the hold point's side.
+        // The right hand flies back off the string.
         var after = Pose(s, 0f, 0.2);
         Assert.Equal(1f, ArcheryPose.FollowThrough(after));
-        var aim = ArcheryPose.BowForward(ArcheryPose.AimLocal(0f, 0f));
-        var grip = ArcheryPose.HoldLocal;
-        var atRelease = ArcheryPose.RightHand(drawn, grip, aim);
-        var followed = ArcheryPose.RightHand(after, grip, aim);
-        Assert.True(Vector3.Dot(followed - atRelease, -aim) > 0.1f); // back
-        Assert.True(Vector3.Dot(followed - atRelease, ArcheryPose.HoldSide * Vector3.Cross(aim, Vector3.UnitY)) > 0.05f); // outward
-        Assert.True(MathF.Abs(followed.X) > MathF.Abs(atRelease.X));
+        var drawnPose = ArcheryPose.Solve(drawn, 0f, 0f);
+        var afterPose = ArcheryPose.Solve(after, 0f, 0f);
+        var aim = drawnPose.Forward;
+        Assert.True(Vector3.Dot(afterPose.HandR - drawnPose.HandR, -aim) > 0.1f, $"{drawnPose.HandR} -> {afterPose.HandR}"); // back
+        // The string is straight again, the limbs unbent.
+        Assert.Equal(0f, afterPose.Pull, 2);
+        Assert.Equal(0f, afterPose.Flex, 2);
     }
 
-    [Fact]
-    public void TheHeldBowPointsALittleOffTheAimAwayFromTheHeadSoTheStringHandIsBesideIt()
-    {
-        // Whichever side of the head BowGeometry's hold point is on.
-        Assert.Equal(BowGeometry.HoldRight < 0f ? -1f : 1f, ArcheryPose.HoldSide);
-        var aim = ArcheryPose.AimLocal(0.1f, 0.3f);
-        var forward = ArcheryPose.BowForward(aim);
-        Assert.Equal(1f, forward.Length(), 4);
-        var (yaw, pitch) = ArcheryPose.AimAngles(forward, true, 0f);
-        // Turned to the left (positive yaw) for a hold point right of the head, to the right for one left of it.
-        Assert.Equal(0.1f + ArcheryPose.HoldSide * ArcheryPose.BowSkew, yaw, 4);
-        Assert.Equal(0.3f, pitch, 4);
-        // The head tilts away from the hold point's side (positive roll is to the left).
-        Assert.Equal(ArcheryPose.HoldSide * ArcheryPose.HeadTilt, ArcheryPose.HeadRoll);
-    }
-
-    [Theory]
-    [InlineData(0f)]
-    [InlineData(0.7f)]
-    [InlineData(0.3f)]
-    [InlineData(-0.3f)]
-    [InlineData(-0.6f)]
-    public void TheStringHandStaysOutsideTheHeadOnTheHoldPointsSide(float aimPitch)
-    {
-        // Aiming along the facing (the feet turn toward the aim while drawing), over the whole pitch range.
-        const float aimYaw = 0f;
-        // The head as characters.py builds it: a 0.4 m ball, its middle 0.368 m above the neck at
-        // 0.72 m, tilted by HeadRoll about the neck (positive to the left).
-        const float neck = 0.72f, headRadius = 0.4f;
-        float roll = ArcheryPose.HeadRoll;
-        var head = new Vector3(-MathF.Sin(roll) * 0.368f, neck + MathF.Cos(roll) * 0.368f, 0f);
-        var grip = ArcheryPose.HoldLocal;
-        var forward = ArcheryPose.BowForward(ArcheryPose.AimLocal(aimYaw, aimPitch));
-        var drawn = DrawFor(ArcheryState.Relaxed, 1.0);
-        var after = Pose(ArcheryPose.Advance(drawn, 0f, Dt), 0f, 0.2);
-        foreach (var hand in new[]
-        {
-            ArcheryPose.RightHand(DrawFor(ArcheryState.Relaxed, 0.3), grip, forward),
-            ArcheryPose.RightHand(drawn, grip, forward),
-            ArcheryPose.RightHand(after, grip, forward),
-        })
-        {
-            // On the hold point's side of the head's middle, further out than the bow hand...
-            Assert.True(ArcheryPose.HoldSide * hand.X > ArcheryPose.HoldSide * grip.X, $"hand {hand}, grip {grip}");
-            // ...behind the bow, and not in the head.
-            Assert.True(Vector3.Dot(hand - grip, forward) < -ArcheryPose.StringRest + 1e-4f, $"hand {hand}");
-            Assert.True(Vector3.Distance(hand, head) > headRadius, $"hand {hand} in the head at {head}");
-        }
-        // The bow hand reaches forward from the body, not into the head either.
-        Assert.True(grip.Z < -0.2f, $"grip {grip}");
-        Assert.True(Vector3.Distance(grip, head) > headRadius, $"grip {grip}");
-    }
 
     [Fact]
     public void AboutSixTenthsOfASecondAfterReleaseTheBowSwingsBackOntoTheBack()

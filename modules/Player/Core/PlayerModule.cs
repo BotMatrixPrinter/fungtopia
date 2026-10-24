@@ -120,6 +120,9 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
     /// <summary>The latest input's aim (<c>PlayerInput.AimDirection</c>), valid when <see cref="HasAim"/>.</summary>
     public Vector3 AimDirection => _input.AimDirection;
 
+    /// <summary>The latest <see cref="BowState.Target"/> (zero before any): where the nocked arrow points (<see cref="ArcheryPose.ArrowAim"/>).</summary>
+    public Vector3 BowTarget { get; private set; }
+
     /// <summary>The latest input's <c>PlayerInput.HasAim</c>.</summary>
     public bool HasAim => _input.HasAim;
 
@@ -212,7 +215,11 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
     public void Handle(in DialogueState message) => _talking = message.Open;
 
     /// <summary>Out of play (behind the start screen) the bow stays on the back: idle only.</summary>
-    public void Handle(in BowState message) => _bowDraw = InPlay ? message.Draw : 0f;
+    public void Handle(in BowState message)
+    {
+        _bowDraw = InPlay ? message.Draw : 0f;
+        BowTarget = message.Target;
+    }
 
     public void Handle(in StartScreenState message)
     {

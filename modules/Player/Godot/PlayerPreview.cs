@@ -10,7 +10,9 @@ namespace Fungtopia.Player.View;
 /// variable PLAYER_PREVIEW picks the pose: "front" (default), "back" (shows the bow on the
 /// back), "walk", "jump", "hit", "draw" (at full draw, aiming a little up), "drawback" (the same
 /// from behind, like the game's camera), "release" (just after a shot) or "swing" (the bow on its
-/// way back onto the back). PLAYER_PREVIEW_CHARACTER ("girl" or "boy") shows only that one, larger.
+/// way back onto the back); "aim", "side" and "facing" hold the draw PLAYER_PREVIEW_DRAW (0..1,
+/// default 1) at a level aim, seen from the Camera module's aim camera, from the character's left
+/// side and from its front (PLAYER_PREVIEW_WALK=1 walks meanwhile). PLAYER_PREVIEW_CHARACTER ("girl" or "boy") shows only that one, larger.
 /// PLAYER_PREVIEW_LOOKS=1 shows four characters dressed from Wardrobe looks instead (<see cref="Dressed"/>),
 /// in the same pose.
 /// </summary>
@@ -29,6 +31,7 @@ public partial class PlayerPreview : Node3D
     private string _pose = "front";
     private float _time;
     private ArcheryState _archery = ArcheryState.Relaxed;
+    private bool _walk;
 
     public override void _Ready()
     {
@@ -86,13 +89,15 @@ public partial class PlayerPreview : Node3D
         for (int i = 0; i < _models.Length; i++)
             _models[i].Apply(looks ? CharacterLook.From(Dressed[i].Look, Dressed[i].Kind) : CharacterLook.Default(_models[i].Kind));
         bool back = _pose == "back";
-        bool archery = _pose is "draw" or "drawback" or "release" or "swing";
+        bool held = _pose is "aim" or "side" or "facing";
+        bool archery = held || _pose is "draw" or "drawback" or "release" or "swing";
+        _walk = OS.GetEnvironment("PLAYER_PREVIEW_WALK") is "1" or "true";
         for (int i = 0; i < _models.Length; i++)
         {
             AddChild(_models[i]);
             float yaw = (back ? 0f : Mathf.Pi) + (i == 0 ? -0.35f : 0.35f) * (back ? -1.5f : 1f);
             if (archery)
-                yaw = _pose == "drawback" ? 0f : -Mathf.Pi * 0.5f - 0.45f; // away from the camera, or to the right
+                yaw = _pose is "drawback" or "aim" or "side" or "facing" ? 0f : -Mathf.Pi * 0.5f - 0.45f; // away from the camera, or to the right
             float x = _models.Length == 1 ? 0f : i == 0 ? -0.75f : 0.75f;
             if (archery && _models.Length > 1)
                 x = i == 0 ? -1.0f : 0.9f;
@@ -107,7 +112,24 @@ public partial class PlayerPreview : Node3D
 
         var camera = new Camera3D { Fov = 40f, Current = true };
         AddChild(camera);
-        if (_pose == "drawback")
+        if (held)
+        {
+            float spread = _models.Length == 1 ? 0f : 0.9f; // two characters: the camera between them
+            var head = new Vector3(spread, Fungtopia.Bow.BowGeometry.HeadUp, 0f);
+            if (_pose == "aim")
+            {
+                // The Camera module's aim camera: 0.9 m left of and 0.25 m above the head, 2.75 m behind, pitched -12 degrees.
+                camera.Fov = 62f;
+                var pivot = head + new Vector3(-0.9f, 0.25f, 0f);
+                float pitch = Mathf.DegToRad(-12f);
+                camera.LookAtFromPosition(pivot + new Vector3(0f, -MathF.Sin(pitch), MathF.Cos(pitch)) * 2.75f, pivot, Vector3.Up);
+            }
+            else if (_pose == "side")
+                camera.LookAtFromPosition(new Vector3(-4.2f, 1.1f, -0.25f), new Vector3(0f, 0.8f, -0.25f), Vector3.Up);
+            else
+                camera.LookAtFromPosition(new Vector3(-0.2f, 1.2f, -4.4f), new Vector3(-0.2f, 0.8f, 0f), Vector3.Up);
+        }
+        else if (_pose == "drawback")
             // Like the game's camera: over the right shoulder, from behind and a little above.
             camera.LookAtFromPosition(new Vector3(0.5f + (_models.Length == 1 ? 0f : 0.9f), 1.9f, 3.4f),
                 new Vector3(0.4f, 1.1f, -1f), Vector3.Up);
@@ -122,8 +144,12 @@ public partial class PlayerPreview : Node3D
         if (archery)
         {
             const float dt = 1f / 60f;
+            float draw = 1f;
+            if (held && float.TryParse(OS.GetEnvironment("PLAYER_PREVIEW_DRAW"), System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out float d))
+                draw = Math.Clamp(d, 0.01f, 1f);
             for (int i = 1; i <= 90; i++)
-                _archery = ArcheryPose.Advance(_archery, Math.Min(1f, i * dt / 0.6f), dt);
+                _archery = ArcheryPose.Advance(_archery, Math.Min(draw, i * dt / 0.6f), dt);
             int after = _pose == "release" ? 6 : _pose == "swing" ? 41 : 0;
             for (int i = 0; i < after; i++)
                 _archery = ArcheryPose.Advance(_archery, 0f, dt);
@@ -149,6 +175,11 @@ public partial class PlayerPreview : Node3D
                 case "release":
                 case "swing":
                     model.Animate(dt, 0f, true, 0f, 0f, true, _archery, 0f, 0.12f);
+                    break;
+                case "aim":
+                case "side":
+                case "facing":
+                    model.Animate(dt, _walk ? 3f : 0f, true, 0f, 0f, true, _archery, 0f, 0f);
                     break;
                 case "hit":
                     model.Animate(dt, 0f, true, 0f, 0.8f, true);

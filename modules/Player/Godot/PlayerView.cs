@@ -110,7 +110,8 @@ public partial class PlayerView : Node3D, IModuleView
         // The pose's blend weight between the ticks, so it glides at any frame rate.
         var archery = _currentArchery;
         archery.Weight = Mathf.Lerp(_previousArchery.Weight, _currentArchery.Weight, alpha);
-        var (aimYaw, aimPitch) = ArcheryPose.AimAngles(_player.AimDirection, _player.HasAim, facing);
+        // The nocked arrow points from the hold point at the Bow module's target (the crosshair's point).
+        var (aimYaw, aimPitch) = ArcheryPose.ArrowAim(_current.Position, _current.Facing, _player.BowTarget, _player.AimDirection, _player.HasAim);
         _model.Animate((float)delta, speed, _current.Grounded, velocity.Y, flash, _current.Alive, archery, aimYaw, aimPitch);
     }
 
