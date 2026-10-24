@@ -10,7 +10,7 @@ publishes the character and pet once when Start is pressed.
 - `Contract/` — `Fungtopia.StartScreen.Contract` (namespace `Fungtopia.StartScreen`), see below.
 - `Core/` — `Fungtopia.StartScreen.Core`: `StartScreenModule`, the module's one `IModule`, and
   the `StartStep`, `LookRow` and `StartButton` enums. It references the Wardrobe Contract
-  (`Fungtopia.Wardrobe`: `Looks`, `Catalog`, `SetLook`, `Equip`).
+  (`Fungtopia.Wardrobe`: `Looks`, `Catalog`, `SetLook`, `Equip`, `PreviewYaw`).
 - `Godot/` — `Main.tscn` with `StartScreenView` (a `CanvasLayer` on layer 50, over the HUD),
   built in code from `MushroomLogo`, `ChoiceCard`, `CapButton`, `LookPanel` and `PreviewStage`;
   `Preview.tscn` (one step, for screenshots); `Shaders/` (toon surface, ink outline, blur).
@@ -34,13 +34,15 @@ It also sends the Wardrobe module's messages (see the Wardrobe README) from the 
 | --- | --- | --- |
 | `Fungtopia.Wardrobe.SetLook` | On the tick the look step is reached from the character step, and on each tick skin tone, hair style, hair color or eye color changes | All four indices (into `Looks.SkinTones`, `HairStyles`, `HairColors`, `EyeColors`). |
 | `Fungtopia.Wardrobe.Equip` | On the same tick the look step is reached, and on each tick the outfit changes | Four messages for the chosen `Catalog.StarterOutfits` entry, in the order Top, Bottom, Shoes, Head: `new Equip(id)`, or `Equip.Unequip(slot)` for a slot it leaves empty. |
+| `Fungtopia.Wardrobe.PreviewYaw` | Every tick the look step is showing (from the tick it is reached; not on the tick it is left) | `Yaw`: how the player turned the character, as the wardrobe sends it: radians in [-π, π), 0 faces the camera, positive turns its front to the screen's right; 0 each time the look step is reached. |
 
-In a tick they come in the order `SetLook`, `Equip`s, `GameStart`, `StartScreenState`; a few
+In a tick they come in the order `SetLook`, `Equip`s, `PreviewYaw`, `GameStart`, `StartScreenState`; a few
 changes in one tick send one `SetLook` (the latest look). On the tick Start is pressed,
 `GameStart` comes first, then `StartScreenState` with `Open` false.
 
-Other modules (Player, Pet) do not read `GameStart` yet, and the Player does not draw the
-Wardrobe's `AppearanceState` yet: until they do, the game runs behind
+Other modules (Player, Pet) do not read `GameStart` yet, the Player does not draw the
+Wardrobe's `AppearanceState` yet, and it turns the character by `PreviewYaw` (and stands still)
+only if its own job makes it do so during the start screen too: until they do, the game runs behind
 the start screen and starts as the Girl with the Cat whatever is chosen.
 
 ## Core
@@ -62,13 +64,20 @@ in order (up to 32 a tick; more are dropped):
 - `Point(option)` (0 or 1) highlights that choice (the mouse is over its card); a click is
   `Point` then `Confirm`.
 
+**Turning** (the same as the wardrobe's): on each tick of the `Look` step `Yaw` turns and is
+published as `PreviewYaw`: `SetTurnButtons(left, right)` (Q / LB, E / RB, held) turn at
+`TurnRadiansPerSecond` (3), else `SetTurnStick(x)` (the right stick) past `StickDeadZone` (0.2)
+up to that speed, plus `Drag(pixels)` (a mouse drag, added up between ticks,
+`DragRadiansPerPixel` 0.01; ignored on other steps, dropped when the step is left). Reaching the
+`Look` step (from `Character` or back from `Pet`) sets `Yaw` to 0.
+
 The Girl and the Cat are highlighted at first; the look starts at index 0 everywhere. Each time
 the `Look` step is reached from `Character`, a character other than last time (or the first time)
 gets `Catalog.DefaultOutfit` (the Mushroom Dress for the Girl, Sunny Stripes for the Boy) and the
 `Skin` row highlighted; the look and outfit are then sent whole. Coming back from `Pet` sends
 nothing. Once started, presses are ignored and
 `GameStart` is never published again. The view also reads `Step`, `Character`, `StarterPet`,
-`Open`, `Row`, `Skin`, `HairStyle`, `HairColor`, `EyeColor`, `Outfit`, `LookValue(row)`,
+`Open`, `Row`, `Yaw`, `Skin`, `HairStyle`, `HairColor`, `EyeColor`, `Outfit`, `LookValue(row)`,
 `LookCount(row)`, `OutfitFits(outfit)`, `Ticks` and `StepTicks` (ticks since the step began). No allocations per tick.
 
 ## View
@@ -78,7 +87,8 @@ nothing. Once started, presses are ignored and
 | Highlight a choice | Hover its card | Left / Right arrows | Left stick or D-pad left / right |
 | Look: pick a row | Click a value in it | Up / Down arrows | Left stick or D-pad up / down |
 | Look: change a value | Click a swatch or pill | Left / Right arrows | Left stick or D-pad left / right |
-| OK, next, "Start!" | Click (a card, "Next", "Start!", anywhere on the title) | Enter or E | A |
+| Look: turn the character | Drag on the left half | Q / E (held) | Right stick, LB / RB (held) |
+| OK, next, "Start!" | Click (a card, "Next", "Start!", anywhere on the title) | Enter, or E (not on the look step, where E turns) | A |
 | Back | The "Back" button | Esc or Backspace | B |
 
 While open, `StartScreenView` takes every input event (so a press there does not also jump or
@@ -92,7 +102,9 @@ character there is the Player module's own, framed by the Camera, and it changes
 applies the messages. `LookPanel` on the right draws the five rows (round swatches for the
 colors, pills for hair styles and outfits; the outfits that do not fit are left out), the
 highlighted row in gold with little arrows, each row's value with a gold ring, and the value under
-the mouse a little bigger; the green "Next" button is below it.
+the mouse a little bigger; the green "Next" button is below it. The left half stays free for
+the character: pressing the mouse there (off the Back button) and dragging turns it, as do Q / E,
+LB / RB and the right stick, polled every frame on the look step only; the hint under it says so.
 
 `PreviewStage` is a `SubViewport` with its own world: a model on a turntable, or Mushroom Town
 seen from a slowly drifting camera (rendered at 480x270 and drawn over the screen through a

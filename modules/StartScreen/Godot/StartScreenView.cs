@@ -9,14 +9,17 @@ namespace Fungtopia.StartScreen.View;
 /// keyboard and gamepad presses to its Core: the "Fungtopia" logo over a soft blurred view of
 /// Mushroom Town, then the Girl and the Boy, then "Make your look" (a panel on the right, the
 /// game's own character seen on the left), then the Mushroom Cat and the Mushroom Dog, then
-/// "Start!". It takes every input event while open (so a press here does not also jump or talk
-/// in the game), keeps the mouse visible, fades out after "Start!" and captures the mouse again.
+/// "Start!". On the look step a mouse drag on the left half, Q / E, LB / RB and the right stick
+/// turn the character (the Core's <c>PreviewYaw</c>), like the wardrobe. It takes every input
+/// event while open (so a press here does not also jump or talk in the game), keeps the mouse
+/// visible, fades out after "Start!" and captures the mouse again.
 /// </summary>
 public partial class StartScreenView : CanvasLayer, IModuleView
 {
     private const float FadeSeconds = 0.6f;
     private const float StickOn = 0.6f;
     private const float StickOff = 0.3f;
+    private const int Pad = 0;
 
     private StartScreenModule? _screen;
     private Control _root = null!;
@@ -38,6 +41,7 @@ public partial class StartScreenView : CanvasLayer, IModuleView
     private int _hovered = -1;
     private int _stick;
     private int _stickY;
+    private bool _dragging;
     private float _closing;
     private float _time;
 
@@ -133,6 +137,20 @@ public partial class StartScreenView : CanvasLayer, IModuleView
         if (step != _shownStep)
             ShowStep(step);
         Layout(step);
+        if (step == StartStep.Look)
+        {
+            // Held turning: Q / LB to the left, E / RB to the right, or the right stick.
+            _screen.SetTurnButtons(
+                GodotInput.IsPhysicalKeyPressed(Key.Q) || GodotInput.IsJoyButtonPressed(Pad, JoyButton.LeftShoulder),
+                GodotInput.IsPhysicalKeyPressed(Key.E) || GodotInput.IsJoyButtonPressed(Pad, JoyButton.RightShoulder));
+            _screen.SetTurnStick(GodotInput.GetJoyAxis(Pad, JoyAxis.RightX));
+        }
+        else
+        {
+            _dragging = false;
+            _screen.SetTurnButtons(false, false);
+            _screen.SetTurnStick(0f);
+        }
 
         // Each new step slides up and fades in over a fifth of a second.
         float appear = Mathf.Clamp((_screen.StepTicks + (float)Engine.GetPhysicsInterpolationFraction()) / 12f, 0f, 1f);
@@ -205,7 +223,7 @@ public partial class StartScreenView : CanvasLayer, IModuleView
         {
             StartStep.Title => "",
             StartStep.Ready => "Enter / E / (A): Start!     Esc / (B): back",
-            StartStep.Look => "Up/Down: row    Left/Right: change    Enter/E/(A): next    Esc/(B): back",
+            StartStep.Look => "Drag / Q E / (LB)(RB) / right stick: turn\nUp/Down: row    Left/Right: change    Enter/(A): next    Esc/(B): back",
             _ => "Arrows / stick / D-pad: choose     Enter / E / (A): OK     Esc / (B): back",
         };
     }
@@ -234,13 +252,13 @@ public partial class StartScreenView : CanvasLayer, IModuleView
         Place(_prompt, new Vector2(view.X * 0.5f, view.Y * 0.72f), new Vector2(1400f, 70f) * u);
         SetFontSize(_prompt, Mathf.RoundToInt(44 * u));
         Place(_hint, new Vector2(view.X * 0.5f, view.Y - 46f * u), new Vector2(1800f, 50f) * u);
+        SetFontSize(_hint, Mathf.RoundToInt(28 * u));
         if (look)
         {
-            // Left of the panel, under the character.
-            Place(_hint, new Vector2((panelX - panel.X * 0.5f) * 0.5f, view.Y - 46f * u), new Vector2(1000f, 50f) * u);
+            // Left of the panel, under the character, on two lines.
+            Place(_hint, new Vector2((panelX - panel.X * 0.5f) * 0.5f, view.Y - 64f * u), new Vector2(1000f, 80f) * u);
             SetFontSize(_hint, Mathf.RoundToInt(23 * u));
         }
-        SetFontSize(_hint, Mathf.RoundToInt(28 * u));
 
         var card = new Vector2(500f, 640f) * u;
         for (int i = 0; i < 2; i++)
@@ -305,8 +323,8 @@ public partial class StartScreenView : CanvasLayer, IModuleView
                     _screen.Press(StartButton.Up);
                 else if (code == Key.Down)
                     _screen.Press(StartButton.Down);
-                else if (code is Key.Enter or Key.KpEnter or Key.E)
-                    _screen.Press(StartButton.Confirm);
+                else if (code is Key.Enter or Key.KpEnter || (code == Key.E && _screen.Step != StartStep.Look))
+                    _screen.Press(StartButton.Confirm); // on the look step E turns the character
                 else if (code is Key.Escape or Key.Backspace)
                     _screen.Press(StartButton.Back);
                 break;
@@ -355,6 +373,8 @@ public partial class StartScreenView : CanvasLayer, IModuleView
                     _stickY = 0;
                 break;
             case InputEventMouseMotion motion:
+                if (_dragging)
+                    _screen.Drag(motion.Relative.X);
                 _look.Hovered = _look.At(motion.Position);
                 int over = CardAt(motion.Position);
                 if (over != _hovered && over >= 0)
@@ -363,6 +383,9 @@ public partial class StartScreenView : CanvasLayer, IModuleView
                 break;
             case InputEventMouseButton { ButtonIndex: MouseButton.Left, Pressed: true } click:
                 Click(click.Position);
+                break;
+            case InputEventMouseButton { ButtonIndex: MouseButton.Left, Pressed: false }:
+                _dragging = false;
                 break;
         }
         GetViewport().SetInputAsHandled();
@@ -381,6 +404,8 @@ public partial class StartScreenView : CanvasLayer, IModuleView
             _screen.Press(StartButton.Confirm);
         else if (step == StartStep.Look && _look.At(at) is (int row and >= 0, int value))
             _screen.Pick((LookRow)row, value);
+        else if (step == StartStep.Look && at.X < _root.Size.X * 0.5f)
+            _dragging = true; // the left half: drag to turn the character
         else if (CardAt(at) is int card and >= 0)
         {
             _screen.Point(card);

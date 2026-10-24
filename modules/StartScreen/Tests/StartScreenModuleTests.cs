@@ -15,6 +15,7 @@ public class StartScreenModuleTests
         public readonly List<StartScreenState> States = new();
         public readonly List<SetLook> SetLooks = new();
         public readonly List<Equip> Equips = new();
+        public readonly List<PreviewYaw> Yaws = new();
         public readonly List<string> Order = new();
         public int OtherMessages;
 
@@ -42,6 +43,11 @@ public class StartScreenModuleTests
                 Equips.Add(equip);
                 Order.Add("Equip");
             }
+            else if (message is PreviewYaw yaw)
+            {
+                Yaws.Add(yaw);
+                Order.Add("PreviewYaw");
+            }
             else
                 OtherMessages++;
         }
@@ -50,6 +56,7 @@ public class StartScreenModuleTests
         {
             SetLooks.Clear();
             Equips.Clear();
+            Yaws.Clear();
             Order.Clear();
         }
     }
@@ -404,7 +411,7 @@ public class StartScreenModuleTests
         AssertLook(Assert.Single(bus.SetLooks), 0, 0, 0, 0);
         Assert.Equal(new[] { ("spotted_dress", Slot.Top), ("", Slot.Bottom), ("mary_janes", Slot.Shoes), ("big_bow", Slot.Head) },
             Equipped(bus));
-        Assert.Equal(new[] { "SetLook", "Equip", "Equip", "Equip", "Equip", "StartScreenState" }, bus.Order);
+        Assert.Equal(new[] { "SetLook", "Equip", "Equip", "Equip", "Equip", "PreviewYaw", "StartScreenState" }, bus.Order);
         Assert.True(bus.States[^1].Open);
     }
 
@@ -430,7 +437,7 @@ public class StartScreenModuleTests
         PressAndTick(screen, StartButton.Right);                      // skin 1
         AssertLook(Assert.Single(bus.SetLooks), 1, 0, 0, 0);
         Assert.Empty(bus.Equips);
-        Assert.Equal(new[] { "SetLook", "StartScreenState" }, bus.Order);
+        Assert.Equal(new[] { "SetLook", "PreviewYaw", "StartScreenState" }, bus.Order);
 
         bus.ClearLookMessages();
         PressAndTick(screen, StartButton.Down, StartButton.Right, StartButton.Right);   // hair style 2
@@ -673,6 +680,9 @@ public class StartScreenModuleTests
                 if (i % 7 == 0)
                     screen.Press(StartButton.Up);
                 screen.Pick(LookRow.Outfit, i % 3);
+                screen.SetTurnButtons(i % 5 == 0, i % 4 == 0);
+                screen.SetTurnStick(i % 2 == 0 ? 0.7f : -0.1f);
+                screen.Drag(i % 9);
                 screen.Tick(new TickContext(i + 1, 1.0 / 60));
             }
         }
@@ -682,6 +692,169 @@ public class StartScreenModuleTests
         Run(100);
         Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
         Assert.True(bus.Count > sentBefore + 100);
+    }
+
+    private const float Step = 1f / 60;
+
+    [Fact]
+    public void TheLookStepPublishesPreviewYawEveryTickStartingFacingTheCamera()
+    {
+        var bus = new FakeBus();
+        var screen = Started(bus);
+        PressAndTick(screen, StartButton.Confirm);
+        Tick(screen);
+        Assert.Empty(bus.Yaws);                                       // not on the title or the character step
+
+        PressAndTick(screen, StartButton.Confirm);                    // the look step
+        Assert.Equal(0f, Assert.Single(bus.Yaws).Yaw);
+        for (int i = 0; i < 9; i++)
+            Tick(screen);
+        Assert.Equal(10, bus.Yaws.Count);
+        Assert.All(bus.Yaws, y => Assert.Equal(0f, y.Yaw));
+        Assert.Equal(0f, screen.Yaw);
+
+        bus.ClearLookMessages();
+        PressAndTick(screen, StartButton.Confirm);                    // on to the pet: no more
+        Tick(screen);
+        Assert.Empty(bus.Yaws);
+    }
+
+    [Fact]
+    public void TurnSettingsMatchTheWardrobe()
+    {
+        Assert.Equal(3f, StartScreenModule.TurnRadiansPerSecond);
+        Assert.Equal(0.01f, StartScreenModule.DragRadiansPerPixel);
+        Assert.Equal(0.2f, StartScreenModule.StickDeadZone);
+    }
+
+    [Fact]
+    public void HeldTurnButtonsTurnLeftAndRightAtTheTurnSpeed()
+    {
+        var bus = new FakeBus();
+        var screen = OnLookStep(bus);
+        screen.SetTurnButtons(false, true);                          // E / RB
+        for (int i = 0; i < 30; i++)
+            Tick(screen);
+        Assert.Equal(30 * Step * StartScreenModule.TurnRadiansPerSecond, screen.Yaw, 4);
+        Assert.Equal(screen.Yaw, bus.Yaws[^1].Yaw);
+        Assert.True(bus.Yaws[0].Yaw > 0f && bus.Yaws[0].Yaw < bus.Yaws[^1].Yaw);
+
+        screen.SetTurnButtons(true, false);                          // Q / LB
+        for (int i = 0; i < 60; i++)
+            Tick(screen);
+        Assert.Equal(-30 * Step * StartScreenModule.TurnRadiansPerSecond, screen.Yaw, 4);
+
+        screen.SetTurnButtons(true, true);                           // both: they cancel
+        Tick(screen);
+        Assert.Equal(-30 * Step * StartScreenModule.TurnRadiansPerSecond, screen.Yaw, 4);
+        screen.SetTurnButtons(false, false);
+        Tick(screen);
+        Assert.Equal(-30 * Step * StartScreenModule.TurnRadiansPerSecond, screen.Yaw, 4);
+    }
+
+    [Fact]
+    public void TheRightStickTurnsPastItsDeadZoneAndTheButtonsWin()
+    {
+        var bus = new FakeBus();
+        var screen = OnLookStep(bus);
+        screen.SetTurnStick(0.15f);                                  // inside the dead zone
+        Tick(screen);
+        Assert.Equal(0f, screen.Yaw);
+
+        screen.SetTurnStick(1f);
+        Tick(screen);
+        Assert.Equal(Step * StartScreenModule.TurnRadiansPerSecond, screen.Yaw, 5);
+
+        screen.SetTurnStick(-0.6f);                                  // half way from the dead zone to full
+        Tick(screen);
+        Assert.Equal(0.5f * Step * StartScreenModule.TurnRadiansPerSecond, screen.Yaw, 5);
+
+        screen.SetTurnStick(-5f);                                    // clamped to full
+        Tick(screen);
+        Assert.Equal(-0.5f * Step * StartScreenModule.TurnRadiansPerSecond, screen.Yaw, 5);
+
+        screen.SetTurnStick(float.NaN);
+        Tick(screen);
+        Assert.Equal(-0.5f * Step * StartScreenModule.TurnRadiansPerSecond, screen.Yaw, 5);
+
+        screen.SetTurnStick(-1f);
+        screen.SetTurnButtons(false, true);
+        Tick(screen);
+        Assert.Equal(0.5f * Step * StartScreenModule.TurnRadiansPerSecond, screen.Yaw, 5);
+    }
+
+    [Fact]
+    public void DragsAddUpAndApplyOnTheNextTick()
+    {
+        var bus = new FakeBus();
+        var screen = OnLookStep(bus);
+        screen.Drag(30f);
+        screen.Drag(20f);
+        Assert.Equal(0f, screen.Yaw);
+        Tick(screen);
+        Assert.Equal(50f * StartScreenModule.DragRadiansPerPixel, screen.Yaw, 5);
+        Assert.Equal(screen.Yaw, bus.Yaws[^1].Yaw);
+        Tick(screen);
+        Assert.Equal(50f * StartScreenModule.DragRadiansPerPixel, screen.Yaw, 5);
+
+        screen.Drag(-80f);
+        screen.Drag(float.PositiveInfinity);
+        Tick(screen);
+        Assert.Equal(-30f * StartScreenModule.DragRadiansPerPixel, screen.Yaw, 5);
+    }
+
+    [Fact]
+    public void TheYawWrapsToMinusPiUpToPi()
+    {
+        var bus = new FakeBus();
+        var screen = OnLookStep(bus);
+        screen.Drag(400f);                                           // 4 radians
+        Tick(screen);
+        Assert.Equal(4f - MathF.Tau, screen.Yaw, 4);
+        screen.Drag(-800f);
+        Tick(screen);
+        Assert.Equal(-4f + MathF.Tau, screen.Yaw, 4);
+        screen.SetTurnButtons(false, true);
+        for (int i = 0; i < 600; i++)
+        {
+            Tick(screen);
+            Assert.InRange(bus.Yaws[^1].Yaw, -MathF.PI, MathF.PI);
+            Assert.True(bus.Yaws[^1].Yaw < MathF.PI);
+        }
+    }
+
+    [Fact]
+    public void TurningOffTheLookStepDoesNothingAndEachVisitStartsFacingTheCamera()
+    {
+        var bus = new FakeBus();
+        var screen = Started(bus);
+        PressAndTick(screen, StartButton.Confirm);                    // the character step
+        screen.Drag(100f);                                           // dropped: not the look step
+        screen.SetTurnButtons(false, true);
+        Tick(screen);
+        Assert.Equal(0f, screen.Yaw);
+        Assert.Empty(bus.Yaws);
+        screen.SetTurnButtons(false, false);
+
+        PressAndTick(screen, StartButton.Confirm);                    // the look step
+        Assert.Equal(0f, bus.Yaws[^1].Yaw);
+        screen.Drag(100f);
+        Tick(screen);
+        Assert.Equal(1f, screen.Yaw, 5);
+
+        screen.Drag(50f);                                            // left before it applies: dropped
+        PressAndTick(screen, StartButton.Confirm);                    // the pet step
+        screen.Drag(70f);
+        Tick(screen);
+        bus.ClearLookMessages();
+        PressAndTick(screen, StartButton.Back);                       // back to the look step
+        Assert.Equal(StartStep.Look, screen.Step);
+        Assert.Equal(0f, Assert.Single(bus.Yaws).Yaw);
+
+        screen.Drag(100f);
+        Tick(screen);
+        PressAndTick(screen, StartButton.Back, StartButton.Confirm);  // character and back again
+        Assert.Equal(0f, bus.Yaws[^1].Yaw);
     }
 
     [Fact]
