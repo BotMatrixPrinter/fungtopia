@@ -121,6 +121,10 @@ public class BowModuleTests
     private static MonsterState Monster(int id, Vector3 feet, float radius = 0.55f, bool alive = true) =>
         new(id, MonsterKind.Caterpillar, feet, radius, alive ? 3 : 0, 3, alive, false);
 
+    /// <summary>From the bow hand of the player (facing 0) to the middle of a monster's sphere.</summary>
+    private Vector3 AimAt(MonsterState m) =>
+        Vector3.Normalize(m.Position + new Vector3(0f, m.Radius, 0f) - BowGeometry.HoldPoint(_player.Position, 0f));
+
     // ---- Draw timing ----
 
     [Fact]
@@ -204,18 +208,57 @@ public class BowModuleTests
     // ---- Flight and gravity ----
 
     [Fact]
-    public void ArrowStartsAtChestHeightAndFliesAlongTheAim()
+    public void ArrowStartsAtTheBowHandAndFliesAlongTheAim()
     {
         var aim = Vector3.Normalize(new Vector3(0.3f, 0.1f, -1f));
         Shoot(36, aim);
         var a = OnlyArrow();
-        var flat = Vector3.Normalize(new Vector3(aim.X, 0f, aim.Z));
-        var start = Spot + new Vector3(0f, BowModule.ChestHeight, 0f) + flat * BowModule.LaunchForward;
+        // Facing 0 (-Z): Right is +X, Forward is -Z.
+        var start = Spot + new Vector3(BowGeometry.HoldRight, BowGeometry.HoldUp, -BowGeometry.HoldForward);
         // It was launched at the start and has flown one tick since.
         Assert.True(Vector3.Distance(start, a.PreviousPosition) < 1e-4f, $"{a.PreviousPosition} vs {start}");
         var step = a.Position - a.PreviousPosition;
         Assert.Equal(45f * Dt, step.Length(), 2);
         Assert.True(Vector3.Dot(Vector3.Normalize(step), aim) > 0.999f);
+    }
+
+    [Fact]
+    public void TheHoldPointSitsAtTheChibisChestInFrontOfItsRightSide()
+    {
+        Assert.Equal(new Vector3(BowGeometry.HoldRight, BowGeometry.HoldUp, BowGeometry.HoldForward), BowGeometry.HoldOffset);
+        Assert.InRange(BowGeometry.HoldRight, 0.05f, 0.3f);
+        Assert.InRange(BowGeometry.HoldUp, 1f, 1.3f);
+        Assert.InRange(BowGeometry.HoldForward, 0.3f, 0.6f);
+        Assert.InRange(BowGeometry.FullDrawPull, 0.15f, 0.4f);
+    }
+
+    [Theory]
+    [InlineData(0f, 0.15f, -0.45f)]          // facing -Z: right +X
+    [InlineData(MathF.PI / 2, -0.45f, -0.15f)] // facing -X: right -Z
+    [InlineData(MathF.PI, -0.15f, 0.45f)]    // facing +Z: right -X
+    [InlineData(-MathF.PI / 2, 0.45f, 0.15f)] // facing +X: right +Z
+    public void TheHoldPointTurnsWithTheFacing(float facing, float dx, float dz)
+    {
+        var feet = new Vector3(3f, 2f, -7f);
+        var p = BowGeometry.HoldPoint(feet, facing);
+        Assert.Equal(feet.X + dx, p.X, 4);
+        Assert.Equal(feet.Y + BowGeometry.HoldUp, p.Y, 4);
+        Assert.Equal(feet.Z + dz, p.Z, 4);
+    }
+
+    [Fact]
+    public void ArrowsLeaveFromTheBowHandRotatedByTheFacingNotTheAim()
+    {
+        // Facing +X (turned right), aiming a little left of it and up: the start follows the facing.
+        float facing = -MathF.PI / 2;
+        _player = PlayerAt(Spot, facing: facing);
+        var aim = Vector3.Normalize(new Vector3(1f, 0.15f, -0.3f));
+        Shoot(36, aim);
+        var a = OnlyArrow();
+        var start = Spot + new Vector3(BowGeometry.HoldForward, BowGeometry.HoldUp, BowGeometry.HoldRight);
+        Assert.True(Vector3.Distance(start, a.PreviousPosition) < 1e-4f, $"{a.PreviousPosition} vs {start}");
+        Assert.Equal(BowGeometry.HoldPoint(Spot, facing), a.PreviousPosition);
+        Assert.True(Vector3.Dot(Vector3.Normalize(a.Velocity), aim) > 0.999f);
     }
 
     [Fact]
@@ -276,8 +319,9 @@ public class BowModuleTests
     {
         _monsters.Add(Monster(7, OnGround(Spot.X, Spot.Z - 6f)));
         _monsters.Add(Monster(8, OnGround(Spot.X, Spot.Z - 9f))); // right behind it
-        Shoot(36, North);
-        Run(30, false, North);
+        var aim = AimAt(_monsters[0]);
+        Shoot(36, aim);
+        Run(30, false, aim);
         var hit = Assert.Single(_bus.Hits);
         Assert.Equal(7, hit.MonsterId);
         Assert.Equal(3, hit.Damage);
@@ -295,8 +339,9 @@ public class BowModuleTests
     public void DamageGoesFromOneToThreeByDraw(int drawTicks, int damage)
     {
         _monsters.Add(Monster(3, OnGround(Spot.X, Spot.Z - 4f)));
-        Shoot(drawTicks, North);
-        Run(20, false, North);
+        var aim = AimAt(_monsters[0]);
+        Shoot(drawTicks, aim);
+        Run(20, false, aim);
         Assert.Equal(damage, Assert.Single(_bus.Hits).Damage);
     }
 
@@ -346,8 +391,9 @@ public class BowModuleTests
     public void AFastArrowDoesNotTunnelThroughASmallMonster()
     {
         // 45 m/s is 0.75 m per tick, more than this monster's diameter.
-        // Its sphere sits right on the arrow's line (at chest height), 6.675 m ahead: between two ticks' positions.
-        var feet = new Vector3(Spot.X, Spot.Y + BowModule.ChestHeight - 0.3f, Spot.Z - 6.675f);
+        // Its sphere sits right on the arrow's line (from the bow hand), 6.675 m ahead: between two ticks' positions.
+        var hand = BowGeometry.HoldPoint(Spot, 0f);
+        var feet = new Vector3(hand.X, hand.Y - 0.3f, hand.Z - 6.675f);
         _monsters.Add(Monster(4, feet, radius: 0.3f));
         Shoot(36, North);
         Run(20, false, North);

@@ -8,13 +8,13 @@ using Godot;
 namespace Fungtopia.Bow.View;
 
 /// <summary>
-/// A stand-alone scene showing the bow, for screenshots:
+/// A stand-alone scene showing the bow's arrows, for screenshots:
 /// <c>./screenshot.sh modules/Bow/Godot/Preview.tscn</c>. It runs a real <see cref="BowModule"/>
 /// with scripted input and a <see cref="BowView"/> on a patch of forest ground, with the Girl
 /// model (from the Player module's Models, for the look only) standing in for the player. A few
-/// arrows are already stuck in the ground. The environment variable BOW_PREVIEW picks the
-/// moment: "shot" (default: an arrow just flew off with its spore trail and the next one is
-/// being drawn) or "draw" (holding a full draw).
+/// arrows are already stuck in the ground, and one is shot every 10 s, leaving from
+/// <see cref="BowGeometry.HoldPoint"/> with its spore trail. The bow in the hands is the Player
+/// module's to draw, so it does not show here.
 /// </summary>
 public partial class BowPreview : Node3D
 {
@@ -28,13 +28,11 @@ public partial class BowPreview : Node3D
 
     private readonly BowModule _bow = new();
     private PlayerState _player;
-    private bool _fullDraw;
     private long _tick;
     private int _frame;
 
     public override void _Ready()
     {
-        _fullDraw = OS.GetEnvironment("BOW_PREVIEW").Equals("draw", StringComparison.OrdinalIgnoreCase);
         BuildStage();
         _bow.Start(new SilentBus());
         _player = new PlayerState(Feet, 0f, System.Numerics.Vector3.Zero, true, 10, 10, true, CharacterKind.Girl);
@@ -69,7 +67,7 @@ public partial class BowPreview : Node3D
         // Frames since the scene started: a shot leaves at frame 77, then the next draw begins.
         int frame = _frame++ % 600;
         var aim = new System.Numerics.Vector3(0.02f, 0.06f, -1f);
-        bool fire = _fullDraw || frame < 77 || frame > 79;
+        bool fire = frame < 77 || frame > 79;
         Step(fire, aim);
     }
 

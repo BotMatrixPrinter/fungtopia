@@ -25,10 +25,6 @@ public sealed class BowModule : IModule, IMessageHandler<PlayerInput>, IMessageH
     public const float MaxSpeed = 45f;
     /// <summary>Light gravity on arrows, meters per second squared.</summary>
     public const float Gravity = 4f;
-    /// <summary>Where arrows start: this high above the player's feet (chest of a chibi kid).</summary>
-    public const float ChestHeight = 0.6f;
-    /// <summary>And this far out along the shot's horizontal direction.</summary>
-    public const float LaunchForward = 0.3f;
     public const int MinDamage = 1;
     public const int MaxDamage = 3;
     public const float PoisonDamagePerSecond = 1f;
@@ -60,7 +56,7 @@ public sealed class BowModule : IModule, IMessageHandler<PlayerInput>, IMessageH
     /// <summary>How far the bow is drawn, 0..1.</summary>
     public float Draw { get; private set; }
 
-    /// <summary>The latest player state (the view holds the bow at the player).</summary>
+    /// <summary>The latest player state.</summary>
     public PlayerState Player { get; private set; }
 
     /// <summary>Whether a <see cref="PlayerState"/> has arrived yet.</summary>
@@ -167,11 +163,9 @@ public sealed class BowModule : IModule, IMessageHandler<PlayerInput>, IMessageH
     private void Shoot(Vector3 direction, float draw)
     {
         int slot = FreeSlot();
-        var flat = new Vector2(direction.X, direction.Z);
-        Vector3 forward = flat.LengthSquared() > 1e-6f
-            ? new Vector3(direction.X, 0f, direction.Z) / flat.Length()
-            : Vector3.Zero;
-        Vector3 start = Player.Position + new Vector3(0f, ChestHeight, 0f) + forward * LaunchForward;
+        // From the character's bow hand (the Player module draws the bow there).
+        float facing = float.IsFinite(Player.Facing) ? Player.Facing : 0f;
+        Vector3 start = BowGeometry.HoldPoint(Player.Position, facing);
         _arrows[slot] = new Arrow
         {
             Phase = ArrowPhase.Flying,
