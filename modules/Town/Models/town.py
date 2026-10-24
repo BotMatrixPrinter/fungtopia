@@ -4,7 +4,7 @@
 #
 # One object per Fungtopia.Town TownPiece: PlayerHouse (12 x 12 m, 10 m tall), MillieHouse
 # (10 x 10 x 8), Clinic (12 x 10 x 8.5), FurnitureShop (7 x 4 x 3.5), Fountain (7 x 7 x 2.2),
-# House0..House3 (9 x 9 x 7, four looks), StreetLamp, Bench, Fence (one 2 m segment) and
+# House0..House3 (9 x 9 x 7, four looks), ClothingShop (10 x 9 x 8), StreetLamp, Bench, Fence (one 2 m segment) and
 # FlowerBed: each the size of its footprint in the Map Contract, standing on the ground at the
 # origin (a little foundation below it, for uneven ground), its front (door, counter, seat)
 # toward Blender +Y (Godot -Z, a building's front at rotation 0). Chunky and cute; no eyes or
@@ -59,6 +59,12 @@ COLORS = {
     "PetalBlue": (0.56, 0.7, 1.0),
     "PetalWhite": (1.0, 1.0, 0.97),
     "Soot": (0.24, 0.2, 0.22),
+    "CapMint": (0.66, 0.9, 0.82),
+    "WallPink": (1.0, 0.88, 0.88),
+    "DoorLilac": (0.76, 0.62, 0.92),
+    "Display": (1.0, 0.95, 0.97),
+    "SignText": (0.62, 0.24, 0.46),
+    "Hanger": (0.86, 0.68, 0.36),
 }
 ORDER = list(COLORS)
 
@@ -462,6 +468,126 @@ def house(index):
     p.finish()
 
 
+def text(body, size, matrix, depth=0.04):
+    """Flat 3D lettering, centered, reading from +Y (its face toward +Y, upright along +Z)."""
+    curve = bpy.data.curves.new("text", "FONT")
+    curve.body = body
+    curve.size = size
+    curve.extrude = depth / 2
+    curve.align_x = "CENTER"
+    curve.align_y = "CENTER"
+    obj = bpy.data.objects.new("text", curve)
+    bpy.context.scene.collection.objects.link(obj)
+    mesh = bpy.data.meshes.new_from_object(obj.evaluated_get(bpy.context.evaluated_depsgraph_get()))
+    bpy.data.objects.remove(obj)
+    bpy.data.curves.remove(curve)
+    part = bmesh.new()
+    part.from_mesh(mesh)
+    bpy.data.meshes.remove(mesh)
+    bmesh.ops.transform(part, matrix=matrix @ R("Z", 180) @ R("X", 90), verts=part.verts)
+    return part
+
+
+def bar(piece, a, b, radius, mat, matrix=Matrix()):
+    """A round rod from point a to point b (x, z in the plane y = 0 of `matrix`)."""
+    dx, dz = b[0] - a[0], b[1] - a[1]
+    length = math.hypot(dx, dz)
+    angle = math.degrees(math.atan2(dx, dz))
+    m = matrix @ T((a[0] + b[0]) / 2, 0, (a[1] + b[1]) / 2) @ R("Y", angle)
+    piece.add(cylinder(radius, length, m, segments=10), mat)
+    piece.add(sphere(radius, matrix @ T(b[0], 0, b[1]), segments=10, rings=5), mat)
+
+
+def front_flower_box(piece, x, y, z, width, flowers):
+    piece.add(box((width, 0.4, 0.3), T(x, y + 0.2, z), bevel=0.05), "Wood")
+    count = max(3, int(width / 0.33))
+    for k in range(count):
+        fx = x - width / 2 + 0.2 + k * (width - 0.4) / (count - 1)
+        piece.add(sphere(0.14, T(fx, y + 0.22, z + 0.2), segments=10, rings=5), flowers[k % len(flowers)])
+        piece.add(sphere(0.1, T(fx + 0.12, y + 0.3, z + 0.12), scale=(1.3, 0.7, 0.5), segments=8, rings=4), "Leaf")
+
+
+def outfit_stand(piece, matrix, kind, mat):
+    """A little outfit on a stand in the shop window: a round foot, a pole and the clothes."""
+    piece.add(cylinder(0.16, 0.05, matrix @ T(0, 0, 0.025), segments=16), "WoodDark")
+    piece.add(cylinder(0.025, 0.9, matrix @ T(0, 0, 0.45), segments=8), "Wood")
+    if kind == "dress":
+        piece.add(cylinder(0.3, 0.6, matrix @ T(0, 0, 0.6), segments=20, radius2=0.1), mat)
+        piece.add(box((0.24, 0.14, 0.24), matrix @ T(0, 0, 0.98), bevel=0.06), mat)
+        piece.add(torus(0.3, 0.03, matrix @ T(0, 0, 0.32), segments=20, sides=6), "Display")
+    elif kind == "shirt":
+        piece.add(box((0.4, 0.18, 0.42), matrix @ T(0, 0, 0.8), bevel=0.07), mat)
+        for side in (-1, 1):
+            piece.add(box((0.2, 0.15, 0.13), matrix @ T(side * 0.26, 0, 0.92) @ R("Y", side * 30), bevel=0.05), mat)
+        piece.add(box((0.36, 0.17, 0.34), matrix @ T(0, 0, 0.42), bevel=0.06), "CapBlue")
+    else:
+        # A sun hat on top of the pole with a scarf hanging below it.
+        piece.add(cylinder(0.3, 0.04, matrix @ T(0, 0, 0.92), segments=24), mat)
+        piece.add(dome(0.16, 0.14, matrix @ T(0, 0, 0.93), segments=16), mat)
+        piece.add(torus(0.16, 0.025, matrix @ T(0, 0, 0.96), segments=16, sides=6), "PetalPink")
+        piece.add(box((0.12, 0.06, 0.45), matrix @ T(0.06, 0.04, 0.6) @ R("Y", 8), bevel=0.03), "PetalBlue")
+
+
+def clothing_shop():
+    # Abby's clothing shop: a pastel boutique mushroom house with a shop front - a striped awning
+    # over the door and a big display window with little outfits on stands, flower boxes, and a
+    # hanger-shaped sign reading "Abby's" on the cap. (No windows in the cap: they would read as eyes.)
+    p, rx, ry, wall, cap = mushroom_house("ClothingShop", 10, 9, 8, "CapMint", wall_mat="WallPink", spots=9)
+    capx, capy, base, cap_h = cap
+    w, front, back, top = 7.0, ry + 0.5, 1.4, base - 0.1
+    p.add(box((w, front - 0.5 - back, top), T(0, (back + front - 0.5) / 2, top / 2), bevel=0.08), "WallPink")
+    # The facade, around the big window's opening (x from 0.8 to 3.1, z from 0.75 to 2.6).
+    wx0, wx1, wz0, wz1 = 0.8, 3.1, 0.75, 2.6
+    fy = front - 0.25
+    p.add(box((wx0 + w / 2, 0.5, top), T((wx0 - w / 2) / 2, fy, top / 2), bevel=0.08), "WallPink")
+    p.add(box((w / 2 - wx1, 0.5, top), T((wx1 + w / 2) / 2, fy, top / 2), bevel=0.08), "WallPink")
+    p.add(box((wx1 - wx0, 0.5, wz0), T((wx0 + wx1) / 2, fy, wz0 / 2), bevel=0.06), "WallPink")
+    p.add(box((wx1 - wx0, 0.5, top - wz1), T((wx0 + wx1) / 2, fy, (wz1 + top) / 2), bevel=0.06), "WallPink")
+    # The big window: a glowing pane at the back of the opening, a wooden frame, outfits on stands.
+    p.add(box((wx1 - wx0, 0.06, wz1 - wz0), T((wx0 + wx1) / 2, front - 0.52, (wz0 + wz1) / 2), bevel=0.0), "Window")
+    for x in (wx0, wx1):
+        p.add(box((0.14, 0.16, wz1 - wz0 + 0.14), T(x, front + 0.02, (wz0 + wz1) / 2), bevel=0.03), "Wood")
+    for z in (wz0, wz1):
+        p.add(box((wx1 - wx0 + 0.14, 0.16, 0.14), T((wx0 + wx1) / 2, front + 0.02, z), bevel=0.03), "Wood")
+    p.add(box((wx1 - wx0, 0.5, 0.05), T((wx0 + wx1) / 2, front - 0.25, wz0 + 0.02), bevel=0.0), "Display")
+    for k, (kind, mat) in enumerate((("dress", "PetalPink"), ("shirt", "CapYellow"), ("hat", "AwningCream"))):
+        x = wx0 + (k + 0.5) * (wx1 - wx0) / 3
+        outfit_stand(p, T(x, front - 0.25, wz0 + 0.045) @ S(0.95, 0.95, 0.95), kind, mat)
+    front_flower_box(p, (wx0 + wx1) / 2, front, wz0 - 0.3, wx1 - wx0 + 0.2, ("PetalPink", "PetalWhite", "PetalYellow"))
+    # The door, a small round window on the left with its own flower box, two little lanterns.
+    arched_door(p, front, 1.5, 2.4, "DoorLilac")
+    m = T(-2.3, front + 0.02, 1.8) @ R("X", -90)
+    p.add(cylinder(0.55, 0.16, m, segments=24), "Window")
+    p.add(torus(0.6, 0.1, m @ T(0, 0, 0.06), segments=24, sides=8), "Wood")
+    p.add(box((0.08, 1.1, 0.06), m @ T(0, 0, 0.09), bevel=0.02), "Wood")
+    p.add(box((1.1, 0.08, 0.06), m @ T(0, 0, 0.09), bevel=0.02), "Wood")
+    front_flower_box(p, -2.3, front, 1.0, 1.4, ("PetalBlue", "PetalPink"))
+    for x in (-1.15, 1.15):
+        p.add(box((0.1, 0.25, 0.1), T(x, front + 0.1, 2.35), bevel=0.02), "Metal")
+        p.add(sphere(0.13, T(x, front + 0.25, 2.25), segments=12, rings=6), "Glow")
+        p.add(dome(0.18, 0.12, T(x, front + 0.25, 2.34), segments=14), "CapMint")
+    # The striped awning over the whole shop front, sloping out from under the cap, scalloped.
+    stripes, aw, out, drop = 11, w + 0.4, 1.1, 0.5
+    sw = aw / stripes
+    slope = math.degrees(math.atan2(drop, out))
+    for i in range(stripes):
+        x = -aw / 2 + sw * (i + 0.5)
+        mat = "Awning" if i % 2 == 0 else "AwningCream"
+        p.add(box((sw + 0.01, math.hypot(out, drop), 0.1), T(x, front + out / 2, top - 0.15 - drop / 2) @ R("X", -slope), bevel=0.03), mat)
+        p.add(sphere(sw * 0.5, T(x, front + out + 0.02, top - 0.17 - drop), scale=(1, 0.3, 0.6), segments=14, rings=7), mat)
+    # The sign: a big clothes hanger on the cap's front - a hook, two arms and a board reading "Abby's".
+    x, y, z = cap_point(cap, 0, 0.36)
+    sign = T(0, y + 0.35, z) @ R("X", 32)
+    bar(p, (0.0, 1.05), (-1.55, 0.25), 0.07, "Hanger", sign)
+    bar(p, (0.0, 1.05), (1.55, 0.25), 0.07, "Hanger", sign)
+    p.add(cylinder(0.07, 0.35, sign @ T(0, 0, 1.2), segments=10), "Hanger")
+    p.add(torus(0.22, 0.06, sign @ T(-0.22, 0, 1.4) @ R("X", 90), segments=20, sides=8), "Hanger")
+    p.add(box((3.4, 0.16, 0.62), sign @ T(0, 0, 0.0), bevel=0.12), "Hanger")
+    p.add(box((3.15, 0.12, 0.46), sign @ T(0, 0.04, 0.0), bevel=0.1), "Display")
+    p.add(text("Abby's", 0.44, sign @ T(0, 0.12, 0.0)), "SignText")
+    p.finish()
+
+
 def street_lamp():
     # A mushroom street lamp: a dark post on a round foot, a glowing bulb hanging under a spotted
     # cap whose underside and spots glow too.
@@ -535,6 +661,7 @@ furniture_shop()
 fountain()
 for i in range(len(HOUSES)):
     house(i)
+clothing_shop()
 street_lamp()
 bench()
 fence()

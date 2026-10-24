@@ -93,6 +93,7 @@ public partial class TownView : Node3D, IModuleView
         TownPiece.FurnitureShop => new(7f, 3.5f, 4f),
         TownPiece.Fountain => new(7f, 2.2f, 7f),
         TownPiece.House => new(9f, 7f, 9f),
+        TownPiece.ClothingShop => new(10f, 8f, 9f),
         TownPiece.StreetLamp => Size(TownLayout.LampSize),
         TownPiece.Bench => Size(TownLayout.BenchSize),
         TownPiece.Fence => Size(TownLayout.FenceSize),

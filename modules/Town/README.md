@@ -2,7 +2,7 @@
 
 Draws Mushroom Town, exactly where the Map module lays it out (`Fungtopia.Map.Buildings`, the
 ones in `Area.Town`): your house, Millie's house next door, Dr. Jeremy's clinic, the furniture
-shop's stall, the fountain in the square and four more houses, plus street lamps, benches, picket
+shop's stall, Abby's clothing shop, the fountain in the square and four more houses, plus street lamps, benches, picket
 fences and flower beds. The street lamps (and every window) light up at night. Nothing in the
 town moves or is walked into here: the Map's `Ground.Obstacles` already cover the buildings; the
 Home module handles the house door and the shop, the signpost is the Travel module's.
@@ -14,7 +14,7 @@ Home module handles the house door and the shop, the signpost is the Travel modu
   (loads `town.glb` at run time, toon materials); `Preview.tscn` with `TownPreview` (for
   screenshots); `Shaders/` (toon surface, ink outline).
 - `Models/` — `town.py`, the Blender script that builds and exports `town.glb` next to it.
-- `Tests/` — `TownTests.cs`: xUnit tests of `TownLayout` and of `TownModule` with a fake `IMessageBus`.
+- `Tests/` — `TownTests.cs`: xUnit tests of `TownLayout`, of `town.glb` having an object for every placement, and of `TownModule` with a fake `IMessageBus`.
 
 Test it with `./test.sh Town` from the repository root.
 
@@ -35,9 +35,9 @@ allocations per tick.
 
 - first each Town building of `Buildings.All`, once, in order, at its exact position, rotation
   and size, with its index in `Buildings.All` (`TryPieceFor(kind)`: PlayerHouse, MillieHouse,
-  Clinic, FurnitureShop, Fountain, House; the four plain houses get looks 0..3). A kind Town
-  does not draw (yet), such as ClothingShop or one the Map adds later, is skipped, never thrown;
-  props still keep clear of its footprint;
+  Clinic, FurnitureShop, Fountain, House, ClothingShop; the four plain houses get looks 0..3). A
+  kind Town does not draw (PetCity's, or one the Map adds later) is skipped, never thrown; props
+  still keep clear of its footprint;
 - then the props (`BuildingIndex` -1): street lamps in a ring round the square and at both front
   corners of every building, benches on the square facing the fountain, flower beds either side
   of each front door and round the square, picket fences round the back and sides of the four
@@ -73,6 +73,11 @@ toon-shaded with ink outlines, and no eyes or faces on anything:
   striped awning with a scalloped edge, a sign board, two chairs and three mushroom lamps on display.
 - **Fountain** — a round stone basin of water, a spotted mushroom in the middle with water
   streaming from its rim.
+- **ClothingShop** — Abby's pastel boutique: a mint cap with white spots, pale pink walls and a
+  shop front with a pink and white striped, scalloped awning, a lilac arched door, a big window
+  with three little outfits on stands (a dress, a shirt with shorts, a sun hat and scarf), a round
+  window, flower boxes, two little lanterns by the door, and a big clothes-hanger sign on the cap
+  reading "Abby's". Its windows and lanterns light up at night with the rest of the town.
 - **House0..House3** — orange, lilac, blue and yellow caps, round or arched doors, flower boxes,
   two with chimneys.
 - **StreetLamp** (3.2 m, a glowing bulb under a spotted cap), **Bench** (on mushroom-stem legs),
@@ -81,5 +86,5 @@ toon-shaded with ink outlines, and no eyes or faces on anything:
 ## Screenshots
 
 `./screenshot.sh modules/Town/Godot/Preview.tscn` shows the town by day;
-`TOWN_PREVIEW=night` at 22:00 with the lamps lit. `TOWN_VIEW` = `home`, `clinic`, `fountain` or
-`houses` frames a closer view (default `square`, over the town from its entrance).
+`TOWN_PREVIEW=night` at 22:00 with the lamps lit. `TOWN_VIEW` = `home`, `clinic`, `fountain`,
+`houses` or `shop` (Abby's) frames a closer view (default `square`, over the town from its entrance).

@@ -18,6 +18,8 @@ public enum TownPiece
     Bench,
     Fence,
     FlowerBed,
+    /// <summary>Abby's clothing shop (added after the props, so the earlier pieces keep their numbers).</summary>
+    ClothingShop,
 }
 
 /// <summary>
@@ -82,7 +84,7 @@ public static class TownLayout
     public static readonly Vector2[] Spots =
     {
         Flat(Places.HomeDoor), Flat(Places.ClinicDoor), Flat(Places.MillieSpot),
-        Flat(Places.FurnitureShopSpot), Flat(Places.SignpostTown),
+        Flat(Places.FurnitureShopSpot), Flat(Places.AbbySpot), Flat(Places.SignpostTown),
     };
 
     private static readonly float[] Sides = { -1f, 1f };
@@ -98,7 +100,7 @@ public static class TownLayout
 
     /// <summary>
     /// The piece drawing a Map building of <paramref name="kind"/>, or false for a kind Town does
-    /// not draw (PetCity's, or one added to the Map later, such as ClothingShop): Build skips it.
+    /// not draw (PetCity's, or one added to the Map later): Build skips it.
     /// </summary>
     public static bool TryPieceFor(BuildingKind kind, out TownPiece piece)
     {
@@ -110,6 +112,7 @@ public static class TownLayout
             case BuildingKind.FurnitureShop: piece = TownPiece.FurnitureShop; return true;
             case BuildingKind.Fountain: piece = TownPiece.Fountain; return true;
             case BuildingKind.House: piece = TownPiece.House; return true;
+            case BuildingKind.ClothingShop: piece = TownPiece.ClothingShop; return true;
             default: piece = default; return false;
         }
     }

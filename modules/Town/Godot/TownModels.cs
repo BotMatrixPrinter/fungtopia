@@ -13,7 +13,7 @@ public static class TownModels
     private const string Shaders = "res://modules/Town/Godot/Shaders/";
 
     /// <summary>Surfaces drawn without an ink outline (small soft details).</summary>
-    private static readonly HashSet<string> NoOutline = new() { "Spots", "SpotsPale", "MatStripe", "Water", "Soot", "Glow" };
+    private static readonly HashSet<string> NoOutline = new() { "Spots", "SpotsPale", "MatStripe", "Water", "Soot", "Glow", "SignText" };
 
     private static Shader? s_toon;
     private static ShaderMaterial? s_outline;

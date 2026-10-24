@@ -1,5 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Text;
+using System.Text.Json;
 using System.Numerics;
 using Fungtopia.DayNight;
 using Fungtopia.Map;
@@ -71,7 +74,7 @@ public class TownTests
             if (drawable)
                 town++;
         }
-        Assert.Equal(9, town);
+        Assert.Equal(10, town);
     }
 
     [Fact]
@@ -90,6 +93,7 @@ public class TownTests
         Assert.Equal(1, Count(TownPiece.Clinic));
         Assert.Equal(1, Count(TownPiece.FurnitureShop));
         Assert.Equal(1, Count(TownPiece.Fountain));
+        Assert.Equal(1, Count(TownPiece.ClothingShop));
         Assert.Equal(4, Count(TownPiece.House));
         var looks = new HashSet<int>();
         foreach (var p in TownLayout.All)
@@ -105,27 +109,92 @@ public class TownTests
     }
 
     [Fact]
+    public void AbbysClothingShopIsDrawnOnceAtTheMapsSpot()
+    {
+        Assert.True(TownLayout.TryPieceFor(BuildingKind.ClothingShop, out var piece));
+        Assert.Equal(TownPiece.ClothingShop, piece);
+        var buildings = Buildings.All;
+        int index = -1;
+        for (int i = 0; i < buildings.Length; i++)
+            if (buildings[i].Kind == BuildingKind.ClothingShop)
+                index = i;
+        Assert.True(index >= 0);
+        var shop = buildings[index];
+
+        int drawn = 0;
+        foreach (var p in TownLayout.All)
+        {
+            if (p.Piece != TownPiece.ClothingShop)
+                continue;
+            drawn++;
+            Assert.Equal(index, p.BuildingIndex);
+            Assert.Equal(0, p.Variant);
+            Assert.Equal(shop.X, p.X);
+            Assert.Equal(shop.Z, p.Z);
+            Assert.Equal(shop.Rotation, p.Yaw);
+            Assert.Equal(shop.Width, p.Width);
+            Assert.Equal(shop.Depth, p.Depth);
+            Assert.Equal(shop.Height, p.Height);
+        }
+        Assert.Equal(1, drawn);
+
+        // Lamps light its front at night, like every other building's.
+        var front = shop.ToWorld(0f, -shop.Depth * 0.5f);
+        bool lamp = false;
+        foreach (var p in TownLayout.All)
+            if (p.Piece == TownPiece.StreetLamp && Vector2.Distance(new Vector2(p.X, p.Z), front) < shop.Width * 0.5f + 4f)
+                lamp = true;
+        Assert.True(lamp);
+    }
+
+    /// <summary>The names of the objects in Models/town.glb (read from its JSON chunk).</summary>
+    private static HashSet<string> ModelObjects()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !File.Exists(Path.Combine(dir.FullName, "modules", "Town", "Models", "town.glb")))
+            dir = dir.Parent;
+        Assert.NotNull(dir);
+        byte[] glb = File.ReadAllBytes(Path.Combine(dir!.FullName, "modules", "Town", "Models", "town.glb"));
+        Assert.Equal("glTF", Encoding.ASCII.GetString(glb, 0, 4));
+        int length = BitConverter.ToInt32(glb, 12);
+        using var json = JsonDocument.Parse(Encoding.UTF8.GetString(glb, 20, length));
+        var names = new HashSet<string>();
+        foreach (var node in json.RootElement.GetProperty("nodes").EnumerateArray())
+            if (node.TryGetProperty("name", out var name))
+                names.Add(name.GetString()!);
+        return names;
+    }
+
+    [Fact]
+    public void TheModelHasAnObjectForEveryPlacementIncludingAbbysShop()
+    {
+        var names = ModelObjects();
+        Assert.Contains("ClothingShop", names);
+        foreach (var p in TownLayout.All)
+        {
+            // TownView.ModelName: a House by its look, anything else by its piece.
+            string name = p.Piece == TownPiece.House ? $"House{p.Variant}" : p.Piece.ToString();
+            Assert.Contains(name, names);
+        }
+    }
+
+    [Fact]
     public void KindsTownDoesNotDrawAreSkippedNotThrown()
     {
         Assert.False(TownLayout.TryPieceFor(BuildingKind.PetStore, out _));
         Assert.False(TownLayout.TryPieceFor(BuildingKind.CityBlock, out _));
-        Assert.False(TownLayout.TryPieceFor(BuildingKind.ClothingShop, out _));
         Assert.False(TownLayout.TryPieceFor((BuildingKind)999, out _));
 
-        // A Town building of a kind not drawn yet (ClothingShop, drawn by a later job) gets no
-        // placement, and the layout still builds.
+        // PetCity's buildings get no placement, and the layout still builds.
         var buildings = Buildings.All;
-        bool sawUndrawn = false;
         for (int i = 0; i < buildings.Length; i++)
         {
-            if (buildings[i].Area != Area.Town || TownLayout.TryPieceFor(buildings[i].Kind, out _))
+            if (buildings[i].Area == Area.Town)
                 continue;
-            sawUndrawn = true;
             foreach (var p in TownLayout.All)
                 Assert.NotEqual(i, p.BuildingIndex);
         }
-        Assert.True(sawUndrawn);
-        Assert.True(TownLayout.Count > 9);
+        Assert.True(TownLayout.Count > 10);
     }
 
     [Fact]
@@ -133,7 +202,7 @@ public class TownTests
     {
         var all = TownLayout.All;
         for (int i = 0; i < all.Length; i++)
-            Assert.Equal(i < 9, all[i].BuildingIndex >= 0);
+            Assert.Equal(i < 10, all[i].BuildingIndex >= 0);
     }
 
     [Fact]
@@ -152,7 +221,7 @@ public class TownTests
     public void PropsStandOnTownGroundOffBuildingsPathsAndSpotsAndApart()
     {
         var all = TownLayout.All;
-        var spots = new[] { Places.HomeDoor, Places.ClinicDoor, Places.MillieSpot, Places.FurnitureShopSpot, Places.SignpostTown };
+        var spots = new[] { Places.HomeDoor, Places.ClinicDoor, Places.MillieSpot, Places.FurnitureShopSpot, Places.AbbySpot, Places.SignpostTown };
         for (int i = 0; i < all.Length; i++)
         {
             var p = all[i];
