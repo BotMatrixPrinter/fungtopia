@@ -35,6 +35,7 @@ public class MapTests
         yield return Places.ClinicDoor;
         yield return Places.MillieSpot;
         yield return Places.FurnitureShopSpot;
+        yield return Places.AbbySpot;
         yield return Places.LucySpot;
         yield return Places.SignpostTown;
         yield return Places.SignpostForestSouth;
@@ -467,6 +468,7 @@ public class MapTests
         Check(Places.ClinicDoor, Area.Town);
         Check(Places.MillieSpot, Area.Town);
         Check(Places.FurnitureShopSpot, Area.Town);
+        Check(Places.AbbySpot, Area.Town);
         Check(Places.SignpostTown, Area.Town);
         Check(Places.SignpostForestSouth, Area.Forest);
         Check(Places.SignpostForestNorth, Area.Forest);
@@ -517,6 +519,7 @@ public class MapTests
         Check(Places.ClinicDoor, BuildingKind.Clinic, 2.5f);
         Check(Places.MillieSpot, BuildingKind.MillieHouse, 2.5f);
         Check(Places.FurnitureShopSpot, BuildingKind.FurnitureShop, 2.5f);
+        Check(Places.AbbySpot, BuildingKind.ClothingShop, 2.5f);
         Check(Places.LucySpot, BuildingKind.PetStore, 2.5f);
         // Millie lives next door.
         var home = Buildings.First(BuildingKind.PlayerHouse);
@@ -532,7 +535,7 @@ public class MapTests
     public void BuildingsAreWhereTheDesignPutsThem()
     {
         int houses = 0, blocks = 0;
-        foreach (var kind in new[] { BuildingKind.PlayerHouse, BuildingKind.MillieHouse, BuildingKind.Clinic, BuildingKind.FurnitureShop, BuildingKind.Fountain, BuildingKind.PetStore })
+        foreach (var kind in new[] { BuildingKind.PlayerHouse, BuildingKind.MillieHouse, BuildingKind.Clinic, BuildingKind.FurnitureShop, BuildingKind.Fountain, BuildingKind.PetStore, BuildingKind.ClothingShop })
         {
             int n = 0;
             foreach (var b in Buildings.All)
@@ -561,6 +564,40 @@ public class MapTests
         Assert.True(blocks >= 6);
         var fountain = Buildings.First(BuildingKind.Fountain);
         Assert.Equal(Buildings.TownSquare, fountain.Center);
+    }
+
+    [Fact]
+    public void AbbysClothingShopIsABoutiqueNearTheTownSquare()
+    {
+        // Added at the end of the enum and of Buildings.All, so older kinds and indices keep their values.
+        var kinds = Enum.GetValues<BuildingKind>();
+        Assert.Equal(BuildingKind.ClothingShop, kinds[^1]);
+        Assert.Equal(8, (int)BuildingKind.ClothingShop);
+        Assert.Equal(BuildingKind.ClothingShop, Buildings.All[Buildings.Count - 1].Kind);
+
+        var shop = Buildings.First(BuildingKind.ClothingShop);
+        Assert.Equal(Area.Town, shop.Area);
+        Assert.True(Vector2.Distance(shop.Center, Buildings.TownSquare) < 40f, "the clothing shop is near the square");
+        Assert.True(shop.Height >= 6f, "a mushroom house, not a stall");
+        // Its front faces the square, and the street in from the entrance does not run through it.
+        Assert.True(Vector2.Dot(Buildings.TownSquare - shop.Center, shop.Front) > 0f);
+        for (float z = Areas.Town.MinZ; z <= Buildings.TownSquare.Y; z += 0.5f)
+            Assert.False(shop.Contains(0f, z, 2f), "the shop blocks the town street");
+
+        // Abby stands at its door, facing out towards the square, and you can walk up to her.
+        var abby = new Vector2(Places.AbbySpot.Position.X, Places.AbbySpot.Position.Z);
+        Assert.True(Vector2.Dot(new Vector2(Places.AbbySpot.Facing.X, Places.AbbySpot.Facing.Z), shop.Front) > 0.99f);
+        Assert.True(Free(abby.X, abby.Y));
+        Assert.True(Ground.Blocks(shop.X, shop.Z));
+
+        // Its obstacle circles come right after the other buildings' and before the Deep Forest's trunks.
+        var all = Ground.Obstacles;
+        int deepFirst = all.Length - Ground.DeepForestTrunkCount;
+        bool found = false;
+        for (int i = Ground.ForestTrunkCount; i < deepFirst; i++)
+            found |= shop.Contains(all[i].X, all[i].Z);
+        Assert.True(found, "no obstacle circle on the clothing shop");
+        Assert.True(shop.Contains(all[deepFirst - 1].X, all[deepFirst - 1].Z), "the shop's circles are not the last building circles");
     }
 
     [Fact]

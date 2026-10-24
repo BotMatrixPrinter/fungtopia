@@ -33,7 +33,8 @@ are yaws in radians about +Y (Godot's `rotation.y`); yaw 0 faces -Z.
   z = +150 ┌───────────┴┴─────────────┐   SignpostTown at its north entrance
            │       Mushroom Town      │   x -80..80, z 150..290; fountain in the square (0, 215);
   z = +290 └──────────────────────────┘   your house west of it, Millie's next door, the clinic
-                                          and the furniture stall east of it, four more houses
+                                          and the furniture stall east of it, Abby's clothing
+                                          shop south of it (0, 246) facing it, four more houses
 
   West of the forest, beyond a 10 m strip of cliff:
   x = -280          -110  -100
@@ -67,14 +68,14 @@ Everything is pure, deterministic (no random seed, no clock) and allocation-free
 | `DeepForestLayout.SpawnPoints`, `SpawnMinEntranceDistance` (40), `ClearingRadius` (6) | Ten monster spawn spots (x, z) spread over the Deep Forest, each walkable and clear of obstacles with 2 m to spare, at least 40 m from the entrance and 20 m from each other. |
 | `Areas.HomeFloorY` | -50: the home room's floor height. |
 | `Place` | `Position` (`Vector3` on the ground: `Y == Ground.HeightAt(X, Z)`), `Yaw`, `Facing` (unit horizontal vector). |
-| `Places.HomeDoor`, `ClinicDoor`, `MillieSpot`, `FurnitureShopSpot`, `LucySpot` | 1.6 m (`Places.FrontGap`) in front of the building's front, facing out from it. Lucy's counter is the pet store's open front. |
+| `Places.HomeDoor`, `ClinicDoor`, `MillieSpot`, `FurnitureShopSpot`, `LucySpot`, `AbbySpot` | 1.6 m (`Places.FrontGap`) in front of the building's front, facing out from it. Lucy's counter is the pet store's open front; Abby stands at her clothing shop's door, facing the square. |
 | `Places.HomeInterior`, `HomeExit` | Inside the home room: where you appear on entering (facing into the room), and the spot by its door that leaves the house (facing the door). |
 | `Places.SignpostTown`, `SignpostForestSouth`, `SignpostForestNorth`, `SignpostPetCity` | The signposts, beside the road at each entrance, facing into their own area. |
 | `Places.SignpostDeepForest` | The Deep Forest's entrance signpost, just inside the west gap beside the path, facing west into it. |
 | `Places.Signpost(Area)` | Town, Forest (its south signpost), PetCity or DeepForest; throws for Road and Home. |
-| `enum BuildingKind` | `PlayerHouse`, `MillieHouse`, `Clinic`, `FurnitureShop`, `House`, `Fountain`, `PetStore`, `CityBlock`. |
+| `enum BuildingKind` | `PlayerHouse`, `MillieHouse`, `Clinic`, `FurnitureShop`, `House`, `Fountain`, `PetStore`, `CityBlock`, `ClothingShop` (Abby's boutique mushroom house, added last). |
 | `Building` | `Kind`, `Area`, `X`, `Z`, `Rotation` (yaw; at 0 the front faces -Z), `Width` (local X), `Depth` (local Z), `Height` (suggested drawing height), `Center`, `Front`, `ToWorld(localX, localZ)`, `Contains(x, z, margin)`. |
-| `Buildings.All`, `Count`, `First(kind)`, `TownSquare` (0, 215), `CityPlaza` (0, -215) | Every building and the fountain, in a fixed order: Town draws the Town ones, PetCity the PetCity ones, exactly there. |
+| `Buildings.All`, `Count`, `First(kind)`, `TownSquare` (0, 215), `CityPlaza` (0, -215) | Every building and the fountain, in a fixed order (Abby's clothing shop last): Town draws the Town ones, PetCity the PetCity ones, exactly there. |
 
 Every named place is walkable with 0.5 m to spare and clear of obstacles for a 0.5 m walker, and
 everything outdoors is reachable on foot from your house's door (the tests flood-fill it); the

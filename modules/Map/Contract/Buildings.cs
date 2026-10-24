@@ -22,6 +22,8 @@ public enum BuildingKind
     PetStore,
     /// <summary>A tall, colorful cartoon city block with windows, in Pet City.</summary>
     CityBlock,
+    /// <summary>Abby's clothing shop: a boutique mushroom house on the town square's south side; she stands at its door (<see cref="Places.AbbySpot"/>).</summary>
+    ClothingShop,
 }
 
 /// <summary>
@@ -116,6 +118,9 @@ public static class Buildings
         new(BuildingKind.CityBlock, Area.PetCity, 46f, -256f, FaceWest, 12f, 12f, 23f),
         new(BuildingKind.CityBlock, Area.PetCity, -24f, -276f, FaceSouth, 14f, 10f, 20f),
         new(BuildingKind.CityBlock, Area.PetCity, 24f, -276f, FaceSouth, 14f, 10f, 24f),
+
+        // Mushroom Town again: Abby's clothing shop, south across the square from the road, its door facing the fountain.
+        new(BuildingKind.ClothingShop, Area.Town, 0f, 246f, FaceNorth, 10f, 9f, 8f),
     };
 
     /// <summary>Every building, in a fixed order.</summary>
