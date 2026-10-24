@@ -9,13 +9,12 @@ namespace Fungtopia.Save.View;
 /// The pause menu and the "Saved!" toast. Esc or Start opens the menu while playing (the Core
 /// says when: not on the start screen nor in another module's menu); its Core publishes
 /// <c>UiFocus</c> while it is open, so the player stands still. The game keeps ticking behind it.
-/// Also points the Core at Godot's user://saves folder.
+/// The highlight moves only by the Input module's paced <c>MenuNav</c> steps, which the Core
+/// takes; this view handles Esc / Start, confirm, back and the mouse. Also points the Core at
+/// Godot's user://saves folder.
 /// </summary>
 public partial class SaveView : CanvasLayer, IModuleView
 {
-    private const float StickOn = 0.6f;
-    private const float StickOff = 0.3f;
-
     private SaveModule? _save;
     private PauseMenu _menu = null!;
     private SaveToast _toast = null!;
@@ -28,7 +27,6 @@ public partial class SaveView : CanvasLayer, IModuleView
     private float _appear;
     private int _seenSaves;
     private int _seenLoads;
-    private int _stick;
 
     /// <summary>The slot the Choice page shows.</summary>
     public int ChosenSlot
@@ -37,7 +35,7 @@ public partial class SaveView : CanvasLayer, IModuleView
         set => _menu.ChosenSlot = value;
     }
 
-    /// <summary>For the preview: opening the menu keeps the page set by <see cref="Show"/>, and hovering highlights nothing.</summary>
+    /// <summary>For the preview: hovering highlights nothing (the page set by <see cref="Show"/> stays as shown).</summary>
     public bool KeepPage { get; set; }
 
     public void Bind(IModule module)
@@ -105,12 +103,7 @@ public partial class SaveView : CanvasLayer, IModuleView
             _menu.Visible = _shown;
             _hintBar.Visible = _shown;
             _appear = 0f;
-            if (_shown && !KeepPage)
-            {
-                _menu.Page = MenuPage.Main;
-                _menu.Highlight = 0;
-            }
-            else
+            if (!_shown)
                 GodotInput.MouseMode = GodotInput.MouseModeEnum.Captured;
         }
         if (!_shown)
@@ -119,6 +112,8 @@ public partial class SaveView : CanvasLayer, IModuleView
             GodotInput.MouseMode = GodotInput.MouseModeEnum.Visible;
         _appear = Mathf.Min(1f, _appear + (float)delta / 0.18f);
         _menu.Appear = _appear;
+        _menu.Page = _save.Page;
+        _menu.Highlight = _save.Highlight;
         _menu.Slots = _save.Slots;
         _menu.CurrentSlot = _save.Current;
         UpdateHints();
@@ -168,7 +163,7 @@ public partial class SaveView : CanvasLayer, IModuleView
                     return;
                 int hover = _menu.ItemAt(motion.Position);
                 if (hover >= 0)
-                    _menu.Highlight = hover;
+                    Highlight(hover);
                 return;
             case InputEventMouseButton { ButtonIndex: MouseButton.Left } button:
                 // Keep the click from the game (the Input view would recapture the mouse on it).
@@ -178,7 +173,7 @@ public partial class SaveView : CanvasLayer, IModuleView
                 int item = _menu.ItemAt(button.Position);
                 if (item >= 0)
                 {
-                    _menu.Highlight = item;
+                    Highlight(item);
                     Confirm();
                 }
                 return;
@@ -186,35 +181,15 @@ public partial class SaveView : CanvasLayer, IModuleView
 
         if (IsPause(e))
         {
-            if (_menu.Page == MenuPage.Main)
+            if (_save.Page == MenuPage.Main)
                 Resume();
             else
                 Back();
         }
-        else if (Pressed(e, Key.Up, JoyButton.DpadUp) || Pressed(e, Key.Left, JoyButton.DpadLeft))
-            Move(-1);
-        else if (Pressed(e, Key.Down, JoyButton.DpadDown) || Pressed(e, Key.Right, JoyButton.DpadRight))
-            Move(1);
         else if (Pressed(e, Key.Enter, JoyButton.A) || Pressed(e, Key.KpEnter, JoyButton.A) || Pressed(e, Key.Space, JoyButton.A))
             Confirm();
         else if (Pressed(e, Key.Backspace, JoyButton.B))
             Back();
-        else if (e is InputEventJoypadMotion { Axis: JoyAxis.LeftY or JoyAxis.LeftX } stick)
-        {
-            // One step each time the stick is pushed past StickOn; it re-arms near the middle.
-            if (stick.AxisValue <= -StickOn && _stick != -1)
-            {
-                _stick = -1;
-                Move(-1);
-            }
-            else if (stick.AxisValue >= StickOn && _stick != 1)
-            {
-                _stick = 1;
-                Move(1);
-            }
-            else if (Mathf.Abs(stick.AxisValue) < StickOff)
-                _stick = 0;
-        }
     }
 
     private static bool IsPause(InputEvent e) => Pressed(e, Key.Escape, JoyButton.Start);
@@ -226,18 +201,18 @@ public partial class SaveView : CanvasLayer, IModuleView
         _ => false,
     };
 
-    private void Move(int by)
+    private void Highlight(int item)
     {
-        int count = PauseMenu.ItemCount(_menu.Page);
-        _menu.Highlight = (_menu.Highlight + by + count) % count;
+        _save!.SetHighlight(item);
+        _menu.Highlight = _save.Highlight;
     }
 
     private void Confirm()
     {
         if (_save == null)
             return;
-        int item = _menu.Highlight;
-        switch (_menu.Page)
+        int item = _save.Highlight;
+        switch (_save.Page)
         {
             case MenuPage.Main:
                 if (item == 0)
@@ -278,7 +253,7 @@ public partial class SaveView : CanvasLayer, IModuleView
 
     private void Back()
     {
-        if (_menu.Page == MenuPage.Choice)
+        if (_save?.Page == MenuPage.Choice)
             Show(MenuPage.Slots, _menu.ChosenSlot - 1);
         else
             Show(MenuPage.Main, 2);
@@ -289,8 +264,9 @@ public partial class SaveView : CanvasLayer, IModuleView
     {
         if (page == MenuPage.Choice && _menu.ChosenSlot < 1)
             _menu.ChosenSlot = 1;
+        _save?.ShowPage(page, highlight);
         _menu.Page = page;
-        _menu.Highlight = highlight;
+        _menu.Highlight = _save?.Highlight ?? highlight;
         _appear = 0.6f;
     }
 

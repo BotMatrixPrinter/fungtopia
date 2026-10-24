@@ -10,6 +10,14 @@ using Fungtopia.Wallet;
 
 namespace Fungtopia.Save;
 
+/// <summary>Which screen of the pause menu shows.</summary>
+public enum MenuPage
+{
+    Main,
+    Slots,
+    Choice,
+}
+
 /// <summary>
 /// Saves and loads the game: three slots, each with a manual save and a separate autosave.
 /// Requests (<see cref="SaveGame"/>, <see cref="LoadGame"/>, <see cref="DeleteSlot"/>,
@@ -19,7 +27,8 @@ namespace Fungtopia.Save;
 public sealed class SaveModule : IModule,
     IMessageHandler<SaveGame>, IMessageHandler<LoadGame>, IMessageHandler<DeleteSlot>, IMessageHandler<NewGameInSlot>,
     IMessageHandler<SavePart>, IMessageHandler<UiFocus>, IMessageHandler<StartScreenState>, IMessageHandler<GameStart>,
-    IMessageHandler<PlayerState>, IMessageHandler<WalletState>, IMessageHandler<TimeOfDay>, IMessageHandler<ActiveDevice>
+    IMessageHandler<PlayerState>, IMessageHandler<WalletState>, IMessageHandler<TimeOfDay>, IMessageHandler<ActiveDevice>,
+    IMessageHandler<MenuNav>
 {
     /// <summary>The pause menu's <see cref="UiFocus.Owner"/> ("SAVE").</summary>
     public const int MenuOwner = 0x53415645;
@@ -128,6 +137,20 @@ public sealed class SaveModule : IModule,
     /// <summary>The device the player used last (<see cref="ActiveDevice"/>); the pause menu's hints show its buttons.</summary>
     public DeviceKind Device { get; private set; }
 
+    /// <summary>The pause menu's page (Main each time it opens).</summary>
+    public MenuPage Page { get; private set; }
+
+    /// <summary>The highlighted item of <see cref="Page"/>, 0 .. <see cref="ItemCount"/> - 1.</summary>
+    public int Highlight { get; private set; }
+
+    /// <summary>Number of items on a page (the last is always Back, except on Main).</summary>
+    public static int ItemCount(MenuPage page) => page switch
+    {
+        MenuPage.Main => 4,
+        MenuPage.Slots => SaveSlots.Count + 1,
+        _ => 3,
+    };
+
     public void Start(IMessageBus bus)
     {
         ArgumentNullException.ThrowIfNull(bus);
@@ -144,6 +167,7 @@ public sealed class SaveModule : IModule,
         bus.Subscribe<WalletState>(this);
         bus.Subscribe<TimeOfDay>(this);
         bus.Subscribe<ActiveDevice>(this);
+        bus.Subscribe<MenuNav>(this);
     }
 
     public void Handle(in SaveGame message) => Enqueue(Kind.Save, message.Slot, message.Auto);
@@ -219,6 +243,31 @@ public sealed class SaveModule : IModule,
 
     public void Handle(in ActiveDevice message) => Device = message.Kind;
 
+    /// <summary>
+    /// The open pause menu moves its highlight only by the Input module's paced steps: up or left
+    /// one item back, down or right one forward, wrapping around.
+    /// </summary>
+    public void Handle(in MenuNav message)
+    {
+        if (!MenuOpen)
+            return;
+        int by = message.Vertical != 0 ? message.Vertical : message.Horizontal;
+        if (by == 0)
+            return;
+        int count = ItemCount(Page);
+        Highlight = ((Highlight + by) % count + count) % count;
+    }
+
+    /// <summary>Shows a page of the pause menu with an item highlighted (clamped to the page).</summary>
+    public void ShowPage(MenuPage page, int highlight)
+    {
+        Page = page;
+        SetHighlight(highlight);
+    }
+
+    /// <summary>Highlights an item of the current page (the mouse hovers or clicks it).</summary>
+    public void SetHighlight(int item) => Highlight = Math.Clamp(item, 0, ItemCount(Page) - 1);
+
     /// <summary>The pause menu's Save, Load and the like go through these (carried out next tick).</summary>
     public void RequestSave(int slot, bool auto) => Enqueue(Kind.Save, slot, auto);
 
@@ -228,12 +277,17 @@ public sealed class SaveModule : IModule,
 
     public void RequestNewGame(int slot) => Enqueue(Kind.NewGame, slot, false);
 
-    /// <summary>Opens the pause menu if <see cref="CanOpenMenu"/>; <see cref="UiFocus"/> follows on the next tick.</summary>
+    /// <summary>
+    /// Opens the pause menu on its Main page, Resume highlighted, if <see cref="CanOpenMenu"/>;
+    /// <see cref="UiFocus"/> follows on the next tick.
+    /// </summary>
     public bool OpenMenu()
     {
         if (!CanOpenMenu)
             return false;
         MenuOpen = true;
+        Page = MenuPage.Main;
+        Highlight = 0;
         return true;
     }
 

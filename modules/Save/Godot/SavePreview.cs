@@ -69,6 +69,7 @@ public partial class SavePreview : Node
 
         view.KeepPage = true;
         view.ChosenSlot = 1;
+        _save.OpenMenu();
         switch (page)
         {
             case "slots":
@@ -84,7 +85,6 @@ public partial class SavePreview : Node
                 view.Show(MenuPage.Main, 0);
                 break;
         }
-        _save.OpenMenu();
     }
 
     /// <summary>

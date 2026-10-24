@@ -10,12 +10,12 @@ the in-game pause menu (Esc / Start): Resume, Save, Load, Quit to Title.
 - `Core/` — `Fungtopia.Save.Core`: `SaveModule`, the module's one `IModule`; `SaveFiles` (the
   files of one folder: paths, atomic write, read, delete, the JSON format) and `SaveData` (one
   file); `PauseHints` (the pause menu's button hint line). It reads the Input (`UiFocus`,
-  `ActiveDevice`), StartScreen (`GameStart`, `StartScreenState`), Player
+  `ActiveDevice`, `MenuNav`), StartScreen (`GameStart`, `StartScreenState`), Player
   (`PlayerState`), Wallet (`WalletState`) and DayNight (`TimeOfDay`) Contracts.
 - `Godot/` — `Main.tscn` with `SaveView` (a `CanvasLayer` on layer 60, over the HUD and the
   start screen), drawn by `PauseMenu` and `SaveToast`; `Preview.tscn` (`SavePreview`, for
   screenshots).
-- `Tests/` — `SaveModuleTests.cs`: xUnit tests of `SaveModule`, `SaveFiles` and `PauseHints` with a fake
+- `Tests/` — `SaveModuleTests.cs`: xUnit tests of `SaveModule`, `SaveFiles` and `PauseHints` with a fake paced `MenuNav` and a fake
   synchronous `IMessageBus` and fake saving modules, on a temp folder.
 
 Test it with `./test.sh Save` from the repository root.
@@ -91,6 +91,13 @@ another module's tick.
   closes it. On the next tick the Core publishes `UiFocus(SaveModule.MenuOwner, true)` (false
   when it closes): the Input module then stops moving the player. `UiFocus` from `MenuOwner`
   does not count as another menu.
+- **Menu selection.** The Core keeps the menu's `Page` (`MenuPage` Main / Slots / Choice; Main
+  with Resume highlighted each time it opens) and `Highlight`. While the menu is open, each
+  `MenuNav` step from the Input module moves the highlight one item (up or left back, down or
+  right forward, wrapping); nothing else moves it, so a held direction moves one item per 0.2 s
+  and a short flick exactly one, from the stick, D-pad, arrow keys and WASD alike.
+  `ItemCount(page)` is 4 on Main, 4 on Slots (three slots and Back), 3 on Choice.
+  `ShowPage(page, item)` and `SetHighlight(item)` (the mouse) clamp the item to the page.
 - **Device.** `Device` is the latest `ActiveDevice.Kind` (keyboard and mouse until one arrives).
   `PauseHints.Line(device, mainPage, iconSize)` is the hint line as RichTextLabel BBCode with that
   device's icons only (`Prompts.Rich`): "[Up][Down] Move  [Confirm] Choose  [Pause] Resume" on the
@@ -119,7 +126,8 @@ Xbox and other pads; D-pad, Cross and Options / Circle on PlayStation; Nintendo'
 as soon as the device, the page or the screen size changes; text and icons scale with the screen
 and the bar fits around them.
 
-Up / Down (or Left / Right, the D-pad, the left stick) move the highlight; Enter, Space or A
+The highlight moves only by the Core's `MenuNav` steps (the arrow keys, W A S D, the D-pad and the
+left stick, paced by the Input module); the view reads no direction itself. Enter, Space or A
 choose; Backspace or B go back; Esc or Start resume (or go back from the Load pages). The mouse
 is visible while it is open: hovering highlights, clicking chooses (the click is kept from the
 game). Loading closes the menu ("Loaded!"); autosaves show a small "Autosaved" toast.

@@ -67,6 +67,36 @@ internal sealed class FakeSaver : IMessageHandler<CollectSave>, IMessageHandler<
     }
 }
 
+/// <summary>
+/// Fake of the Input module's MenuNav, paced as its Contract says: a step on the tick a direction
+/// is first pushed, then one per 0.2 s (12 ticks) while it stays held, never two closer than that;
+/// every other tick both fields are 0. Publishes one per tick, like the Input module.
+/// </summary>
+internal sealed class FakeMenuNav
+{
+    public const int RepeatTicks = 12;
+    private readonly IMessageBus _bus;
+    private int _sinceStep = RepeatTicks;
+
+    public FakeMenuNav(IMessageBus bus) => _bus = bus;
+
+    /// <summary>One tick with a direction held (vertical -1 up / +1 down, horizontal -1 left / +1 right, 0 none).</summary>
+    public void Tick(int vertical, int horizontal = 0)
+    {
+        bool held = vertical != 0 || horizontal != 0;
+        if (held && _sinceStep >= RepeatTicks)
+        {
+            _sinceStep = 1;
+            _bus.Publish(vertical != 0 ? new MenuNav(vertical, 0) : new MenuNav(0, horizontal));
+        }
+        else
+        {
+            _sinceStep++;
+            _bus.Publish(new MenuNav(0, 0));
+        }
+    }
+}
+
 public sealed class SaveModuleTests : IDisposable
 {
     private const double Step = 1.0 / 60.0;
@@ -616,6 +646,127 @@ public sealed class SaveModuleTests : IDisposable
         Assert.False(save.MenuOpen);
         Assert.Equal(3, save.Current);
         Assert.Equal(new UiFocus(SaveModule.MenuOwner, false), bus.All<UiFocus>().Last());
+    }
+
+    // ---- Pause menu navigation ----
+
+    /// <summary>A module playing with its pause menu open, and the Input module's MenuNav.</summary>
+    private (FakeBus Bus, SaveModule Save, FakeMenuNav Nav) OpenMenu()
+    {
+        var bus = new FakeBus();
+        var save = NewModule(bus);
+        StartPlaying(bus);
+        Tick(save);
+        Assert.True(save.OpenMenu());
+        return (bus, save, new FakeMenuNav(bus));
+    }
+
+    /// <summary>One tick: the Input module publishes its MenuNav, then Save ticks.</summary>
+    private void NavTick(SaveModule save, FakeMenuNav nav, int vertical, int horizontal = 0)
+    {
+        nav.Tick(vertical, horizontal);
+        Tick(save);
+    }
+
+    [Fact]
+    public void Opening_the_pause_menu_shows_Main_with_Resume_highlighted()
+    {
+        var (_, save, _) = OpenMenu();
+        save.ShowPage(MenuPage.Slots, 2);
+        save.CloseMenu();
+        Assert.True(save.OpenMenu());
+        Assert.Equal(MenuPage.Main, save.Page);
+        Assert.Equal(0, save.Highlight);
+    }
+
+    [Fact]
+    public void A_held_direction_moves_one_item_per_fifth_of_a_second()
+    {
+        var (_, save, nav) = OpenMenu();
+        save.ShowPage(MenuPage.Slots, 0);
+        var highlights = new List<int>();
+        // Down held for 0.5 s (30 ticks): steps on ticks 0, 12 and 24 only.
+        for (int i = 0; i < 30; i++)
+        {
+            NavTick(save, nav, 1);
+            highlights.Add(save.Highlight);
+        }
+        var expected = Enumerable.Range(0, 30).Select(i => i < 12 ? 1 : i < 24 ? 2 : 3).ToList();
+        Assert.Equal(expected, highlights);
+        // Held on, it wraps from Back to the first slot on tick 36 (0.6 s).
+        for (int i = 0; i < 6; i++)
+            NavTick(save, nav, 1);
+        Assert.Equal(3, save.Highlight);
+        NavTick(save, nav, 1);
+        Assert.Equal(0, save.Highlight);
+    }
+
+    [Fact]
+    public void A_short_flick_moves_exactly_one_item()
+    {
+        var (_, save, nav) = OpenMenu();
+        // A two-tick flick of the stick, then 1 s centered.
+        NavTick(save, nav, 1);
+        NavTick(save, nav, 1);
+        for (int i = 0; i < 60; i++)
+            NavTick(save, nav, 0);
+        Assert.Equal(1, save.Highlight);
+        // A one-tick flick up moves back exactly one.
+        NavTick(save, nav, -1);
+        for (int i = 0; i < 60; i++)
+            NavTick(save, nav, 0);
+        Assert.Equal(0, save.Highlight);
+    }
+
+    [Fact]
+    public void Each_MenuNav_step_moves_one_item_with_wrap_and_left_right_like_up_down()
+    {
+        var (bus, save, _) = OpenMenu();
+        bus.Publish(new MenuNav(-1, 0));
+        Assert.Equal(3, save.Highlight); // Resume wraps up to Quit to Title.
+        bus.Publish(new MenuNav(1, 0));
+        Assert.Equal(0, save.Highlight);
+        bus.Publish(new MenuNav(0, 1));
+        Assert.Equal(1, save.Highlight);
+        bus.Publish(new MenuNav(0, -1));
+        Assert.Equal(0, save.Highlight);
+        // Ticks without a step move nothing.
+        for (int i = 0; i < 30; i++)
+        {
+            bus.Publish(new MenuNav(0, 0));
+            Tick(save);
+        }
+        Assert.Equal(0, save.Highlight);
+
+        save.ShowPage(MenuPage.Choice, 2);
+        bus.Publish(new MenuNav(1, 0));
+        Assert.Equal(0, save.Highlight); // Back wraps down to Manual save (3 items).
+    }
+
+    [Fact]
+    public void MenuNav_is_ignored_while_the_pause_menu_is_closed()
+    {
+        var (bus, save, _) = OpenMenu();
+        save.CloseMenu();
+        bus.Publish(new MenuNav(1, 0));
+        bus.Publish(new MenuNav(0, 1));
+        Assert.Equal(0, save.Highlight);
+    }
+
+    [Fact]
+    public void The_mouse_and_pages_set_the_highlight_within_the_page()
+    {
+        var (bus, save, _) = OpenMenu();
+        save.SetHighlight(2);
+        Assert.Equal(2, save.Highlight);
+        save.SetHighlight(9);
+        Assert.Equal(3, save.Highlight);
+        save.ShowPage(MenuPage.Choice, 5);
+        Assert.Equal(MenuPage.Choice, save.Page);
+        Assert.Equal(2, save.Highlight);
+        Assert.Equal(4, SaveModule.ItemCount(MenuPage.Main));
+        Assert.Equal(SaveSlots.Count + 1, SaveModule.ItemCount(MenuPage.Slots));
+        Assert.Equal(3, SaveModule.ItemCount(MenuPage.Choice));
     }
 
     // ---- Button hints ----

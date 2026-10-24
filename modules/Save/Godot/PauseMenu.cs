@@ -5,18 +5,10 @@ using Godot;
 
 namespace Fungtopia.Save.View;
 
-/// <summary>Which screen of the pause menu shows.</summary>
-public enum MenuPage
-{
-    Main,
-    Slots,
-    Choice,
-}
-
 /// <summary>
 /// Draws the pause menu (a cream panel with a spotted mushroom cap on a dimmed screen) and says
-/// which item is at a point. It keeps no game state: <see cref="SaveView"/> tells it the page,
-/// the highlighted item and the slot list.
+/// which item is at a point. It keeps no game state: <see cref="SaveView"/> tells it the page and
+/// the highlighted item (the Core's) and the slot list.
 /// </summary>
 public partial class PauseMenu : Control
 {
@@ -67,14 +59,6 @@ public partial class PauseMenu : Control
         MouseFilter = MouseFilterEnum.Ignore;
         SetAnchorsPreset(LayoutPreset.FullRect);
     }
-
-    /// <summary>Number of items on a page (the last is always Back, except on Main).</summary>
-    public static int ItemCount(MenuPage page) => page switch
-    {
-        MenuPage.Main => MainItems.Length,
-        MenuPage.Slots => SaveSlots.Count + 1,
-        _ => 3,
-    };
 
     /// <summary>The item under <paramref name="point"/> (as last drawn), or -1.</summary>
     public int ItemAt(Vector2 point)
