@@ -4,7 +4,8 @@
 #
 # Chunky, cute, mushroom-themed furniture: one object per kind, named like Fungtopia.Home's
 # FurnitureKind (BasicBed, MushroomBed, Rug, Lamp, Table, Chair, PottedMushroom, Painting, PetBed,
-# Bookshelf, ToadstoolStool) plus the CatalogBook on its stand. Each stands on the floor at the
+# Bookshelf, ToadstoolStool) plus the CatalogBook on its stand and the Wardrobe that comes with
+# the house (no face: only creatures have eyes). Each stands on the floor at the
 # origin, centered on its footprint (width along X, depth along Blender Y = Godot Z, a little
 # smaller than its 0.5 m grid cells), its back toward Blender +Y (Godot -Z, a wall) and its front
 # toward Blender -Y (Godot +Z, into the room). Materials carry plain colors only; the game draws
@@ -347,6 +348,39 @@ def catalog_book():
     return p.finish()
 
 
+def wardrobe():
+    p = Piece("Wardrobe")
+    # A big, chunky wooden wardrobe (1.5 x 1 m of floor, 2.2 m tall): stubby round feet, two
+    # rounded doors with mushroom-shaped panels and round knobs, a drawer below, and a spotted
+    # mushroom-cap crown on top. No face.
+    w, d, h = 1.38, 0.78, 1.9
+    for x in (-1, 1):
+        for y in (-1, 1):
+            p.add(sphere(0.08, T(x * (w / 2 - 0.12), y * (d / 2 - 0.12), 0.07), scale=(1, 1, 0.9)), "WoodDark")
+    p.add(box((w, d, h - 0.1), T(0, 0, 0.1 + (h - 0.1) / 2), bevel=0.09), "Wood")
+    p.add(box((w + 0.06, d + 0.06, 0.1), T(0, 0, h + 0.02), bevel=0.04), "WoodDark")
+    front = -d / 2
+    # The drawer with a little handle.
+    p.add(box((w - 0.16, 0.05, 0.26), T(0, front - 0.005, 0.32), bevel=0.04), "WoodDark")
+    p.add(sphere(0.04, T(0, front - 0.04, 0.32), scale=(1.6, 0.8, 0.8), segments=12, rings=6), "Stem")
+    # Two doors, a seam between them; each door has a mushroom panel (stem and spotted cap).
+    door_w, door_h, door_z = w / 2 - 0.1, 1.28, 1.15
+    for side in (-1, 1):
+        x = side * (door_w / 2 + 0.03)
+        p.add(box((door_w, 0.04, door_h), T(x, front - 0.01, door_z), bevel=0.05), "Wood")
+        p.add(box((0.12, 0.03, 0.26), T(x, front - 0.035, door_z - 0.17), bevel=0.02), "Stem")
+        p.add(sphere(0.2, T(x, front - 0.03, door_z), scale=(1, 0.2, 0.55)), "Cap")
+        for dx, dz, r in ((-0.09, 0.02, 0.032), (0.08, 0.04, 0.028), (0.0, 0.07, 0.024)):
+            p.add(sphere(r, T(x + dx, front - 0.066, door_z + dz), scale=(1, 0.4, 1), segments=10, rings=5), "Spots")
+        p.add(sphere(0.045, T(side * 0.07, front - 0.05, door_z - 0.35), segments=14, rings=7), "Stem")
+    p.add(box((0.02, 0.05, door_h), T(0, front - 0.012, door_z), bevel=0.0), "WoodDark")
+    # The mushroom-cap crown on top, with spots.
+    p.add(cylinder(0.16, 0.12, T(0, 0, h + 0.13)), "Stem")
+    p.add(dome(0.62, 0.3, T(0, 0, h + 0.17) @ S(1, 0.62, 1)), "Cap")
+    spots_on_dome(p, 0.62, 0.3, T(0, 0, h + 0.17) @ S(1, 0.62, 1), count=7, size=0.13)
+    return p.finish()
+
+
 bpy.ops.wm.read_factory_settings(use_empty=True)
 for name, color in COLORS.items():
     material(name, color)
@@ -363,6 +397,7 @@ pet_bed()
 bookshelf()
 toadstool_stool()
 catalog_book()
+wardrobe()
 
 path = os.path.join(HERE, "furniture.glb")
 bpy.ops.export_scene.gltf(filepath=path, export_format="GLB", export_yup=True)

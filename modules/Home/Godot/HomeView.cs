@@ -8,7 +8,7 @@ namespace Fungtopia.Home.View;
 
 /// <summary>
 /// Draws the home from the Home Core: the furniture placed in the house, the catalog book on its
-/// stand, the pets at home (wandering, napping, playing), and while decorating the floor grid,
+/// stand, the wardrobe, the pets at home (wandering, napping, playing), and while decorating the floor grid,
 /// the held item at the cursor over a green (fits) or red (does not) footprint. Its
 /// <see cref="HomePanels"/> show the prompts, the shop's catalog and the decorating help. Reads
 /// the shop's and decorating's own buttons and hands them to the Core (Interact comes through
@@ -40,6 +40,14 @@ public partial class HomeView : Node3D, IModuleView
             book.Position = new Vector3(p.X, p.Y, p.Z);
             book.Rotation = new Vector3(0f, MathF.PI, 0f); // facing north, into the room
             AddChild(book);
+        }
+        // The wardrobe comes with the house: always there, against the north wall, doors facing into the room.
+        var wardrobe = HomeModels.Instance(HomeModels.Furniture, "Wardrobe");
+        if (wardrobe != null)
+        {
+            var p = HomeRoom.WardrobePosition;
+            wardrobe.Position = new Vector3(p.X, p.Y, p.Z);
+            AddChild(wardrobe);
         }
 
         var room = Areas.Home;

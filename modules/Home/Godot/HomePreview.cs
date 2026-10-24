@@ -16,7 +16,7 @@ namespace Fungtopia.Home.View;
 /// and keeps the Cat and the Dog at home (the Crow is out). The room's walls and floor are a simple
 /// backdrop (the Map module draws the real ones), its south wall left out so the camera can look
 /// in. The environment variable HOME_PREVIEW = "decorate" shows placement mode with an item held,
-/// "shop" the furniture shop's catalog.
+/// "shop" the furniture shop's catalog, "wardrobe" the player by the wardrobe (its prompt showing).
 /// </summary>
 public partial class HomePreview : Node3D
 {
@@ -79,6 +79,13 @@ public partial class HomePreview : Node3D
             _home.Buy(FurnitureKind.Bookshelf);
             _home.StartDecorating();
             _home.MoveCursor(4, 2);
+        }
+        if (_mode == "wardrobe")
+        {
+            var front = HomeRoom.WardrobeFront;
+            _bus.Publish(new PlayerState(front + new System.Numerics.Vector3(0f, 0f, 0.6f), 0f, System.Numerics.Vector3.Zero, true, 10, 10, true, CharacterKind.Girl));
+            camera.LookAtFromPosition(new Vector3(front.X - 2.6f, y + 2.4f, front.Z + 4.4f), new Vector3(front.X - 0.3f, y + 1.0f, front.Z - 0.5f), Vector3.Up);
+            return;
         }
         camera.LookAtFromPosition(new Vector3(601.8f, y + 3.7f, 605.8f), new Vector3(598.4f, y + 0.4f, 598.4f), Vector3.Up);
     }

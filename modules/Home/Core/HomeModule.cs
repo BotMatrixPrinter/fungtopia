@@ -6,6 +6,7 @@ using Fungtopia.Pet;
 using Fungtopia.Player;
 using Fungtopia.Shell;
 using Fungtopia.Wallet;
+using Fungtopia.Wardrobe;
 
 namespace Fungtopia.Home;
 
@@ -17,6 +18,7 @@ public enum HomePrompt
     Leave,
     Shop,
     Decorate,
+    Wardrobe,
 }
 
 /// <summary>How the latest purchase went.</summary>
@@ -97,11 +99,12 @@ public struct HomePet
 /// <summary>
 /// The player's home: the house door (enter and leave by teleporting), the furniture shop in
 /// town (bought with <see cref="SpendCoins"/>), placing furniture on the home's floor grid, and
-/// the pets that stay at home. Publishes <see cref="HomeState"/> every tick. Kept for the session
+/// the pets that stay at home, and the wardrobe that comes with the house (Interact publishes
+/// <see cref="OpenWardrobe"/>; nothing else is usable while a wardrobe screen is open). Publishes <see cref="HomeState"/> every tick. Kept for the session
 /// only (not saved to disk yet).
 /// </summary>
 public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessageHandler<PlayerInput>,
-    IMessageHandler<SpendResult>, IMessageHandler<WalletState>, IMessageHandler<OwnedPets>
+    IMessageHandler<SpendResult>, IMessageHandler<WalletState>, IMessageHandler<OwnedPets>, IMessageHandler<WardrobeState>
 {
     /// <summary>How many pieces of furniture the player can own.</summary>
     public const int MaxItems = 64;
@@ -169,7 +172,7 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
     /// <summary>Cat, Dog and Crow at home (indexed by <see cref="PetKind"/>); only <see cref="HomePet.Present"/> ones are there.</summary>
     public ReadOnlySpan<HomePet> Pets => _pets;
 
-    /// <summary>What Interact would do now (nothing while the shop is open or while decorating).</summary>
+    /// <summary>What Interact would do now (nothing while the shop is open, while decorating, or while a wardrobe screen is open).</summary>
     public HomePrompt Prompt { get; private set; }
 
     /// <summary>The player is in the house (the latest <see cref="PlayerState.Area"/> is Home).</summary>
@@ -179,6 +182,9 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
     public int Coins { get; private set; }
 
     public long Ticks { get; private set; }
+
+    /// <summary>A Wardrobe screen is open (the latest <see cref="WardrobeState.Open"/>): no decorating, leaving or other Interact.</summary>
+    public bool WardrobeOpen { get; private set; }
 
     // Shop
 
@@ -220,6 +226,7 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
         bus.Subscribe<SpendResult>(this);
         bus.Subscribe<WalletState>(this);
         bus.Subscribe<OwnedPets>(this);
+        bus.Subscribe<WardrobeState>(this);
     }
 
     public void Tick(in TickContext context)
@@ -230,10 +237,13 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
         bool alive = _hasPlayer && _player.Alive;
         if (ShopOpen && (!alive || Distance(_player.Position, Places.FurnitureShopSpot.Position) > ShopLeaveDistance))
             ShopOpen = false;
-        if (Decorating && (!alive || _player.Area != Area.Home))
+        if (Decorating && (!alive || _player.Area != Area.Home || WardrobeOpen))
             StopDecorating();
-        Prompt = ShopOpen || Decorating || !alive ? HomePrompt.None : PromptAt(_player.Position);
+        Prompt = ShopOpen || Decorating || WardrobeOpen || !alive ? HomePrompt.None : PromptAt(_player.Position);
 
+        // A press made while a wardrobe screen is open belongs to that screen.
+        if (WardrobeOpen)
+            _interact = false;
         if (_interact)
         {
             _interact = false;
@@ -265,6 +275,8 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
     }
 
     public void Handle(in WalletState message) => Coins = message.Coins;
+
+    public void Handle(in WardrobeState message) => WardrobeOpen = message.Open;
 
     public void Handle(in SpendResult message)
     {
@@ -312,6 +324,8 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
                 return HomePrompt.Leave;
             if (Distance(p, HomeRoom.BookPosition) <= IndoorReach)
                 return HomePrompt.Decorate;
+            if (Distance(p, HomeRoom.WardrobeFront) <= IndoorReach)
+                return HomePrompt.Wardrobe;
             return HomePrompt.None;
         }
         if (Distance(p, Places.HomeDoor.Position) <= OutdoorReach)
@@ -336,6 +350,9 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
                 break;
             case HomePrompt.Decorate:
                 StartDecorating();
+                break;
+            case HomePrompt.Wardrobe:
+                _bus!.Publish(new OpenWardrobe());
                 break;
         }
     }
@@ -409,9 +426,11 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
 
     // Decorating
 
-    /// <summary>Opens placement mode, holding the first furniture not yet placed (if any).</summary>
+    /// <summary>Opens placement mode, holding the first furniture not yet placed (if any); not while a wardrobe screen is open.</summary>
     public void StartDecorating()
     {
+        if (WardrobeOpen)
+            return;
         Decorating = true;
         Held = -1;
         CursorRotation = 0;
@@ -547,7 +566,7 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
             {
                 int i = ItemAt(c, r);
                 bool book = c >= HomeRoom.BookColumn && c < HomeRoom.BookColumn + HomeRoom.BookSize && r >= HomeRoom.BookRow;
-                _petBlocked[c * HomeRoom.Rows + r] = book || (i >= 0 && _items[i].Kind != FurnitureKind.PetBed);
+                _petBlocked[c * HomeRoom.Rows + r] = book || HomeRoom.UnderWardrobe(c, r) || (i >= 0 && _items[i].Kind != FurnitureKind.PetBed);
             }
     }
 

@@ -7,6 +7,7 @@ using Fungtopia.Pet;
 using Fungtopia.Player;
 using Fungtopia.Shell;
 using Fungtopia.Wallet;
+using Fungtopia.Wardrobe;
 using Xunit;
 
 namespace Fungtopia.Home.Tests;
@@ -23,6 +24,7 @@ public class HomeModuleTests
         public readonly List<TeleportPlayer> Teleports = new();
         public readonly List<SpendCoins> Spends = new();
         public readonly List<HomeState> States = new();
+        public int OpenWardrobes;
         public int? Coins;
 
         public void Subscribe<T>(IMessageHandler<T> handler) where T : struct
@@ -38,6 +40,8 @@ public class HomeModuleTests
                 Teleports.Add(teleport);
             if (message is HomeState state)
                 States.Add(state);
+            if (message is OpenWardrobe)
+                OpenWardrobes++;
             if (_handlers.TryGetValue(typeof(T), out var list))
                 foreach (var handler in list)
                     ((IMessageHandler<T>)handler).Handle(message);
@@ -396,6 +400,151 @@ public class HomeModuleTests
         Assert.False(home.Decorating);
     }
 
+    // The wardrobe
+
+    private static void WardrobeScreen(FakeBus bus, bool open) => bus.Publish(new WardrobeState(open, false));
+
+    [Fact]
+    public void TheWardrobeStandsInTheHouseFromTheStartAndIsNotFurniture()
+    {
+        var (home, bus) = Started();
+        home.Tick(Step);
+        // Not one of the owned pieces: the house still holds just the basic bed.
+        Assert.Equal(1, home.ItemCount);
+        Assert.Equal(new HomeState(1, 1, false), bus.States[^1]);
+        // Against the north wall, inside the room, clear of the bed, the door's way in and the book.
+        var at = HomeRoom.WardrobePosition;
+        Assert.True(Areas.Home.Contains(at.X, at.Z));
+        Assert.Equal(0, HomeRoom.WardrobeRow);
+        for (int c = HomeRoom.WardrobeColumn; c < HomeRoom.WardrobeColumn + HomeRoom.WardrobeWidth; c++)
+            for (int r = HomeRoom.WardrobeRow; r < HomeRoom.WardrobeRow + HomeRoom.WardrobeDepth; r++)
+            {
+                Assert.True(HomeRoom.Inside(c, r));
+                Assert.True(HomeRoom.UnderWardrobe(c, r));
+                Assert.True(HomeRoom.KeptClear(c, r));
+                Assert.Equal(-1, home.ItemAt(c, r));
+                Assert.False(home.CanPlace(FurnitureKind.Chair, c, r, 0));
+            }
+        Assert.False(HomeRoom.UnderWardrobe(HomeRoom.BookColumn, HomeRoom.BookRow));
+        Assert.False(HomeRoom.UnderWardrobe(HomeRoom.ColumnAt(Places.HomeInterior.Position.X), HomeRoom.RowAt(Places.HomeInterior.Position.Z)));
+        Assert.False(HomeRoom.UnderWardrobe(2, 0)); // the bed's corner
+        // Nothing reaches over it, not even partly (a rug from the side, a bookshelf turned along it).
+        Assert.False(home.CanPlace(FurnitureKind.Rug, HomeRoom.WardrobeColumn - 2, 0, 0));
+        Assert.False(home.CanPlace(FurnitureKind.Bookshelf, HomeRoom.WardrobeColumn + 2, 1, 1));
+        Assert.True(home.CanPlace(FurnitureKind.Chair, HomeRoom.WardrobeColumn, HomeRoom.WardrobeRow + HomeRoom.WardrobeDepth, 0));
+        Assert.True(home.CanPlace(FurnitureKind.Chair, HomeRoom.WardrobeColumn - 1, 0, 0));
+    }
+
+    [Fact]
+    public void TheWardrobeCannotBePickedUpOrCoveredWhileDecorating()
+    {
+        var (home, bus) = Started(coins: 1000);
+        home.Buy(FurnitureKind.Chair);
+        Inside(home, bus);
+        home.StartDecorating();
+        Assert.Equal(1, home.Held); // the chair
+        home.MoveCursor(HomeRoom.WardrobeColumn + 1 - home.CursorColumn, HomeRoom.WardrobeRow - home.CursorRow);
+        Assert.False(home.CanPlaceHeld);
+        Assert.False(home.PlaceOrPickUp());
+        Assert.False(home.Items[1].Placed);
+        // With nothing held, the cursor over the wardrobe picks nothing up.
+        home.MoveCursor(0, HomeRoom.WardrobeDepth);
+        Assert.True(home.PlaceOrPickUp());
+        Assert.Equal(-1, home.Held);
+        home.MoveCursor(0, -HomeRoom.WardrobeDepth);
+        Assert.False(home.PlaceOrPickUp());
+        Assert.Equal(-1, home.Held);
+        Assert.Equal(2, home.ItemsPlaced);
+    }
+
+    [Fact]
+    public void NearTheWardrobeThePromptIsWardrobeAndInteractOpensIt()
+    {
+        var (home, bus) = Started();
+        var spot = HomeRoom.WardrobeFront + new Vector3(0f, 0f, 0.6f);
+        StandAt(bus, spot);
+        home.Tick(Step);
+        Assert.Equal(HomePrompt.Wardrobe, home.Prompt);
+        Assert.Equal("E / X: Wardrobe", HomeText.Prompt(HomePrompt.Wardrobe));
+        PressInteract(bus);
+        home.Tick(Step);
+        Assert.Equal(1, bus.OpenWardrobes);
+        Assert.Empty(bus.Teleports);
+        Assert.False(home.Decorating);
+
+        // Too far away, or fainted: no wardrobe.
+        StandAt(bus, HomeRoom.WardrobeFront + new Vector3(0f, 0f, HomeModule.IndoorReach + 0.3f));
+        home.Tick(Step);
+        Assert.Equal(HomePrompt.None, home.Prompt);
+        StandAt(bus, spot, alive: false);
+        home.Tick(Step);
+        Assert.Equal(HomePrompt.None, home.Prompt);
+        PressInteract(bus);
+        home.Tick(Step);
+        Assert.Equal(1, bus.OpenWardrobes);
+    }
+
+    [Fact]
+    public void WhileTheWardrobeIsOpenDecoratingAndLeavingAreDisabled()
+    {
+        var (home, bus) = Started(coins: 1000);
+        WardrobeScreen(bus, open: true);
+        Assert.True(home.WardrobeOpen);
+
+        // By the door inside: no Leave, and Interact does not teleport.
+        StandAt(bus, Places.HomeExit.Position);
+        home.Tick(Step);
+        Assert.Equal(HomePrompt.None, home.Prompt);
+        PressInteract(bus);
+        home.Tick(Step);
+        Assert.Empty(bus.Teleports);
+
+        // By the catalog book: no Decorate, and placement mode does not open.
+        StandAt(bus, HomeRoom.BookPosition + new Vector3(0f, 0f, -0.8f));
+        home.Tick(Step);
+        Assert.Equal(HomePrompt.None, home.Prompt);
+        PressInteract(bus);
+        home.Tick(Step);
+        home.StartDecorating();
+        home.Tick(Step);
+        Assert.False(home.Decorating);
+        Assert.False(bus.States[^1].Decorating);
+
+        // By the wardrobe itself: no second open.
+        StandAt(bus, HomeRoom.WardrobeFront + new Vector3(0f, 0f, 0.5f));
+        home.Tick(Step);
+        Assert.Equal(HomePrompt.None, home.Prompt);
+        PressInteract(bus);
+        home.Tick(Step);
+        Assert.Equal(0, bus.OpenWardrobes);
+
+        // Closed again: a press made while it was open is not acted on later, and all works again.
+        WardrobeScreen(bus, open: false);
+        StandAt(bus, Places.HomeExit.Position);
+        home.Tick(Step);
+        Assert.Equal(HomePrompt.Leave, home.Prompt);
+        Assert.Empty(bus.Teleports);
+        PressInteract(bus);
+        home.Tick(Step);
+        Assert.Single(bus.Teleports);
+    }
+
+    [Fact]
+    public void OpeningTheWardrobeEndsDecorating()
+    {
+        var (home, bus) = Started(coins: 1000);
+        home.Buy(FurnitureKind.Lamp);
+        Inside(home, bus);
+        home.StartDecorating();
+        Assert.Equal(1, home.Held);
+        WardrobeScreen(bus, open: true);
+        home.Tick(Step);
+        Assert.False(home.Decorating);
+        Assert.Equal(-1, home.Held);
+        Assert.False(home.Items[1].Placed); // the held lamp went back to the inventory
+        Assert.False(bus.States[^1].Decorating);
+    }
+
     // Pets at home
 
     private static void Owned(FakeBus bus, bool cat, bool dog, bool crow, PetKind active) =>
@@ -439,6 +588,7 @@ public class HomeModuleTests
                 Assert.True(Areas.Home.Contains(pet.Position.X, pet.Position.Z));
                 int under = home.ItemAt(HomeRoom.ColumnAt(pet.Position.X), HomeRoom.RowAt(pet.Position.Z));
                 Assert.Equal(-1, under); // never on the bed
+                Assert.False(HomeRoom.UnderWardrobe(HomeRoom.ColumnAt(pet.Position.X), HomeRoom.RowAt(pet.Position.Z)));
                 played |= pet.Activity == PetActivity.Play && pet.Speed > PetWalkSpeedLimit;
             }
             moved |= Vector3.Distance(home.Pets[(int)PetKind.Cat].Position, start) > 1f;

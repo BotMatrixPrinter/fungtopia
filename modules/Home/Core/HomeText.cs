@@ -9,6 +9,7 @@ public static class HomeText
         HomePrompt.Leave => "E / X: Leave",
         HomePrompt.Shop => "E / X: Shop",
         HomePrompt.Decorate => "E / X: Decorate",
+        HomePrompt.Wardrobe => "E / X: Wardrobe",
         _ => "",
     };
 

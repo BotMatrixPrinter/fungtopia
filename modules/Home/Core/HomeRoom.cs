@@ -7,7 +7,8 @@ namespace Fungtopia.Home;
 /// <summary>
 /// The home interior's floor grid: <see cref="Areas.Home"/> (12 m x 10 m) in 0.5 m cells, cell
 /// (0, 0) at its north-west corner (min X, min Z). Some cells are kept clear: the way from the
-/// door (in the south wall) to where you appear on entering, and the catalog book's stand.
+/// door (in the south wall) to where you appear on entering, the catalog book's stand, and the
+/// big wardrobe that stands in the north-east corner from the start.
 /// </summary>
 public static class HomeRoom
 {
@@ -35,6 +36,25 @@ public static class HomeRoom
     /// <summary>The catalog book's stand: the middle of its cells, on the floor.</summary>
     public static Vector3 BookPosition => CellsCenter(BookColumn, BookRow, BookSize, BookSize);
 
+    /// <summary>
+    /// The wardrobe: fixed against the north wall in the north-east corner (east of the window),
+    /// three cells wide and two deep; never moved, removed or covered by furniture.
+    /// </summary>
+    public static readonly int WardrobeColumn = Columns - 4;
+    public const int WardrobeRow = 0;
+    public const int WardrobeWidth = 3;
+    public const int WardrobeDepth = 2;
+
+    /// <summary>The wardrobe's footprint: the middle of its cells, on the floor (its doors face south, into the room).</summary>
+    public static Vector3 WardrobePosition => CellsCenter(WardrobeColumn, WardrobeRow, WardrobeWidth, WardrobeDepth);
+
+    /// <summary>Where to stand to use the wardrobe: the middle of its front, on the floor.</summary>
+    public static Vector3 WardrobeFront => CellsCenter(WardrobeColumn, WardrobeRow + WardrobeDepth, WardrobeWidth, 0);
+
+    /// <summary>Whether a cell is under the wardrobe.</summary>
+    public static bool UnderWardrobe(int column, int row) =>
+        column >= WardrobeColumn && column < WardrobeColumn + WardrobeWidth && row >= WardrobeRow && row < WardrobeRow + WardrobeDepth;
+
     public static int ColumnAt(float x) => (int)MathF.Floor((x - Areas.Home.MinX) / Cell);
 
     public static int RowAt(float z) => (int)MathF.Floor((z - Areas.Home.MinZ) / Cell);
@@ -46,8 +66,9 @@ public static class HomeRoom
     /// <summary>Whether a cell is inside the room.</summary>
     public static bool Inside(int column, int row) => column >= 0 && row >= 0 && column < Columns && row < Rows;
 
-    /// <summary>Whether a cell must stay clear (the door's way in, the catalog book's stand).</summary>
+    /// <summary>Whether a cell must stay clear (the door's way in, the catalog book's stand, the wardrobe).</summary>
     public static bool KeptClear(int column, int row) =>
         (column >= DoorMinColumn && column <= DoorMaxColumn && row >= DoorMinRow && row <= DoorMaxRow)
-        || (column >= BookColumn && column < BookColumn + BookSize && row >= BookRow && row < BookRow + BookSize);
+        || (column >= BookColumn && column < BookColumn + BookSize && row >= BookRow && row < BookRow + BookSize)
+        || UnderWardrobe(column, row);
 }
