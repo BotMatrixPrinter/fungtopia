@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Fungtopia.DayNight</RootNamespace>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../shell/Contract/Fungtopia.Shell.Contract.csproj" />
+    <ProjectReference Include="../Contract/Fungtopia.DayNight.Contract.csproj" />
+    <ProjectReference Include="../../Player/Contract/Fungtopia.Player.Contract.csproj" />
+    <ProjectReference Include="../../Map/Contract/Fungtopia.Map.Contract.csproj" />
+  </ItemGroup>
+</Project>
