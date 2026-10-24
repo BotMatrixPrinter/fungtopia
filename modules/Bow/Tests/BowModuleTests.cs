@@ -73,8 +73,8 @@ public class BowModuleTests
 
     private Vector3 CameraFor(Vector3 aim) => _camera ?? Hold - Vector3.Normalize(aim) * 3f;
 
-    /// <summary>Over the left shoulder, as the camera sits while drawing (facing 0: left is -X, behind is +Z).</summary>
-    private static Vector3 ShoulderCamera(Vector3 feet) => feet + new Vector3(-0.6f, 1.7f, 2.6f);
+    /// <summary>Over the right shoulder, as the camera sits while drawing (facing 0: right is +X, behind is +Z).</summary>
+    private static Vector3 ShoulderCamera(Vector3 feet) => feet + new Vector3(0.6f, 1.7f, 2.6f);
 
     /// <summary>One tick as the host runs it: Input, Player and Monsters publish, then the bow ticks.</summary>
     private void TickWith(bool fire, Vector3 aim)
@@ -216,7 +216,7 @@ public class BowModuleTests
         var aim = Vector3.Normalize(new Vector3(0.3f, 0.1f, -1f));
         Shoot(36, aim);
         var a = OnlyArrow();
-        // Facing 0 (-Z): Right is +X (the hold point is left of it, HoldRight < 0), Forward is -Z.
+        // Facing 0 (-Z): Right is +X (the hold point is right of the feet, HoldRight > 0), Forward is -Z.
         var start = Spot + new Vector3(BowGeometry.HoldRight, BowGeometry.HoldUp, -BowGeometry.HoldForward);
         // It was launched at the start and has flown one tick since.
         Assert.True(Vector3.Distance(start, a.PreviousPosition) < 1e-4f, $"{a.PreviousPosition} vs {start}");
@@ -237,10 +237,10 @@ public class BowModuleTests
     }
 
     [Fact]
-    public void TheHoldPointIsOutInTheExtendedLeftHandClearOfTheHead()
+    public void TheHoldPointIsOnTheRightClearOfTheHead()
     {
         Assert.Equal(new Vector3(BowGeometry.HoldRight, BowGeometry.HoldUp, BowGeometry.HoldForward), BowGeometry.HoldOffset);
-        Assert.Equal(-0.45f, BowGeometry.HoldRight, 3); // 0.45 m to the left
+        Assert.Equal(0.45f, BowGeometry.HoldRight, 3); // 0.45 m to the right
         Assert.Equal(0.80f, BowGeometry.HoldUp, 3);
         Assert.Equal(0.45f, BowGeometry.HoldForward, 3);
         Assert.InRange(BowGeometry.FullDrawPull, 0.15f, 0.4f);
@@ -251,21 +251,23 @@ public class BowModuleTests
         Assert.True(Vector3.Distance(BowGeometry.HoldOffset, head) >= BowGeometry.MinHeadClearance);
         // Seen from straight behind, the hand is outside the head's outline (half width 0.43 m).
         Assert.True(MathF.Abs(BowGeometry.HoldRight) > 0.43f || BowGeometry.HoldUp < BowGeometry.HeadUp - 0.43f);
-        // In the world, for any facing, it is left of the facing.
+        // In the world, for any facing, it is right of the facing and ahead of the feet.
         foreach (float facing in new[] { 0f, 1f, MathF.PI / 2, -2.5f })
         {
             var feet = new Vector3(3f, 2f, -7f);
-            var left = new Vector3(-MathF.Cos(facing), 0f, MathF.Sin(facing));
-            Assert.Equal(0.45f, Vector3.Dot(BowGeometry.HoldPoint(feet, facing) - feet, left), 4);
+            var right = new Vector3(MathF.Cos(facing), 0f, -MathF.Sin(facing));
+            var forward = new Vector3(-MathF.Sin(facing), 0f, -MathF.Cos(facing));
+            Assert.Equal(0.45f, Vector3.Dot(BowGeometry.HoldPoint(feet, facing) - feet, right), 4);
+            Assert.Equal(0.45f, Vector3.Dot(BowGeometry.HoldPoint(feet, facing) - feet, forward), 4);
             Assert.True(Vector3.Distance(BowGeometry.HoldPoint(feet, facing), feet + head) >= BowGeometry.MinHeadClearance);
         }
     }
 
     [Theory]
-    [InlineData(0f, -0.45f, -0.45f)]          // facing -Z: left -X
-    [InlineData(MathF.PI / 2, -0.45f, 0.45f)]  // facing -X: left +Z
-    [InlineData(MathF.PI, 0.45f, 0.45f)]       // facing +Z: left +X
-    [InlineData(-MathF.PI / 2, 0.45f, -0.45f)] // facing +X: left -Z
+    [InlineData(0f, 0.45f, -0.45f)]            // facing -Z: right +X
+    [InlineData(MathF.PI / 2, -0.45f, -0.45f)] // facing -X: right -Z
+    [InlineData(MathF.PI, -0.45f, 0.45f)]      // facing +Z: right -X
+    [InlineData(-MathF.PI / 2, 0.45f, 0.45f)]  // facing +X: right +Z
     public void TheHoldPointTurnsWithTheFacing(float facing, float dx, float dz)
     {
         var feet = new Vector3(3f, 2f, -7f);
@@ -406,7 +408,7 @@ public class BowModuleTests
         var trunk = MapGround.Obstacles[MapGround.ForestTrunkCount / 2];
         var feet = OnGround(trunk.X + trunk.Radius + 3f, trunk.Z);
         _player = PlayerAt(feet, facing: MathF.PI / 2);
-        var camera = feet + new Vector3(2.6f, 1.7f, 0.6f); // behind and over the left shoulder
+        var camera = feet + new Vector3(2.6f, 1.7f, -0.6f); // behind and over the right shoulder
         var aim = Vector3.Normalize(new Vector3(trunk.X, feet.Y + 1.5f, trunk.Z) - camera);
         var target = TargetWhileDrawing(camera, aim);
         Assert.True(DistanceToRay(target, camera, aim) < 1e-3f);
@@ -467,7 +469,7 @@ public class BowModuleTests
     [InlineData(45f, 2f, -3f, 1)]
     public void ArrowsFlyFromTheBowToWhereTheCrosshairIs(float distance, float side, float up, int drawTicks)
     {
-        // High above the forest (nothing else in the way); the camera over the left shoulder.
+        // High above the forest (nothing else in the way); the camera over the right shoulder.
         var feet = Spot + new Vector3(0f, 15f, 0f);
         _player = PlayerAt(feet);
         var camera = ShoulderCamera(feet);

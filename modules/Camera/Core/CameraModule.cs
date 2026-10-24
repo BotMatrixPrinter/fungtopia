@@ -17,8 +17,9 @@ namespace Fungtopia.Camera;
 /// when the ground or a giant mushroom trunk would block the view and eases back out after.
 /// While the wardrobe, the shop or the start screen is open it swings round to a still front view
 /// of the player standing in the left half of the screen (kept inside the walls at home), and
-/// swings back when they close. While the bow is drawn it eases to an aim camera over the left of
-/// the head, looking the same way, so the bow held out to the left shows beside the big head.
+/// swings back when they close. While the bow is drawn it eases to an aim camera beside the head
+/// on the bow's side (over the right shoulder), looking the same way, so the bow held on the right
+/// shows beside the big head.
 /// Publishes <see cref="CameraPose"/> every tick.
 /// </summary>
 public sealed class CameraModule : IModule, IMessageHandler<PlayerState>, IMessageHandler<PlayerInput>,
@@ -71,8 +72,16 @@ public sealed class CameraModule : IModule, IMessageHandler<PlayerState>, IMessa
     /// <summary>Front view at home: the step of the search for a side of the player with room for the camera, radians.</summary>
     public const float RoomSearchStep = 10f * MathF.PI / 180f;
 
-    /// <summary>Aim camera: how far its orbit point sits to the left of the head's center (<see cref="BowGeometry.HeadUp"/>), meters.</summary>
-    public const float AimLeft = 0.9f;
+    /// <summary>
+    /// Aim camera: how far its orbit point sits to the side of the head's center
+    /// (<see cref="BowGeometry.HeadUp"/>), meters, on <see cref="AimSideSign"/>'s side: the bow's.
+    /// </summary>
+    public const float AimSide = 0.9f;
+    /// <summary>
+    /// Aim camera: which side of the head its orbit point is on, 1 right, -1 left: the side of
+    /// <see cref="BowGeometry"/>'s hold point (<see cref="BowGeometry.HoldRight"/>), so it looks over that shoulder.
+    /// </summary>
+    public static float AimSideSign => BowGeometry.HoldRight < 0f ? -1f : 1f;
     /// <summary>Aim camera: how far its orbit point sits above the head's center, meters.</summary>
     public const float AimRaise = 0.25f;
     /// <summary>Aim camera: distance from its orbit point to the camera when nothing is in the way, meters.</summary>
@@ -133,11 +142,11 @@ public sealed class CameraModule : IModule, IMessageHandler<PlayerState>, IMessa
 
     /// <summary>
     /// The aim camera's orbit point for a head orbit center <paramref name="head"/> (<see cref="PivotHeight"/>
-    /// above the feet) and yaw <paramref name="yaw"/>, nothing in the way: <see cref="AimLeft"/> to the
-    /// left of the head's center and <see cref="AimRaise"/> above it.
+    /// above the feet) and yaw <paramref name="yaw"/>, nothing in the way: <see cref="AimSide"/> to the
+    /// bow's side (<see cref="AimSideSign"/>) of the head's center and <see cref="AimRaise"/> above it.
     /// </summary>
     public static Vector3 AimPivot(Vector3 head, float yaw) =>
-        head + new Vector3(0f, BowGeometry.HeadUp + AimRaise - PivotHeight, 0f) - Right(yaw) * AimLeft;
+        head + new Vector3(0f, BowGeometry.HeadUp + AimRaise - PivotHeight, 0f) + Right(yaw) * (AimSideSign * AimSide);
 
     /// <summary>
     /// The aim camera for a player with feet at <paramref name="feet"/>, with nothing in the way:
@@ -357,10 +366,11 @@ public sealed class CameraModule : IModule, IMessageHandler<PlayerState>, IMessa
         float aiming = Aiming;
         if (aiming > 0f)
         {
-            // The aim camera's orbit point, left of the head (kept clear of trunks and walls on that side).
+            // The aim camera's orbit point, beside the head on the bow's side (kept clear of trunks and walls there).
             Vector3 raised = _head + new Vector3(0f, BowGeometry.HeadUp + AimRaise - PivotHeight, 0f);
-            float left = home ? MathF.Min(AimLeft, RoomFreeLength(raised, -right)) : FreeLength(raised, -right, AimLeft);
-            shoulder = Vector3.Lerp(shoulder, raised - right * left, aiming);
+            Vector3 side = right * AimSideSign;
+            float aside = home ? MathF.Min(AimSide, RoomFreeLength(raised, side)) : FreeLength(raised, side, AimSide);
+            shoulder = Vector3.Lerp(shoulder, raised + side * aside, aiming);
             wanted = Distance + (AimDistance - Distance) * aiming;
         }
         Vector3 back = -ViewDirection(Yaw, Pitch);

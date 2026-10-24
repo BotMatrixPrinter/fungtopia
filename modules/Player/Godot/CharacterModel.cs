@@ -11,8 +11,9 @@ namespace Fungtopia.Player.View;
 /// and each worn item's model on the rig's parts, the built-in outfit where nothing is worn),
 /// drawn toon-shaded with ink outlines and animated procedurally: walk bob, leg and arm swing, jump stretch and landing
 /// squash, a white hit flash, and tipping over when defeated; and the archery pose
-/// (<see cref="ArcheryPose"/>): the bow from the back into the left hand at the hold point, the
-/// right hand drawing the string with a nocked arrow, upper body and head toward the aim.
+/// (<see cref="ArcheryPose"/>): the bow from the back over the right shoulder into the left hand
+/// at the hold point on the right, the right hand drawing the string with a nocked arrow to the
+/// right cheek, upper body and head toward the aim.
 /// Faces -Z at zero rotation.
 /// </summary>
 public partial class CharacterModel : Node3D
@@ -395,12 +396,13 @@ public partial class CharacterModel : Node3D
         var frame = ArcheryPose.Solve(archery, aimYaw, aimPitch);
         Quaternion ToPartsRotation(Quaternion model) => (toParts.Basis * new Basis(model) * fromParts.Basis).GetRotationQuaternion();
 
-        // The body about the hips, the head on its neck.
+        // The body about the hips (slid a little toward the bow), the head on its neck.
         var pivot = G(ArcheryPose.BodyPivot);
+        var slide = toParts.Basis * G(frame.Hips - ArcheryPose.BodyPivot) * w;
         var body = walkBody.GetRotationQuaternion().Slerp(ToPartsRotation(G(frame.Body)), w);
         if (_body.Node != null)
-            _body.Node.Transform = new Transform3D(new Basis(body) * Basis.FromScale(squash) * _body.Rest.Basis, _body.Rest.Origin);
-        Vector3 OnBody(System.Numerics.Vector3 rest) => pivot + new Basis(body) * ((G(rest) - pivot) * new Vector3(1f, squash.Y, 1f));
+            _body.Node.Transform = new Transform3D(new Basis(body) * Basis.FromScale(squash) * _body.Rest.Basis, _body.Rest.Origin + slide);
+        Vector3 OnBody(System.Numerics.Vector3 rest) => pivot + slide + new Basis(body) * ((G(rest) - pivot) * new Vector3(1f, squash.Y, 1f));
         if (_head.Node != null)
         {
             var head = walkHead.GetRotationQuaternion().Slerp(ToPartsRotation(G(frame.Head)), w);

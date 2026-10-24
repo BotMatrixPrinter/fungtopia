@@ -25,14 +25,16 @@ and publishes one `CameraPose` per fixed tick.
     second) once the view clears.
   - **Aim camera.** While `BowState.Draw` > 0, and for `AimHoldSeconds` (0.4 s) after the shot,
     the camera eases (`AimTransitionSeconds`, 0.25 s, `Aiming` 0..1) to an orbit point
-    (`AimPivot`) `AimLeft` (0.9 m) to the left of the head's center (`BowGeometry.HeadUp`) and
-    `AimRaise` (0.25 m) above it, `AimDistance` (2.75 m) behind it (`AimView`), so the bow held
-    out to the left (`BowGeometry`'s hold point) shows beside the big head instead of behind it.
+    (`AimPivot`) `AimSide` (0.9 m) to the side of the head's center (`BowGeometry.HeadUp`) and
+    `AimRaise` (0.25 m) above it, `AimDistance` (2.75 m) behind it (`AimView`). The side is the
+    hold point's (`AimSideSign`, from the sign of `BowGeometry.HoldRight`): the right, so the view
+    is over the right shoulder and the bow held on the right shows beside the big head instead of
+    behind it.
     It blends only the orbit point and the arm's length: the view direction (yaw, pitch) stays
     the normal camera's, it never swings sideways (the character faces the aim while drawing).
     The field of view follows the draw down to `AimFieldOfView` (62 degrees) at a full draw, no
     faster than the ease, then eases back to 70. The pull-in (ground, trunks, walls) applies to the
-    aim camera too, also to its left offset; the front view turns it off.
+    aim camera too, also to its side offset; the front view turns it off.
   - **Home.** In the home room (`Fungtopia.Map.Areas.Home`, floor `Areas.HomeFloorY`,
     `RoomHeight` 4 m) the walls, floor and ceiling take the place of the ground and trunks: the
     camera keeps `Clearance` inside them (`RoomFreeLength`).
@@ -59,8 +61,8 @@ and publishes one `CameraPose` per fixed tick.
   poses (a jump of more than 3 m is a cut).
 - `Tests/`: xUnit tests of `CameraModule` with a fake `IMessageBus`: orbit limits, smooth
   following, ground, trunk and wall pull-in, the front view's framing (left half, inside the home
-  room), holding still and transitions, the aim camera (left of and above the head, the head not hiding
-  the bow hand at level and ±20 degree aims, the same view direction, smooth easing in and out,
+  room), holding still and transitions, the aim camera (right of and above the head, on the hold point's side, the head not
+  hiding the hold point at level and ±20 degree aims, the same view direction, smooth easing in and out,
   pull-in), determinism.
 
 Test it with `./test.sh Camera` from the repository root.

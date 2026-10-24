@@ -171,29 +171,36 @@ facing) says what `CharacterModel` draws; `ArcheryPose.Solve` gives the whole po
 - Idle and walking (`Weight` 0): the bow stays slung on the back (`BackBow`).
 - As soon as `Draw` > 0 the pose blends in over 0.15 s (`Weight`, eased): `BackBow` is hidden and
   `HandBow` (the same bow, 1.3 times bigger; it grows as it comes) swings from the back over the
-  left shoulder into the left hand, its grip and the left hand at `BowGeometry`'s hold point
-  (`HoldLocal`, where the Bow module's arrows start).
+  right shoulder into the left hand, its grip and the left hand at `BowGeometry`'s hold point
+  (`HoldLocal`, on the player's right, where the Bow module's arrows start).
 - The arrow points from the hold point at `BowState.Target` (`ArrowAim`; along the input's aim
   when there is no target or it is within a meter), yaw within ±0.7 rad of the facing, pitch
-  within -0.2..0.7 rad (steeper down, the nock would come up past the right shoulder). The bow
+  within -0.2..0.7 rad (steeper down, the nock would come up past the right cheek). The bow
   stands upright along it (`BowTurn`: limbs up, the string toward the character), its top tilted
-  `BowCant` (0.15 rad) away from the head. The right hand pinches the string at the nock with the
-  arrow (`NockArrow`, a poison mushroom tip), pulled back `Draw` × `BowGeometry.FullDrawPull`
-  behind the string's rest (`StringRest`); the string bends into a V and each limb
-  (`HandBowLimbTop` / `Bottom`) bends back about the grip by up to `MaxLimbFlex` (0.1 rad).
+  `BowCant` (0.15 rad) away from the head (to the right). The right hand pinches the string at the
+  nock with the arrow (`NockArrow`, a poison mushroom tip), pulled back along the arrow `Draw` ×
+  `BowGeometry.FullDrawPull` behind the string's rest (`StringRest`) to an anchor beside the right
+  cheek and chin; the string bends into a V and each limb (`HandBowLimbTop` / `Bottom`) bends back
+  about the grip by up to `MaxLimbFlex` (0.1 rad) with the visible pull (`Frame.Pull`).
 - The arms are never scaled or stretched: they keep `ArmLength` (0.42 m) and only turn at the
-  shoulders (`ReachArm`), the hands at their ends. The body turns side-on, left shoulder toward
-  the target (near `SideOn` to the right of the aim, less at the start of a draw), and leans about
-  the hips (`BodyTurn`) just enough that the shoulders put both hands where they belong: a small
-  damped least-squares solve (bow hand first; within 2 cm of the grip, 3 cm of the nock), started
-  from a half draw's pose so the pose moves smoothly. The legs keep walking and the feet keep the
-  facing logic. The head rides on the neck, looks along the arrow, and tilts on it to stay over the
-  feet (`HeadMiddle`), clear of the bow and the string hand. Since the hold point is 0.45 m left
-  of the head, the string comes back beside the head's left cheek. A slight squash pulses as the
-  draw reaches full (body and head only; squash and stretch never scale arms or legs).
+  shoulders (`ReachArm`), the hands at their ends. The left arm reaches forward and across, in
+  front of the chest, to the grip on the right. For that the body turns to the right of the aim
+  (near `SideOn`, less at the start of a draw, never more than `MaxTurn`, 1.5 rad: the chest
+  always faces the target's side), leans about the hips (`BodyTurn`) and slides its hips up to
+  `MaxHipShift` (0.15 m; `Frame.Hips`) just enough that the shoulders put both hands where they
+  belong: a small damped least-squares solve (bow hand first; within 2 cm of the grip, 3 cm of the
+  nock), started from a half draw's pose so the pose moves smoothly. Where the right arm still
+  cannot reach the full pull, the visible pull (and the nocked arrow with it) is shortened instead
+  (`Frame.Pull` ≤ `StringPull`; about 80% at a level full draw); an arm is never wrapped round.
+  Both hands and both elbows (the middle of the arm: it never bends) stay in front of the torso's
+  back plane (`InFrontOfBack`, `TorsoBack` 0.17 m behind its middle) and never behind the neck or
+  head. The legs keep walking and the feet keep the facing logic. The head rides on the neck,
+  looks along the arrow, and tilts on it to stay about over the feet, a little away from the bow
+  (`HeadMiddle`), clear of the bow and the string hand. A slight squash pulses as the draw reaches
+  full (body and head only; squash and stretch never scale arms or legs).
 - On release (`Draw` back to 0): the arrow is gone, the string snaps forward with a little
-  overshoot and the limbs straighten, the body holds the drawn pose and the right arm swings back
-  off the string (`StringHandTarget`); after 0.6 s without drawing the bow swings back onto the
+  overshoot and the limbs straighten, the body holds the drawn pose and the right hand swings back
+  off the string, out to the right and up (`StringHandTarget`); after 0.6 s without drawing the bow swings back onto the
   back (0.15 s). Drawing again meanwhile keeps the bow in hand.
 - `PlayerView` blends `Weight` between ticks, so the pose glides at any frame rate, and reads
   `BowTarget` (the latest `BowState.Target`) from the Core.
@@ -230,7 +237,8 @@ variable `PLAYER_PREVIEW` picks the pose: `front` (default), `back`, `walk`, `ju
 `draw` (full draw), `drawback` (full draw from behind, like the game camera), `release` (just
 after a shot), `swing` (the bow on its way back), or `aim`, `side` and `facing`: a held draw
 (`PLAYER_PREVIEW_DRAW`, 0..1, default 1) at a level aim from the Camera module's aim camera (0.9 m
-left of and 0.25 m above the head, 2.75 m back, 62 degrees), from the left side and from the front
+right of and 0.25 m above the head, 2.75 m back, 62 degrees), from the right side (the bow's) and
+from the front
 (`PLAYER_PREVIEW_WALK=1` walks meanwhile); `PLAYER_PREVIEW_CHARACTER=girl` or `boy`
 shows only that character, larger; `PLAYER_PREVIEW_LOOKS=1` shows four characters dressed from
 different Wardrobe looks (skin, hair style and color, eyes, clothes) in the chosen pose.

@@ -114,18 +114,18 @@ public partial class PlayerPreview : Node3D
         AddChild(camera);
         if (held)
         {
-            float spread = _models.Length == 1 ? 0f : 0.9f; // two characters: the camera between them
+            float spread = _models.Length == 1 ? 0f : -1.0f; // two characters: the camera between them
             var head = new Vector3(spread, Fungtopia.Bow.BowGeometry.HeadUp, 0f);
             if (_pose == "aim")
             {
-                // The Camera module's aim camera: 0.9 m left of and 0.25 m above the head, 2.75 m behind, pitched -12 degrees.
+                // The Camera module's aim camera: 0.9 m right of and 0.25 m above the head, 2.75 m behind, pitched -12 degrees.
                 camera.Fov = 62f;
-                var pivot = head + new Vector3(-0.9f, 0.25f, 0f);
+                var pivot = head + new Vector3(0.9f, 0.25f, 0f);
                 float pitch = Mathf.DegToRad(-12f);
                 camera.LookAtFromPosition(pivot + new Vector3(0f, -MathF.Sin(pitch), MathF.Cos(pitch)) * 2.75f, pivot, Vector3.Up);
             }
             else if (_pose == "side")
-                camera.LookAtFromPosition(new Vector3(-4.2f, 1.1f, -0.25f), new Vector3(0f, 0.8f, -0.25f), Vector3.Up);
+                camera.LookAtFromPosition(new Vector3(4.2f, 1.1f, -0.25f), new Vector3(0f, 0.8f, -0.25f), Vector3.Up); // the bow's side
             else
                 camera.LookAtFromPosition(new Vector3(-0.2f, 1.2f, -4.4f), new Vector3(-0.2f, 0.8f, 0f), Vector3.Up);
         }

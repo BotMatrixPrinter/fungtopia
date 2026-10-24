@@ -15,7 +15,7 @@ public struct ArcheryState
 
     /// <summary>
     /// How far the archery pose is blended in: 0 is the bow on the back, 1 the bow at the hold
-    /// point in the left hand. Moves at most 1 per <see cref="ArcheryPose.BlendSeconds"/>.
+    /// point (on the right) in the left hand. Moves at most 1 per <see cref="ArcheryPose.BlendSeconds"/>.
     /// </summary>
     public float Weight;
 
@@ -58,7 +58,7 @@ public static class ArcheryPose
     /// <summary>Aim yaw is clamped to this much either side of the facing (the feet turn the rest), radians.</summary>
     public const float MaxAimYaw = 0.7f;
 
-    /// <summary>Lowest aim pitch (looking down), radians: steeper, the nocked arrow would come up past the right shoulder.</summary>
+    /// <summary>Lowest aim pitch (looking down), radians: steeper, the nock would come up past the right cheek into the head.</summary>
     public const float MinAimPitch = -0.2f;
 
     /// <summary>Highest aim pitch (looking up), radians.</summary>
@@ -83,8 +83,9 @@ public static class ArcheryPose
     public static Vector3 HoldLocal => new(BowGeometry.HoldRight, BowGeometry.HoldUp, -BowGeometry.HoldForward);
 
     /// <summary>
-    /// Which side of the head's middle the hold point is on: 1 right (or in the middle), -1 left.
-    /// The bow's top tilts and the right hand follows through to that side.
+    /// Which side of the head's middle the hold point is on: 1 right (as now: the bow on the
+    /// right, in the left hand), -1 left. The bow's top tilts and the right hand follows through
+    /// to that side, the bow swings over that shoulder, and the head keeps to the other side.
     /// </summary>
     public static float HoldSide => BowGeometry.HoldRight < 0f ? -1f : 1f;
 
@@ -189,7 +190,7 @@ public static class ArcheryPose
     /// <summary>
     /// Where the bow's grip (and the left hand on it) is: at <paramref name="weight"/> 0 on the
     /// back (<paramref name="backGrip"/>), at 1 exactly <see cref="HoldLocal"/>; in between it
-    /// swings over the left shoulder.
+    /// swings over the shoulder on the hold point's side (<see cref="HoldSide"/>: the right one).
     /// </summary>
     public static Vector3 BowGrip(float weight, Vector3 backGrip)
     {
@@ -197,7 +198,7 @@ public static class ArcheryPose
         if (w >= 1f)
             return HoldLocal;
         float arc = MathF.Sin(MathF.PI * w);
-        return Vector3.Lerp(backGrip, HoldLocal, Eased(w)) + new Vector3(-0.25f, 0.2f, 0f) * arc;
+        return Vector3.Lerp(backGrip, HoldLocal, Eased(w)) + new Vector3(HoldSide * 0.25f, 0.2f, 0f) * arc;
     }
 
     // ---- The full pose: body, head, arms and bow (the rig as characters.py builds it) ----
@@ -227,10 +228,26 @@ public static class ArcheryPose
     public static readonly Vector3 ArmLRestDirection = Vector3.Normalize(new Vector3(-0.13f, -0.22f, -0.02f));
 
     /// <summary>
-    /// How far the body turns side-on (left shoulder toward the target) in the full pose,
-    /// radians to the right of the aim; the solver keeps it near this.
+    /// How far the body turns to the right of the aim in the full pose (the left shoulder coming
+    /// forward so the left arm reaches across the chest to the hold point on the right), radians;
+    /// the solver keeps it near this, and within <see cref="MaxTurn"/>.
     /// </summary>
     public const float SideOn = 1.1f;
+
+    /// <summary>
+    /// The body never turns further than this to the right of the aim, radians: less than a
+    /// quarter turn, so the chest always faces the target's side and the back is away from it.
+    /// </summary>
+    public const float MaxTurn = 1.5f;
+
+    /// <summary>
+    /// The hips may slide this far (meters, sideways and forward or back) toward the bow, shifting
+    /// the weight so the left arm reaches without leaning far over; the legs stay where they are.
+    /// </summary>
+    public const float MaxHipShift = 0.15f;
+
+    /// <summary>The torso's back is this far behind its middle (the body's axis), meters: its back plane.</summary>
+    public const float TorsoBack = 0.17f;
 
     /// <summary>The held bow's top tilts this far away from the head (radians about its forward), like a cute archer's.</summary>
     public const float BowCant = 0.15f;
@@ -239,7 +256,7 @@ public static class ArcheryPose
     public const float MaxLimbFlex = 0.1f;
 
     /// <summary>Where the head's middle stays sideways while aiming (X, meters): about over the feet, away from the bow.</summary>
-    public const float HeadMiddle = 0.05f;
+    public static float HeadMiddle => -HoldSide * 0.1f;
 
     /// <summary>The head tilts at most this much on the neck (roll, radians).</summary>
     public const float MaxHeadRoll = 0.5f;
@@ -251,8 +268,10 @@ public static class ArcheryPose
     /// </summary>
     public struct Frame
     {
-        /// <summary>The body's turn about <see cref="BodyPivot"/>.</summary>
+        /// <summary>The body's turn about its pivot, <see cref="Hips"/>.</summary>
         public Quaternion Body;
+        /// <summary>The body's pivot: <see cref="BodyPivot"/> slid (by at most <see cref="MaxHipShift"/>) toward the bow.</summary>
+        public Vector3 Hips;
         /// <summary>The body's turn as <see cref="BodyTurn"/>'s yaw, roll (lean to its left) and pitch (forward).</summary>
         public float Yaw, Roll, Pitch;
         /// <summary>Where the neck (the head's pivot) is, and the head's turn (absolute: it looks along the arrow).</summary>
@@ -268,7 +287,10 @@ public static class ArcheryPose
         public Quaternion Bow;
         /// <summary>The arrow's direction, from the hold point toward the target.</summary>
         public Vector3 Forward;
-        /// <summary>The string's pull (<see cref="StringPull"/>), the limbs' bend, the nock (the string's middle).</summary>
+        /// <summary>
+        /// The string's visible pull (<see cref="StringPull"/>, shortened when the right arm cannot
+        /// reach that far back), the limbs' bend, the nock (the string's middle and the arrow's back).
+        /// </summary>
         public float Pull, Flex;
         public Vector3 Nock;
     }
@@ -287,9 +309,22 @@ public static class ArcheryPose
         return AimAngles(aimDirection, hasAim, facing);
     }
 
-    /// <summary>The left (<paramref name="side"/> -1) or right (1) shoulder for the body turned by <paramref name="body"/>.</summary>
-    public static Vector3 Shoulder(Quaternion body, float side) =>
-        BodyPivot + Vector3.Transform(new Vector3(-side * ShoulderLRest.X, ShoulderLRest.Y, ShoulderLRest.Z) - BodyPivot, body);
+    /// <summary>The left (<paramref name="side"/> -1) or right (1) shoulder for the body turned by <paramref name="body"/> about <paramref name="hips"/>.</summary>
+    public static Vector3 Shoulder(Quaternion body, Vector3 hips, float side) =>
+        hips + Vector3.Transform(new Vector3(-side * ShoulderLRest.X, ShoulderLRest.Y, ShoulderLRest.Z) - BodyPivot, body);
+
+    /// <summary>The body's forward (the chest's facing) for its turn.</summary>
+    public static Vector3 Chest(Quaternion body) => Vector3.Transform(-Vector3.UnitZ, body);
+
+    /// <summary>
+    /// How far <paramref name="point"/> is in front of the torso's back plane (through its back,
+    /// <see cref="TorsoBack"/> behind the hips, square to <see cref="Chest"/>), meters: negative behind the back.
+    /// </summary>
+    public static float InFrontOfBack(in Frame f, Vector3 point) =>
+        Vector3.Dot(point - (f.Hips + Vector3.Transform(new Vector3(0f, 0f, TorsoBack), f.Body)), Chest(f.Body));
+
+    /// <summary>The arm's elbow (it never bends: the middle of the arm) for its shoulder and hand.</summary>
+    public static Vector3 Elbow(Vector3 shoulder, Vector3 hand) => (shoulder + hand) * 0.5f;
 
     /// <summary>The arm's rest direction, shoulder to hand, for the left (-1) or right (1) arm.</summary>
     public static Vector3 ArmRestDirection(float side) => new(-side * ArmLRestDirection.X, ArmLRestDirection.Y, ArmLRestDirection.Z);
@@ -339,46 +374,56 @@ public static class ArcheryPose
         return Quaternion.Normalize(Quaternion.CreateFromRotationMatrix(m) * Quaternion.CreateFromAxisAngle(Vector3.UnitZ, -HoldSide * BowCant));
     }
 
-    /// <summary>Where the right hand goes: the nock while drawing; after a release it flies back (and a little out and up).</summary>
-    public static Vector3 StringHandTarget(in ArcheryState s, Vector3 grip, Vector3 forward)
+    /// <summary>
+    /// Where the right hand goes: the nock while drawing (pulled back <paramref name="reach"/>
+    /// times <see cref="StringPull"/>: less than 1 when the arm cannot reach that far); after a
+    /// release it flies back off the string, out to the right and up.
+    /// </summary>
+    public static Vector3 StringHandTarget(in ArcheryState s, Vector3 grip, Vector3 forward, float reach = 1f)
     {
         float follow = FollowThrough(s);
-        float pull = s.Draw > 0f ? StringPull(s) : s.ReleasedDraw * BowGeometry.FullDrawPull;
+        float pull = reach * (s.Draw > 0f ? StringPull(s) : s.ReleasedDraw * BowGeometry.FullDrawPull);
         var side = HoldSide * Vector3.Normalize(Vector3.Cross(forward, Vector3.UnitY));
-        return Nock(grip, forward, pull) + (-forward * 0.2f + side * 0.08f + Vector3.UnitY * 0.06f) * follow;
+        return Nock(grip, forward, pull) + (-forward * 0.08f + side * 0.12f + Vector3.UnitY * 0.1f) * follow;
     }
 
     /// <summary>
     /// The full archery pose for the state and the arrow's aim (<see cref="ArrowAim"/>): the bow
-    /// at the hold point along the arrow, the left hand on its grip, the right hand on the string
-    /// (or following through), the body turned side-on and leaning just enough that both arms,
-    /// turned only at the shoulders, reach exactly; the head on the neck looking along the arrow.
+    /// at the hold point (on the right) along the arrow, the left hand on its grip, the right hand
+    /// on the string (or following through), the body turned right of the aim (never more than
+    /// <see cref="MaxTurn"/>), leaning and sliding its hips just enough that both arms, turned only
+    /// at the shoulders, reach exactly; where the right arm still cannot reach, the visible pull
+    /// is shortened instead. The head on the neck looks along the arrow.
     /// </summary>
     public static Frame Solve(in ArcheryState s, float aimYaw, float aimPitch)
     {
         var f = new Frame { Grip = HoldLocal, Forward = AimLocal(aimYaw, aimPitch) };
         f.Bow = BowTurn(f.Forward);
-        f.Pull = StringPull(s);
+
+        // Levenberg-Marquardt on (yaw, roll, pitch, hips x, hips z, pull): both arms exactly long
+        // enough (the bow hand first), the body near its turn and upright, the hips near their
+        // rest, the pull as drawn. Starts from the usual answer.
+        float yaw0 = aimYaw - SideOn * (0.6f + 0.4f * Math.Clamp((s.Draw > 0f ? s.Draw : s.ReleasedDraw), 0f, 1f));
+        Span<float> p = stackalloc float[Unknowns] { yaw0, 0f, 0.1f, 0f, 0f, 0.5f * BowGeometry.FullDrawPull };
+        // First toward a half draw's pose, then from there to this one: nearby states land in the same pose.
+        Fit(p, aimYaw, yaw0, f.Grip, f.Forward, 0.5f * BowGeometry.FullDrawPull);
+        // After a shot the body keeps the drawn pose; only the right arm swings back off the string.
+        float drawn = s.Draw > 0f ? StringPull(s) : s.ReleasedDraw * BowGeometry.FullDrawPull;
+        p[5] = Math.Min(p[5], drawn);
+        Fit(p, aimYaw, yaw0, f.Grip, f.Forward, drawn);
+        float reach = drawn > 1e-5f ? Math.Clamp(p[5] / drawn, 0f, 1f) : 1f;
+        f.Pull = StringPull(s) * reach;
         f.Flex = MaxLimbFlex * Math.Clamp(f.Pull / BowGeometry.FullDrawPull, 0f, 1f);
         f.Nock = Nock(f.Grip, f.Forward, f.Pull);
-        var right = StringHandTarget(s, f.Grip, f.Forward);
-
-        // Levenberg-Marquardt on (yaw, roll, pitch): both arms exactly long enough (the bow hand
-        // first), the body near side-on and upright. Starts from the usual answer, a slight lean back.
-        float yaw0 = aimYaw - SideOn * (0.6f + 0.4f * Math.Clamp((s.Draw > 0f ? s.Draw : s.ReleasedDraw), 0f, 1f));
-        Span<float> p = stackalloc float[3] { yaw0, 0.3f, -0.35f };
-        // First toward a half draw's pose, then from there to this one: nearby states land in the same pose.
-        Fit(p, yaw0, f.Grip, Nock(f.Grip, f.Forward, 0.5f * BowGeometry.FullDrawPull));
-        // After a shot the body keeps the drawn pose; only the right arm swings back off the string.
-        float drawn = s.Draw > 0f ? f.Pull : s.ReleasedDraw * BowGeometry.FullDrawPull;
-        Fit(p, yaw0, f.Grip, Nock(f.Grip, f.Forward, drawn));
+        var right = StringHandTarget(s, f.Grip, f.Forward, reach);
         (f.Yaw, f.Roll, f.Pitch) = (p[0], p[1], p[2]);
         f.Body = BodyTurn(p[0], p[1], p[2]);
-        f.ShoulderL = Shoulder(f.Body, -1f);
-        f.ShoulderR = Shoulder(f.Body, 1f);
+        f.Hips = BodyPivot + new Vector3(p[3], 0f, p[4]);
+        f.ShoulderL = Shoulder(f.Body, f.Hips, -1f);
+        f.ShoulderR = Shoulder(f.Body, f.Hips, 1f);
         (f.ArmL, f.HandL) = ReachArm(f.ShoulderL, -1f, f.Grip);
         (f.ArmR, f.HandR) = ReachArm(f.ShoulderR, 1f, right);
-        f.Neck = BodyPivot + Vector3.Transform(NeckRest - BodyPivot, f.Body);
+        f.Neck = f.Hips + Vector3.Transform(NeckRest - BodyPivot, f.Body);
         // The head looks along the arrow; it rides on the leaning neck but tilts back over the feet
         // (HeadMiddle), clear of the bow and the string hand.
         float roll = Math.Clamp(MathF.Asin(Math.Clamp((f.Neck.X - HeadMiddle) / HeadAboveNeck, -1f, 1f)), -MaxHeadRoll, MaxHeadRoll);
@@ -387,43 +432,54 @@ public static class ArcheryPose
         return f;
     }
 
-    /// <summary>Levenberg-Marquardt from <paramref name="p"/> (yaw, roll, pitch) on <see cref="Residuals"/>.</summary>
-    private static void Fit(Span<float> p, float yaw0, Vector3 grip, Vector3 right)
+    /// <summary>The solver keeps the body's lean (roll and pitch) within this, radians.</summary>
+    public const float MaxLean = 0.6f;
+
+    private const int Unknowns = 6, Residual = 8;
+
+    /// <summary>Levenberg-Marquardt from <paramref name="p"/> (yaw, roll, pitch, hips x, hips z, pull) on <see cref="Residuals"/>.</summary>
+    private static void Fit(Span<float> p, float aimYaw, float yaw0, Vector3 grip, Vector3 forward, float pull)
     {
-        Span<float> q = stackalloc float[3];
-        Span<float> r = stackalloc float[5];
-        Span<float> rp = stackalloc float[5];
-        Span<float> j = stackalloc float[15];
-        float cost = Residuals(p, yaw0, grip, right, r), lambda = 1e-3f;
-        for (int iteration = 0; iteration < 40 && cost > 1e-9f; iteration++)
+        Span<float> q = stackalloc float[Unknowns];
+        Span<float> r = stackalloc float[Residual];
+        Span<float> rp = stackalloc float[Residual];
+        Span<float> j = stackalloc float[Residual * Unknowns];
+        Span<float> a = stackalloc float[Unknowns * (Unknowns + 1)];
+        Clamp(p, aimYaw, pull);
+        float cost = Residuals(p, yaw0, grip, forward, pull, r), lambda = 1e-3f;
+        for (int iteration = 0; iteration < 60 && cost > 1e-9f; iteration++)
         {
-            for (int k = 0; k < 3; k++)
+            for (int k = 0; k < Unknowns; k++)
             {
                 p.CopyTo(q);
                 q[k] += 1e-3f;
-                Residuals(q, yaw0, grip, right, rp);
-                for (int i = 0; i < 5; i++)
-                    j[i * 3 + k] = (rp[i] - r[i]) / 1e-3f;
+                Residuals(q, yaw0, grip, forward, pull, rp);
+                for (int i = 0; i < Residual; i++)
+                    j[i * Unknowns + k] = (rp[i] - r[i]) / 1e-3f;
             }
-            // (JᵀJ + λ diag) δ = -Jᵀr, by Cramer's rule.
-            float a00 = 0f, a01 = 0f, a02 = 0f, a11 = 0f, a12 = 0f, a22 = 0f, b0 = 0f, b1 = 0f, b2 = 0f;
-            for (int i = 0; i < 5; i++)
+            // (JᵀJ + λ diag) δ = -Jᵀr, by Gaussian elimination on [A | b].
+            const int w = Unknowns + 1;
+            for (int row = 0; row < Unknowns; row++)
             {
-                float j0 = j[i * 3], j1 = j[i * 3 + 1], j2 = j[i * 3 + 2];
-                a00 += j0 * j0; a01 += j0 * j1; a02 += j0 * j2; a11 += j1 * j1; a12 += j1 * j2; a22 += j2 * j2;
-                b0 -= j0 * r[i]; b1 -= j1 * r[i]; b2 -= j2 * r[i];
+                for (int col = 0; col < Unknowns; col++)
+                {
+                    float sum = 0f;
+                    for (int i = 0; i < Residual; i++)
+                        sum += j[i * Unknowns + row] * j[i * Unknowns + col];
+                    a[row * w + col] = sum;
+                }
+                float b = 0f;
+                for (int i = 0; i < Residual; i++)
+                    b -= j[i * Unknowns + row] * r[i];
+                a[row * w + Unknowns] = b;
+                a[row * w + row] += lambda * (a[row * w + row] + 1e-4f);
             }
-            a00 += lambda * (a00 + 1e-4f); a11 += lambda * (a11 + 1e-4f); a22 += lambda * (a22 + 1e-4f);
-            float det = a00 * (a11 * a22 - a12 * a12) - a01 * (a01 * a22 - a12 * a02) + a02 * (a01 * a12 - a11 * a02);
-            if (MathF.Abs(det) < 1e-20f)
+            if (!SolveLinear(a))
                 break;
-            q[0] = p[0] + (b0 * (a11 * a22 - a12 * a12) - a01 * (b1 * a22 - a12 * b2) + a02 * (b1 * a12 - a11 * b2)) / det;
-            q[1] = p[1] + (a00 * (b1 * a22 - a12 * b2) - b0 * (a01 * a22 - a12 * a02) + a02 * (a01 * b2 - b1 * a02)) / det;
-            q[2] = p[2] + (a00 * (a11 * b2 - b1 * a12) - a01 * (a01 * b2 - b1 * a02) + b0 * (a01 * a12 - a11 * a02)) / det;
-            q[0] = Math.Clamp(q[0], yaw0 - 1f, yaw0 + 1f);
-            q[1] = Math.Clamp(q[1], -MaxLean, MaxLean);
-            q[2] = Math.Clamp(q[2], -MaxLean, MaxLean);
-            float tried = Residuals(q, yaw0, grip, right, rp);
+            for (int k = 0; k < Unknowns; k++)
+                q[k] = p[k] + a[k * w + Unknowns];
+            Clamp(q, aimYaw, pull);
+            float tried = Residuals(q, yaw0, grip, forward, pull, rp);
             if (tried < cost)
             {
                 q.CopyTo(p);
@@ -436,19 +492,60 @@ public static class ArcheryPose
         }
     }
 
-    /// <summary>The solver keeps the body's lean (roll and pitch) within this, radians.</summary>
-    public const float MaxLean = 0.6f;
+    /// <summary>The unknowns within their limits: the turn, the lean, the hips' slide and the pull (up to as drawn).</summary>
+    private static void Clamp(Span<float> p, float aimYaw, float pull)
+    {
+        p[0] = Math.Clamp(p[0], aimYaw - MaxTurn, aimYaw - 0.4f);
+        p[1] = Math.Clamp(p[1], -MaxLean, MaxLean);
+        p[2] = Math.Clamp(p[2], -MaxLean, MaxLean);
+        p[3] = Math.Clamp(p[3], -MaxHipShift, MaxHipShift);
+        p[4] = Math.Clamp(p[4], -MaxHipShift, MaxHipShift);
+        p[5] = Math.Clamp(p[5], 0f, Math.Max(0f, pull));
+    }
 
-    private static float Residuals(ReadOnlySpan<float> p, float yaw0, Vector3 grip, Vector3 right, Span<float> r)
+    /// <summary>Solves the augmented square system <paramref name="a"/> ([A | b], rows of <see cref="Unknowns"/> + 1) in place: the answer in its last column.</summary>
+    private static bool SolveLinear(Span<float> a)
+    {
+        const int n = Unknowns, w = Unknowns + 1;
+        for (int c = 0; c < n; c++)
+        {
+            int pivot = c;
+            for (int row = c + 1; row < n; row++)
+                if (MathF.Abs(a[row * w + c]) > MathF.Abs(a[pivot * w + c]))
+                    pivot = row;
+            if (MathF.Abs(a[pivot * w + c]) < 1e-12f)
+                return false;
+            if (pivot != c)
+                for (int k = 0; k < w; k++)
+                    (a[c * w + k], a[pivot * w + k]) = (a[pivot * w + k], a[c * w + k]);
+            for (int row = 0; row < n; row++)
+            {
+                if (row == c)
+                    continue;
+                float factor = a[row * w + c] / a[c * w + c];
+                for (int k = c; k < w; k++)
+                    a[row * w + k] -= factor * a[c * w + k];
+            }
+        }
+        for (int row = 0; row < n; row++)
+            a[row * w + n] /= a[row * w + row];
+        return true;
+    }
+
+    private static float Residuals(ReadOnlySpan<float> p, float yaw0, Vector3 grip, Vector3 forward, float pull, Span<float> r)
     {
         var body = BodyTurn(p[0], p[1], p[2]);
-        r[0] = 3f * (Vector3.Distance(Shoulder(body, -1f), grip) - ArmLength); // the bow hand first
-        r[1] = Vector3.Distance(Shoulder(body, 1f), right) - ArmLength;
+        var hips = BodyPivot + new Vector3(p[3], 0f, p[4]);
+        r[0] = 6f * (Vector3.Distance(Shoulder(body, hips, -1f), grip) - ArmLength); // the bow hand first
+        r[1] = 5f * (Vector3.Distance(Shoulder(body, hips, 1f), Nock(grip, forward, p[5])) - ArmLength);
         r[2] = 0.04f * (p[0] - yaw0);
-        r[3] = 0.05f * p[1];
-        r[4] = 0.05f * p[2];
+        r[3] = 0.1f * p[1];
+        r[4] = 0.1f * p[2];
+        r[5] = 0.15f * p[3];
+        r[6] = 0.15f * p[4];
+        r[7] = 1f * (p[5] - pull); // shorten the pull only when the right arm cannot reach
         float cost = 0f;
-        for (int i = 0; i < 5; i++)
+        for (int i = 0; i < Residual; i++)
             cost += r[i] * r[i];
         return cost;
     }

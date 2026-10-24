@@ -9,17 +9,18 @@ namespace Fungtopia.Bow;
 /// The hold point is an offset from the player's feet in the player's facing frame: Right, Up and
 /// Forward, in meters, where Forward is the facing direction (-sin Facing, 0, -cos Facing) of
 /// <c>Fungtopia.Player.PlayerState.Facing</c> and Right is (cos Facing, 0, -sin Facing).
-/// The bow is held out in the extended left hand, left of and below the big chibi head (about
-/// 0.86 m wide, its center <see cref="HeadUp"/> above the feet), more than
-/// <see cref="MinHeadClearance"/> from the head's center, so an over-the-shoulder camera behind
-/// the left of the head sees it.
+/// The bow is held on the character's right side by the left hand (reaching forward and across
+/// the chest), right of and below the big chibi head (about 0.86 m wide, its center
+/// <see cref="HeadUp"/> above the feet), more than <see cref="MinHeadClearance"/> from the head's
+/// center, so the over-the-right-shoulder aim camera sees it; the right hand draws the string to
+/// the right cheek.
 /// </summary>
 public static class BowGeometry
 {
-    /// <summary>The bow hand is this far to the character's right of its feet, meters: negative, it is 0.45 m to the left.</summary>
-    public const float HoldRight = -0.45f;
+    /// <summary>The bow hand is this far to the character's right of its feet, meters (positive: on the right).</summary>
+    public const float HoldRight = 0.45f;
 
-    /// <summary>The bow hand is this high above the feet (the extended left arm, below the head's center), meters.</summary>
+    /// <summary>The bow hand is this high above the feet (below the head's center), meters.</summary>
     public const float HoldUp = 0.80f;
 
     /// <summary>The bow hand is this far ahead of the feet along the facing, meters.</summary>

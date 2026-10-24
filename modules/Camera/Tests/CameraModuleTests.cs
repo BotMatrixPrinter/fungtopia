@@ -680,15 +680,21 @@ public class CameraModuleTests
         MathF.Acos(Math.Clamp(Vector3.Dot(Vector3.Normalize(a), Vector3.Normalize(b)), -1f, 1f));
 
     [Fact]
-    public void TheAimOffsetIsLeftOfAndAboveTheHead()
+    public void TheAimOffsetIsRightOfAndAboveTheHeadOnTheHoldPointsSide()
     {
         var feet = ForestBounds.PlayerStart;
         var head = feet + new Vector3(0f, BowGeometry.HeadUp, 0f);
+        // The bow is held on the right, so the camera looks over the right shoulder.
+        Assert.True(BowGeometry.HoldRight > 0f);
+        Assert.Equal(1f, CameraModule.AimSideSign);
         foreach (float yaw in new[] { 0f, 1.1f, -2.4f })
         {
             Vector3 pivot = CameraModule.AimPivot(feet + new Vector3(0f, CameraModule.PivotHeight, 0f), yaw);
             Vector3 offset = pivot - head;
-            Assert.Equal(-0.9f, Vector3.Dot(offset, CameraModule.Right(yaw)), 2);   // 0.9 m left
+            Assert.Equal(0.9f, Vector3.Dot(offset, CameraModule.Right(yaw)), 2);    // 0.9 m right
+            // On the hold point's side of the head.
+            Vector3 hold = BowGeometry.HoldPoint(feet, yaw) - head;
+            Assert.True(Vector3.Dot(offset, CameraModule.Right(yaw)) * Vector3.Dot(hold, CameraModule.Right(yaw)) > 0f);
             Assert.Equal(0.25f, offset.Y, 2);                                         // 0.25 m higher
             Assert.Equal(0f, Vector3.Dot(offset, CameraModule.Forward(yaw)), 3);      // over the head, not ahead
         }
@@ -701,7 +707,7 @@ public class CameraModuleTests
         var pose = bus.Poses[^1];
         Vector3 fromHead = pose.Position - head;
         Assert.Equal(1f, camera.Aiming, 4);
-        Assert.InRange(Vector3.Dot(fromHead, CameraModule.Right(camera.Yaw)), -0.95f, -0.85f);
+        Assert.InRange(Vector3.Dot(fromHead, CameraModule.Right(camera.Yaw)), 0.85f, 0.95f);
         Assert.InRange(fromHead.Y, 0.2f, 0.3f);
         Assert.InRange(-Vector3.Dot(fromHead, CameraModule.Forward(camera.Yaw)), 2.5f, 3f);
         Assert.True(Vector3.Distance(CameraModule.AimView(feet, camera.Yaw, 0f).Position, pose.Position) < 0.02f);
@@ -732,10 +738,10 @@ public class CameraModuleTests
             float apart = AngleBetween(toHead, toHold);
             Assert.True(apart > outline + 1f * Degree,
                 $"pitch {pitchDegrees}: the hold point is {apart / Degree:F1} degrees from the head's center, its outline {outline / Degree:F1}");
-            // And it is on the screen, beside the head on its left, beyond it.
+            // And it is on the screen, beside the head on its right (the camera's side), beyond it.
             Vector3 s = OnScreen(pose, hold);
             Assert.True(s.Z > toHead.Length(), "the bow hand is beyond the head");
-            Assert.True(s.X < OnScreen(pose, head).X, "the bow hand shows left of the head");
+            Assert.True(s.X > OnScreen(pose, head).X, "the bow hand shows right of the head");
             Assert.True(MathF.Abs(s.X) < MathF.Tan(CameraModule.AimFieldOfView / 2f) * CameraModule.FrameAspect, "the bow hand is on the screen");
             Assert.True(MathF.Abs(s.Y) < MathF.Tan(CameraModule.AimFieldOfView / 2f), "the bow hand is on the screen");
         }
