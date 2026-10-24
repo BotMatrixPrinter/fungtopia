@@ -4,9 +4,10 @@ using Godot;
 namespace Fungtopia.Pet.View;
 
 /// <summary>
-/// A stand-alone scene showing the Mushroom Cat and the Mushroom Dog side by side on a patch of
-/// grass, for screenshots: <c>./screenshot.sh modules/Pet/Godot/Preview.tscn</c>. The environment
-/// variable PET_PREVIEW picks the pose: "front" (default), "side", "trot", "sit" or "pounce".
+/// A stand-alone scene showing the Mushroom Cat, the Mushroom Dog and the Mushroom Crow (hovering
+/// above them) on a patch of grass, for screenshots: <c>./screenshot.sh modules/Pet/Godot/Preview.tscn</c>.
+/// The environment variable PET_PREVIEW picks the pose: "front" (default), "side", "trot", "sit"
+/// or "pounce"; "crow" shows the Crow alone close up, flying, and "crow-peck" pecking.
 /// </summary>
 public partial class PetPreview : Node3D
 {
@@ -57,19 +58,29 @@ public partial class PetPreview : Node3D
             MaterialOverride = new StandardMaterial3D { AlbedoColor = new Color(0.5f, 0.74f, 0.33f) },
         });
 
-        _models = new[] { PetModel.Create(PetKind.Cat), PetModel.Create(PetKind.Dog) };
+        var camera = new Camera3D { Fov = 40f, Current = true };
+        AddChild(camera);
+        if (_pose.StartsWith("crow", StringComparison.Ordinal))
+        {
+            _models = new[] { PetModel.Create(PetKind.Crow) };
+            AddChild(_models[0]);
+            _models[0].Transform = new Transform3D(new Basis(Vector3.Up, Mathf.Pi - 0.45f), new Vector3(0f, 0.55f, 0f));
+            camera.LookAtFromPosition(new Vector3(0f, 1.25f, 2.0f), new Vector3(0f, 0.8f, 0f), Vector3.Up);
+            return;
+        }
+
+        _models = new[] { PetModel.Create(PetKind.Cat), PetModel.Create(PetKind.Dog), PetModel.Create(PetKind.Crow) };
         bool side = _pose is "side" or "trot" or "pounce";
         for (int i = 0; i < _models.Length; i++)
         {
             AddChild(_models[i]);
-            // Front: both turned toward the camera; side: both facing right, showing their profiles.
-            float yaw = side ? -Mathf.Pi * 0.5f - 0.35f : Mathf.Pi + (i == 0 ? -0.4f : 0.4f);
-            _models[i].Transform = new Transform3D(new Basis(Vector3.Up, yaw), new Vector3(i == 0 ? -0.55f : 0.55f, 0f, 0f));
+            // Front: turned toward the camera; side: facing right, showing their profiles. The
+            // crow hovers between and above the other two.
+            float yaw = side ? -Mathf.Pi * 0.5f - 0.35f : Mathf.Pi + (i == 0 ? -0.4f : i == 1 ? 0.4f : 0f);
+            var at = i == 2 ? new Vector3(0f, 0.95f, -0.35f) : new Vector3(i == 0 ? -0.55f : 0.55f, 0f, 0f);
+            _models[i].Transform = new Transform3D(new Basis(Vector3.Up, yaw), at);
         }
-
-        var camera = new Camera3D { Fov = 40f, Current = true };
-        AddChild(camera);
-        camera.LookAtFromPosition(new Vector3(0f, 1.0f, 2.9f), new Vector3(0f, 0.38f, 0f), Vector3.Up);
+        camera.LookAtFromPosition(new Vector3(0f, 1.1f, 3.2f), new Vector3(0f, 0.5f, 0f), Vector3.Up);
     }
 
     public override void _Process(double delta)
@@ -78,6 +89,18 @@ public partial class PetPreview : Node3D
         _time += dt;
         foreach (var model in _models)
         {
+            // The crow flies in every pose but sitting.
+            float altitude = model.Kind == PetKind.Crow && _pose != "sit" ? 2f : 0f;
+            if (model.Kind == PetKind.Crow && _pose == "crow-peck")
+            {
+                model.Animate(dt, 0f, false, 0.12f, true, altitude);
+                continue;
+            }
+            if (model.Kind == PetKind.Crow)
+            {
+                model.Animate(dt, _pose == "trot" ? 4f : 0f, false, _pose == "pounce" ? 0.12f : 100f, _pose == "pounce", altitude);
+                continue;
+            }
             switch (_pose)
             {
                 case "trot":

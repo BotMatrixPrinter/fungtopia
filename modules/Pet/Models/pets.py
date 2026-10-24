@@ -1,16 +1,18 @@
-# Builds the starter pets and exports them next to this script:
-#   cat.glb  and  dog.glb
+# Builds the pets and exports them next to this script:
+#   cat.glb, dog.glb  and  crow.glb
 # Run from the repository root:
 #   blender -b --factory-startup --python modules/Pet/Models/pets.py
 #
 # From the drawings: the Mushroom Cat (big eyes, whiskers, two spotted mushroom caps for ears,
-# a long tail) and the Mushroom Dog (fluffy, pointy ears, small mushrooms growing on its back,
-# a collar with a tag).
+# a long tail), the Mushroom Dog (fluffy, pointy ears, small mushrooms growing on its back,
+# a collar with a tag) and the Mushroom Crow (a round dark body with mushroom caps and spots,
+# big eyes, small wings, a beak).
 #
 # Meters, feet at the origin, facing Blender +Y (Godot's -Z, forward, after the glTF export).
 # Separate objects, each with its pivot where it moves, so the game can animate them:
 #   Body (pivot at its middle), Head (pivot at the neck), LegFL / LegFR / LegBL / LegBR (pivot at
-#   the shoulder or hip), Tail (pivot at its root).
+#   the shoulder or hip), Tail (pivot at its root). The crow has Body, Head, WingL / WingR (pivot
+#   at the shoulder), Tail, LegL / LegR (pivot at the hip).
 # Materials carry plain colors only; the game draws them toon-shaded with ink outlines.
 import math
 import os
@@ -43,6 +45,11 @@ COLORS = {
     "Tongue": (1.0, 0.5, 0.56),
     "Collar": (0.25, 0.55, 0.95),
     "Tag": (1.0, 0.8, 0.25),
+    # The crow.
+    "CrowBody": (0.16, 0.15, 0.27),
+    "CrowLight": (0.36, 0.33, 0.52),
+    "CrowSpot": (0.74, 0.7, 0.95),
+    "Beak": (1.0, 0.66, 0.2),
 }
 
 
@@ -345,5 +352,78 @@ def dog():
     export("dog")
 
 
+def crow():
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    mats = {name: material(name, color) for name, color in COLORS.items()}
+
+    # Body: a round dark ball with a lighter belly, soft lilac spots and a big spotted mushroom
+    # cap on top with two little mushrooms beside it.
+    bc = Vector((0, 0, 0.3))
+    body = Part("Body", bc)
+    body.sphere(mats["CrowBody"], bc, (0.22, 0.23, 0.21), segments=40, rings=20)
+    body.sphere(mats["CrowLight"], bc + Vector((0, 0.08, -0.06)), (0.16, 0.16, 0.14), segments=28, rings=14)
+    for i in range(7):
+        a = i * 2.39996 + 1.2
+        n = Vector((math.cos(a) * 0.75, -0.45 + 0.4 * ((i * 0.618) % 1.0), 0.35 + 0.4 * ((i * 0.37) % 1.0)))
+        n.normalize()
+        p = bc + Vector((n.x * 0.22, n.y * 0.23, n.z * 0.21))
+        rot = n.to_track_quat("Z", "Y").to_matrix().to_4x4()
+        s = 0.028 + 0.01 * ((i * 0.53) % 1.0)
+        body.sphere(mats["CrowSpot"], p, (s, s, s * 0.35), rotation=rot, segments=12, rings=6)
+    body.build()
+
+    # Head: on the front of the ball (pivot at the neck, so it can peck): huge eyes with sparkles,
+    # rosy cheeks, an orange beak, and the mushroom caps on top.
+    neck = Vector((0, 0.08, 0.36))
+    head = Part("Head", neck)
+    hc = Vector((0, 0.12, 0.42))
+    head.sphere(mats["CrowBody"], hc, (0.17, 0.15, 0.15), segments=36, rings=18)
+    eyes(head, mats, hc + Vector((0, 0, 0.02)), 0.12, 0.075, 0.062)
+    for side in (-1, 1):
+        head.sphere(mats["Blush"], hc + Vector((side * 0.12, 0.105, -0.05)), (0.035, 0.016, 0.022),
+                    rotation=Matrix.Rotation(math.radians(side * -40), 4, "Z"), segments=16, rings=8)
+    beak = hc + Vector((0, 0.135, -0.04))
+    head.cone(mats["Beak"], beak, 0.045, 0.004, 0.1, rotation=Matrix.Rotation(math.radians(-80), 4, "X"), segments=20)
+    tilt = Matrix.Rotation(math.radians(-10), 4, "X")
+    head.cone(mats["Stem"], hc + Vector((0, -0.02, 0.12)), 0.05, 0.045, 0.07, rotation=tilt, segments=16)
+    mushroom_cap(head, mats, hc + Vector((0, -0.03, 0.18)), 0.15, 0.11, tilt=tilt, spots=6)
+    for side in (-1, 1):
+        lean = Matrix.Rotation(math.radians(side * 38), 4, "Y") @ Matrix.Rotation(math.radians(-14), 4, "X")
+        little_mushroom(head, mats, hc + Vector((side * 0.11, -0.05, 0.1)), 0.075, tilt=lean)
+    head.build()
+
+    # Wings: small rounded feathers on each side, pivot at the shoulder so they can flap.
+    for name, side in (("WingL", -1), ("WingR", 1)):
+        shoulder = Vector((side * 0.19, -0.01, 0.36))
+        wing = Part(name, shoulder)
+        tilt = Matrix.Rotation(math.radians(side * 20), 4, "Y")
+        wing.sphere(mats["CrowBody"], shoulder + Vector((side * 0.08, -0.03, -0.04)), (0.1, 0.13, 0.03),
+                    rotation=tilt, segments=24, rings=10)
+        for k in range(3):
+            tip = shoulder + Vector((side * (0.13 + 0.025 * k), -0.07 - 0.04 * k, -0.06 - 0.02 * k))
+            wing.sphere(mats["CrowLight"], tip, (0.04, 0.06, 0.02), rotation=tilt, segments=12, rings=6)
+        wing.build()
+
+    # Tail: a little fan of three feathers.
+    root = Vector((0, -0.2, 0.28))
+    tail = Part("Tail", root)
+    for k in (-1, 0, 1):
+        tail.sphere(mats["CrowBody"], root + Vector((k * 0.045, -0.07, 0.02 + 0.01 * (1 - abs(k)))),
+                    (0.035, 0.09, 0.018), rotation=Matrix.Rotation(math.radians(k * 18), 4, "Z"), segments=12, rings=6)
+    tail.build()
+
+    # Little orange feet tucked under the ball.
+    for name, side in (("LegL", -1), ("LegR", 1)):
+        hip = Vector((side * 0.07, 0.0, 0.1))
+        leg = Part(name, hip)
+        foot = Vector((side * 0.07, 0.02, 0.02))
+        leg.capsule(mats["Beak"], hip, foot, 0.016, segments=10)
+        for k in (-1, 0, 1):
+            leg.capsule(mats["Beak"], foot, foot + Vector((k * 0.025, 0.045, -0.01)), 0.012, segments=8)
+        leg.build()
+    export("crow")
+
+
 cat()
 dog()
+crow()

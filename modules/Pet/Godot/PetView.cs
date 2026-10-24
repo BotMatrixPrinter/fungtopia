@@ -6,13 +6,14 @@ namespace Fungtopia.Pet.View;
 
 /// <summary>
 /// Draws the pet: the chosen pet's model placed between the last two fixed ticks, turned to face
-/// <see cref="PetState.Facing"/>, and animated from its motion, bites and sitting. The pet setting
-/// is <see cref="Pet"/> ("Cat" or "Dog"), which the command-line user argument <c>--pet=dog</c>
-/// (after <c>--</c>) overrides.
+/// <see cref="PetState.Facing"/>, and animated from its motion, bites, flight and sitting; the
+/// model changes when another owned pet becomes active. The starter pet setting is
+/// <see cref="Pet"/> ("Cat" or "Dog"), which the command-line user argument <c>--pet=dog</c>
+/// (after <c>--</c>) overrides (<c>--pet=crow</c> starts with the Crow, for trying it out).
 /// </summary>
 public partial class PetView : Node3D, IModuleView
 {
-    /// <summary>The pet setting: "Cat" (default) or "Dog".</summary>
+    /// <summary>The starter pet setting: "Cat" (default) or "Dog".</summary>
     [Export]
     public string Pet { get; set; } = "Cat";
 
@@ -29,7 +30,7 @@ public partial class PetView : Node3D, IModuleView
     {
         if (_pet == null)
             return;
-        _pet.Kind = ChosenPet();
+        _pet.Starter = ChosenPet();
         _current = _previous = _pet.State;
         _seenTicks = _pet.Ticks;
         ShowModel(_pet.Kind);
@@ -41,7 +42,9 @@ public partial class PetView : Node3D, IModuleView
         foreach (var arg in OS.GetCmdlineUserArgs())
             if (arg.StartsWith("--pet=", StringComparison.OrdinalIgnoreCase))
                 setting = arg.Substring("--pet=".Length);
-        return setting.Equals("dog", StringComparison.OrdinalIgnoreCase) ? PetKind.Dog : PetKind.Cat;
+        if (setting.Equals("dog", StringComparison.OrdinalIgnoreCase))
+            return PetKind.Dog;
+        return setting.Equals("crow", StringComparison.OrdinalIgnoreCase) ? PetKind.Crow : PetKind.Cat;
     }
 
     private void ShowModel(PetKind kind)
@@ -76,7 +79,7 @@ public partial class PetView : Node3D, IModuleView
 
         var velocity = _pet.Velocity;
         float speed = MathF.Sqrt(velocity.X * velocity.X + velocity.Z * velocity.Z);
-        _model.Animate((float)delta, speed, _pet.Sitting, _pet.SinceBite, _current.Attacking);
+        _model.Animate((float)delta, speed, _pet.Sitting, _pet.SinceBite, _current.Attacking, _pet.Altitude);
     }
 
     private static Vector3 ToGodot(System.Numerics.Vector3 v) => new(v.X, v.Y, v.Z);

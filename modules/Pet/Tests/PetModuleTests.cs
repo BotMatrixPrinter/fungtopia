@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
-using Fungtopia.Forest;
+using Fungtopia.Map;
 using Fungtopia.Monsters;
 using Fungtopia.Player;
 using Fungtopia.Shell;
@@ -19,6 +19,7 @@ public class PetModuleTests
         private readonly Dictionary<Type, List<object>> _handlers = new();
         public readonly List<PetState> States = new();
         public readonly List<(long Tick, HitMonster Hit)> Hits = new();
+        public readonly List<OwnedPets> Owned = new();
         public long Tick;
 
         public void Subscribe<T>(IMessageHandler<T> handler) where T : struct
@@ -34,6 +35,8 @@ public class PetModuleTests
                 States.Add(state);
             else if (message is HitMonster hit)
                 Hits.Add((Tick, hit));
+            else if (message is OwnedPets owned)
+                Owned.Add(owned);
             if (_handlers.TryGetValue(typeof(T), out var list))
                 foreach (var handler in list)
                     ((IMessageHandler<T>)handler).Handle(in message);
@@ -62,15 +65,15 @@ public class PetModuleTests
         _player = PlayerAt(Middle);
     }
 
-    private static Vector3 Ground(float x, float z) => new(x, Terrain.HeightAt(x, z), z);
+    private static Vector3 OnGround(float x, float z) => new(x, Ground.HeightAt(x, z), z);
 
-    private static Vector3 Ground(Vector3 v) => Ground(v.X, v.Z);
+    private static Vector3 OnGround(Vector3 v) => OnGround(v.X, v.Z);
 
     private static PlayerState PlayerAt(Vector3 feet, bool alive = true, float facing = 0f) =>
-        new(Ground(feet), facing, Vector3.Zero, true, alive ? 10 : 0, 10, alive, CharacterKind.Girl);
+        new(OnGround(feet), facing, Vector3.Zero, true, alive ? 10 : 0, 10, alive, CharacterKind.Girl);
 
     private static MonsterState Monster(int id, Vector3 feet, bool alive = true, float radius = 0.5f) =>
-        new(id, MonsterKind.Ant, Ground(feet), radius, alive ? 5 : 0, 5, alive, false);
+        new(id, MonsterKind.Ant, OnGround(feet), radius, alive ? 5 : 0, 5, alive, false);
 
     /// <summary>One tick as the host runs it: the player and monsters publish, then the pet ticks.</summary>
     private void TickOnce()
@@ -102,7 +105,7 @@ public class PetModuleTests
 
     private void AssertOnGround()
     {
-        Assert.Equal(Terrain.HeightAt(_pet.Position.X, _pet.Position.Z), _pet.Position.Y, 3);
+        Assert.Equal(Ground.HeightAt(_pet.Position.X, _pet.Position.Z), _pet.Position.Y, 3);
     }
 
     // ---- Start, settings and state ----
@@ -118,9 +121,21 @@ public class PetModuleTests
     [Fact]
     public void TheSettingPicksTheDog()
     {
-        _pet.Kind = PetKind.Dog;
+        _pet.Starter = PetKind.Dog;
         TickOnce();
         Assert.Equal(PetKind.Dog, _bus.States[^1].Kind);
+        Assert.Equal(PetKind.Dog, _bus.Owned[^1].Active);
+    }
+
+    [Fact]
+    public void WaitsBesideTheHomeDoorBeforeThePlayerIsKnown()
+    {
+        var pet = new PetModule();
+        var door = Places.HomeDoor.Position;
+        Assert.InRange(Flat(pet.Position, door), 1f, 5f);
+        Assert.True(Areas.Walkable(pet.Position.X, pet.Position.Z, PetModule.Radius));
+        Assert.False(Ground.Blocks(pet.Position.X, pet.Position.Z, PetModule.Radius));
+        Assert.Equal(Ground.HeightAt(pet.Position.X, pet.Position.Z), pet.Position.Y, 3);
     }
 
     [Fact]
@@ -225,7 +240,7 @@ public class PetModuleTests
         _pet.PlaceAt(Middle + new Vector3(0f, 0f, 35f));
         TickOnce();
         Assert.True(ToPlayer < 3f, $"{ToPlayer} m from the player");
-        Assert.False(Obstacles.Blocks(_pet.Position.X, _pet.Position.Z, PetModule.Radius));
+        Assert.False(Ground.Blocks(_pet.Position.X, _pet.Position.Z, PetModule.Radius));
         AssertOnGround();
     }
 
@@ -244,7 +259,7 @@ public class PetModuleTests
         // The player comes back at the start after defeat: far from the pet.
         _pet.PlaceAt(Middle + new Vector3(2f, 0f, 0f));
         Run(0.5);
-        _player = PlayerAt(ForestBounds.PlayerStart);
+        _player = PlayerAt(Places.HomeDoor.Position);
         TickOnce();
         Assert.True(ToPlayer < 3f);
         Assert.True(_pet.Teleported);
@@ -423,13 +438,15 @@ public class PetModuleTests
     /// A giant mushroom trunk with open ground 4 m beyond it on both sides along X, so the player
     /// can stand on one side and the pet start on the other.
     /// </summary>
-    private static Obstacle TrunkWithRoomAround()
+    private static Circle TrunkWithRoomAround()
     {
-        foreach (var o in Obstacles.All)
+        var all = Ground.Obstacles;
+        for (int i = 0; i < Ground.ForestTrunkCount; i++)
         {
+            var o = all[i];
             float gap = o.Radius + 4f;
-            if (o.Radius > 1.4f && ForestBounds.Contains(o.X - gap, o.Z, 2f) && ForestBounds.Contains(o.X + gap, o.Z, 2f)
-                && !Obstacles.Blocks(o.X - gap, o.Z, 1f) && !Obstacles.Blocks(o.X + gap, o.Z, 1f))
+            if (o.Radius > 1.4f && Areas.Forest.Contains(o.X - gap, o.Z, 2f) && Areas.Forest.Contains(o.X + gap, o.Z, 2f)
+                && !Ground.Blocks(o.X - gap, o.Z, 1f) && !Ground.Blocks(o.X + gap, o.Z, 1f))
                 return o;
         }
         throw new InvalidOperationException("no trunk with room around it");
@@ -446,7 +463,7 @@ public class PetModuleTests
         Run(6.0, () =>
         {
             closest = MathF.Min(closest, Flat(_pet.Position, new Vector3(trunk.X, 0f, trunk.Z)));
-            Assert.False(Obstacles.Blocks(_pet.Position.X, _pet.Position.Z, PetModule.Radius - 0.01f),
+            Assert.False(Ground.Blocks(_pet.Position.X, _pet.Position.Z, PetModule.Radius - 0.01f),
                 $"inside a trunk at {_pet.Position}");
             AssertOnGround();
         });
@@ -469,9 +486,9 @@ public class PetModuleTests
             // Circle the trunk at 4 m/s, 4 m out from its edge.
             angle += 4f / (trunk.Radius + 4f) * (float)Step;
             var feet = center + new Vector3(MathF.Cos(angle), 0f, MathF.Sin(angle)) * (trunk.Radius + 4f);
-            if (!Obstacles.Blocks(feet.X, feet.Z, 0.4f))
+            if (!Ground.Blocks(feet.X, feet.Z, 0.4f))
                 _player = PlayerAt(feet);
-            Assert.False(Obstacles.Blocks(_pet.Position.X, _pet.Position.Z, PetModule.Radius - 0.01f));
+            Assert.False(Ground.Blocks(_pet.Position.X, _pet.Position.Z, PetModule.Radius - 0.01f));
             Assert.True(ToPlayer < 6f, $"{ToPlayer} m behind");
         });
     }
@@ -492,21 +509,388 @@ public class PetModuleTests
     }
 
     [Fact]
-    public void StaysInsideTheForest()
+    public void StaysOnWalkableGroundWhenThePlayerIsBeyondIt()
     {
-        float edge = ForestBounds.HalfSize - 1f;
-        _player = PlayerAt(new Vector3(edge, 0f, 30f));
-        _pet.PlaceAt(new Vector3(edge - 3f, 0f, 30f));
+        // The east edge of Mushroom Town; the (fake) player stands in the cliffs beyond it.
+        float z = FreeZAlongTownsEastEdge();
+        float edge = Areas.Town.MaxX;
+        _player = PlayerAt(new Vector3(edge + 6f, 0f, z));
+        _pet.PlaceAt(new Vector3(edge - 4f, 0f, z));
+        Run(3.0, () =>
+        {
+            Assert.True(Areas.Walkable(_pet.Position.X, _pet.Position.Z, PetModule.Radius - 0.01f),
+                $"off the walkable ground at {_pet.Position}");
+            AssertOnGround();
+        });
+        // It went as far as it could.
+        Assert.True(_pet.Position.X > edge - 1.5f, $"stopped at {_pet.Position}");
+    }
+
+    private static float FreeZAlongTownsEastEdge()
+    {
+        for (float z = Areas.Town.MinZ + 10f; z < Areas.Town.MaxZ - 10f; z += 1f)
+        {
+            bool free = true;
+            for (float x = Areas.Town.MaxX - 6f; x <= Areas.Town.MaxX; x += 0.25f)
+                free &= Areas.Walkable(x, z, 0f) && !Ground.Blocks(x, z, 1f) && !Ground.Blocks(x, z + 1f, 1f) && !Ground.Blocks(x, z - 1f, 1f);
+            if (free && Areas.Walkable(Areas.Town.MaxX - 0.5f, z, PetModule.Radius))
+                return z;
+        }
+        throw new InvalidOperationException("no free spot along the town's east edge");
+    }
+
+    /// <summary>The south road's center line, from the forest to Mushroom Town.</summary>
+    private static List<Vector2> SouthRoad()
+    {
+        var road = new List<Vector2>();
+        var all = new List<Vector2>();
+        foreach (var p in Areas.RoadPoints)
+        {
+            if (float.IsNaN(p.X))
+            {
+                if (all.Count > 0 && all[0].Y > 0f)
+                    road = all;
+                all = new List<Vector2>();
+                continue;
+            }
+            all.Add(p);
+        }
+        if (all.Count > 0 && all[0].Y > 0f)
+            road = all;
+        if (road[0].Y > road[^1].Y)
+            road.Reverse();
+        return road;
+    }
+
+    [Fact]
+    public void FollowsThePlayerAlongTheRoadIntoTown()
+    {
+        var road = SouthRoad();
+        _player = PlayerAt(new Vector3(road[0].X, 0f, road[0].Y));
+        _pet.PlaceAt(_player.Position + new Vector3(1.5f, 0f, -1f));
+        int next = 1;
+        float farthest = 0f;
+        // The player walks the whole road at 5 m/s, then on into the town.
+        Run(30.0, () =>
+        {
+            if (next < road.Count)
+            {
+                var at = new Vector2(_player.Position.X, _player.Position.Z);
+                var to = road[next] - at;
+                float step = 5f * (float)Step;
+                var moved = to.Length() <= step ? road[next++] : at + Vector2.Normalize(to) * step;
+                _player = PlayerAt(new Vector3(moved.X, 0f, moved.Y));
+            }
+            farthest = MathF.Max(farthest, ToPlayer);
+            Assert.False(Ground.Blocks(_pet.Position.X, _pet.Position.Z, PetModule.Radius - 0.01f));
+            Assert.True(Areas.Walkable(_pet.Position.X, _pet.Position.Z, PetModule.Radius - 0.01f),
+                $"off the walkable ground at {_pet.Position}");
+            AssertOnGround();
+        });
+        Assert.Equal(road.Count, next);
+        Assert.False(_pet.Teleported);
+        Assert.True(farthest < 5f, $"fell {farthest} m behind");
+        Assert.Equal(Area.Town, Areas.At(_pet.Position.X, _pet.Position.Z));
+        Assert.InRange(ToPlayer, 1.6f, 2.6f);
+    }
+
+    // ---- Owning pets ----
+
+    [Fact]
+    public void StartsOwningOnlyTheStarterAndPublishesTheOwnedPetsEveryTick()
+    {
+        Run(0.5);
+        Assert.Equal(30, _bus.Owned.Count);
+        var owned = _bus.Owned[^1];
+        Assert.True(owned.Cat);
+        Assert.False(owned.Dog);
+        Assert.False(owned.Crow);
+        Assert.Equal(PetKind.Cat, owned.Active);
+
+        var pet = new PetModule { Starter = PetKind.Dog };
+        Assert.Equal(new OwnedPets(false, true, false, PetKind.Dog), pet.Owned);
+    }
+
+    [Fact]
+    public void AdoptingAPetAddsItAndMakesItActive()
+    {
+        TickOnce();
+        _bus.Publish(new AdoptPet(PetKind.Crow));
+        TickOnce();
+        var owned = _bus.Owned[^1];
+        Assert.True(owned.Cat);
+        Assert.True(owned.Crow);
+        Assert.False(owned.Dog);
+        Assert.Equal(PetKind.Crow, owned.Active);
+        Assert.Equal(PetKind.Crow, _bus.States[^1].Kind);
+        Assert.False(owned.AtHome(PetKind.Crow));
+        Assert.True(owned.AtHome(PetKind.Cat));
+
+        // Adopting one you own already just makes it active.
+        _bus.Publish(new AdoptPet(PetKind.Cat));
+        TickOnce();
+        Assert.Equal(new OwnedPets(true, false, true, PetKind.Cat), _bus.Owned[^1]);
+    }
+
+    [Fact]
+    public void SetActivePetSwitchesOnlyToAnOwnedPet()
+    {
+        _bus.Publish(new AdoptPet(PetKind.Crow));
+        _bus.Publish(new SetActivePet(PetKind.Cat));
+        TickOnce();
+        Assert.Equal(PetKind.Cat, _bus.Owned[^1].Active);
+        Assert.Equal(PetKind.Cat, _bus.States[^1].Kind);
+
+        // The Dog is not owned: nothing changes.
+        _bus.Publish(new SetActivePet(PetKind.Dog));
+        _bus.Publish(new SetActivePet((PetKind)42));
+        _bus.Publish(new AdoptPet((PetKind)42));
+        TickOnce();
+        Assert.Equal(new OwnedPets(true, false, true, PetKind.Cat), _bus.Owned[^1]);
+        Assert.Equal(PetKind.Cat, _bus.States[^1].Kind);
+
+        _bus.Publish(new SetActivePet(PetKind.Crow));
+        TickOnce();
+        Assert.Equal(PetKind.Crow, _bus.Owned[^1].Active);
+    }
+
+    [Fact]
+    public void OnlyTheActivePetFollowsAndFights()
+    {
+        _pet.PlaceAt(Middle + new Vector3(2f, 0f, 0f));
+        var monster = Middle + new Vector3(-4f, 0f, 2f);
+        _monsters.Add(Monster(7, monster));
         Run(3.0);
-        Assert.True(ForestBounds.Contains(_pet.Position.X, _pet.Position.Z));
+        Assert.All(_bus.States, s => Assert.Equal(PetKind.Cat, s.Kind));
+        Assert.True(_bus.Hits.Count >= 2);
+        Assert.Equal(60, _bus.Hits[^1].Tick - _bus.Hits[^2].Tick);
+
+        // The Crow is adopted: the cat goes home, the crow appears beside the player and takes over.
+        _bus.Publish(new AdoptPet(PetKind.Crow));
+        Assert.True(Flat(_pet.Position, _player.Position) < 2f);
+        int before = _bus.Hits.Count, states = _bus.States.Count;
+        Run(4.0);
+        // Still exactly one pet out: one state a tick, all of it the crow's.
+        Assert.Equal(states + 240, _bus.States.Count);
+        for (int i = states; i < _bus.States.Count; i++)
+            Assert.Equal(PetKind.Crow, _bus.States[i].Kind);
+        Assert.True(_bus.Owned[^1].AtHome(PetKind.Cat));
+        // Its hits come at the crow's pace, not the cat's.
+        Assert.True(_bus.Hits.Count - before >= 3);
+        for (int i = before + 1; i < _bus.Hits.Count; i++)
+            Assert.Equal(48, _bus.Hits[i].Tick - _bus.Hits[i - 1].Tick);
+
+        // When the monster is defeated the crow comes back to the player, not the cat.
+        _monsters.Clear();
+        _player = PlayerAt(Middle + new Vector3(6f, 0f, 0f));
+        Run(3.0);
+        Assert.Equal(PetKind.Crow, _bus.States[^1].Kind);
+        Assert.True(ToPlayer < 2f);
+    }
+
+    // ---- The Mushroom Crow ----
+
+    private void AdoptCrow()
+    {
+        _bus.Publish(new AdoptPet(PetKind.Crow));
+        Assert.Equal(PetKind.Crow, _pet.Kind);
+    }
+
+    private float Height => _pet.Position.Y - Ground.HeightAt(_pet.Position.X, _pet.Position.Z);
+
+    [Fact]
+    public void TheCrowHoversAboutTwoMetersUpBesideThePlayer()
+    {
+        TickOnce();
+        AdoptCrow();
+        _pet.PlaceAt(Middle + new Vector3(-8f, 0f, 6f));
+        Assert.Equal(PetModule.HoverHeight, Height, 2);
+        // The player faces -Z: their right is +X.
+        Run(4.0, () => Assert.InRange(Height, 1.5f, 2.5f));
+        Assert.Equal(2f, Height, 2);
+        Assert.Equal(2f, _bus.States[^1].Position.Y - Ground.HeightAt(_pet.Position.X, _pet.Position.Z), 2);
+        var offset = _pet.Position - _player.Position;
+        Assert.InRange(offset.X, 0.7f, 1.7f);
+        Assert.InRange(MathF.Abs(offset.Z), 0f, 0.5f);
+
+        // The player turns around (now their right is -X) and walks on: the crow keeps at their side.
+        _player = PlayerAt(Middle + new Vector3(0f, 0f, 6f), facing: MathF.PI);
+        Run(3.0);
+        offset = _pet.Position - _player.Position;
+        Assert.InRange(offset.X, -1.7f, -0.7f);
+        Assert.InRange(MathF.Abs(offset.Z), 0f, 0.5f);
+        Assert.Equal(2f, Height, 2);
+    }
+
+    [Fact]
+    public void TheCrowSwoopsDownAndPecksEveryEightTenthsOfASecond()
+    {
+        TickOnce();
+        AdoptCrow();
+        _pet.PlaceAt(Middle + new Vector3(2f, 0f, 0f));
+        var monster = Middle + new Vector3(-6f, 0f, 2f);
+        _monsters.Add(Monster(3, monster));
+        float lowest = float.MaxValue;
+        var heightsAtPecks = new List<float>();
+        for (int i = 0; i < 300; i++)
+        {
+            int hits = _bus.Hits.Count;
+            TickOnce();
+            lowest = MathF.Min(lowest, Height);
+            if (_bus.Hits.Count > hits)
+                heightsAtPecks.Add(Height);
+            // Still high in the air while it flies over to the monster.
+            if (i == 10)
+                Assert.True(Height > 1.5f, $"{Height} m up");
+        }
+        Assert.InRange(_bus.Hits.Count, 5, 7);
+        foreach (var (_, hit) in _bus.Hits)
+        {
+            Assert.Equal(3, hit.MonsterId);
+            Assert.Equal(1, hit.Damage);
+            Assert.Equal(PetModule.BiteSource, hit.Source);
+        }
+        for (int i = 1; i < _bus.Hits.Count; i++)
+            Assert.Equal(48, _bus.Hits[i].Tick - _bus.Hits[i - 1].Tick);
+        // It pecks only once it has swooped down.
+        Assert.All(heightsAtPecks, h => Assert.True(h <= PetModule.PeckHeight + 0.01f, $"pecked from {h} m"));
+        Assert.True(Flat(_pet.Position, monster) < 0.5f + PetModule.Radius + PetModule.BiteReach + 0.01f);
+        Assert.True(_bus.States[^1].Attacking);
+
+        // The monster is defeated: back up to its hover beside the player.
+        _monsters[0] = Monster(3, monster, alive: false);
+        Run(3.0);
+        Assert.Equal(2f, Height, 2);
+        Assert.InRange(ToPlayer, 0.7f, 1.7f);
+    }
+
+    [Fact]
+    public void TheCrowPecksFasterThanTheCatAndDogBite()
+    {
+        Assert.Equal(0.8f, PetModule.AttackInterval(PetKind.Crow));
+        Assert.Equal(1f, PetModule.AttackInterval(PetKind.Cat));
+        Assert.Equal(1f, PetModule.AttackInterval(PetKind.Dog));
+    }
+
+    [Fact]
+    public void TheCatAndDogStayOnTheGround()
+    {
+        _pet.PlaceAt(Middle + new Vector3(6f, 0f, 0f));
+        Run(2.0, () => Assert.Equal(0f, Height, 3));
+        _pet.Starter = PetKind.Dog;
+        Run(2.0, () => Assert.Equal(0f, Height, 3));
+    }
+
+    [Fact]
+    public void TheCrowLandsBesideTheDefeatedPlayer()
+    {
+        TickOnce();
+        AdoptCrow();
+        _player = PlayerAt(Middle, alive: false);
+        Run(3.0);
+        Assert.True(_pet.Sitting);
+        Assert.Equal(0f, Height, 3);
+        Assert.True(ToPlayer < 1.6f);
+    }
+
+    // ---- Teleporting with the player ----
+
+    [Fact]
+    public void ComesAlongWhenThePlayerIsTeleportedIntoTheHouseAndOut()
+    {
+        _player = PlayerAt(Places.HomeDoor.Position, facing: Places.HomeDoor.Yaw);
+        _pet.PlaceAt(Places.HomeDoor.Position + new Vector3(2f, 0f, 0f));
+        Run(1.0);
+        Assert.NotEqual(Area.Home, Areas.At(_pet.Position.X, _pet.Position.Z));
+
+        // Through the door: the pet appears inside with the player at once.
+        var inside = Places.HomeInterior;
+        _bus.Publish(new TeleportPlayer(inside.Position, inside.Yaw));
+        Assert.True(_pet.Teleported);
+        Assert.Equal(Area.Home, Areas.At(_pet.Position.X, _pet.Position.Z));
+        Assert.True(Flat(_pet.Position, inside.Position) < 3f);
+        Assert.True(Areas.Walkable(_pet.Position.X, _pet.Position.Z, PetModule.Radius));
+        AssertOnGround();
+        _player = PlayerAt(inside.Position, facing: inside.Yaw);
+        Run(2.0, () =>
+        {
+            Assert.Equal(Area.Home, Areas.At(_pet.Position.X, _pet.Position.Z));
+            AssertOnGround();
+        });
+
+        // And out again.
+        var door = Places.HomeDoor;
+        _bus.Publish(new TeleportPlayer(door.Position, door.Yaw));
+        Assert.NotEqual(Area.Home, Areas.At(_pet.Position.X, _pet.Position.Z));
+        Assert.True(Flat(_pet.Position, door.Position) < 3f);
+        AssertOnGround();
+        _player = PlayerAt(door.Position, facing: door.Yaw);
+        Run(1.0);
+        Assert.NotEqual(Area.Home, Areas.At(_pet.Position.X, _pet.Position.Z));
+    }
+
+    [Fact]
+    public void StaysWithTheTeleportedPlayerEvenBeforeTheirNextState()
+    {
+        // The pet may tick before the Player module publishes where the teleport put them.
+        _pet.PlaceAt(Middle + new Vector3(2f, 0f, 0f));
+        TickOnce();
+        var clinic = Places.ClinicDoor;
+        _bus.Publish(new TeleportPlayer(clinic.Position, clinic.Yaw));
+        _pet.Tick(new TickContext(_tick++, Step));
+        // That tick reports the pop (the view jumps instead of gliding there).
+        Assert.True(_pet.Teleported);
+        Assert.Equal(Vector3.Zero, _pet.Velocity);
+        Assert.True(Flat(_pet.Position, clinic.Position) < 3f);
+        Assert.True(Areas.Walkable(_pet.Position.X, _pet.Position.Z, PetModule.Radius));
+        Assert.False(Ground.Blocks(_pet.Position.X, _pet.Position.Z, PetModule.Radius));
+    }
+
+    [Fact]
+    public void TheCrowFliesAlongOnATeleport()
+    {
+        TickOnce();
+        AdoptCrow();
+        var sign = Places.SignpostPetCity;
+        _bus.Publish(new TeleportPlayer(sign.Position, sign.Yaw));
+        Assert.True(Flat(_pet.Position, sign.Position) < 3f);
+        Assert.Equal(PetModule.HoverHeight, Height, 2);
+        Assert.Equal(Area.PetCity, Areas.At(_pet.Position.X, _pet.Position.Z));
+    }
+
+    [Fact]
+    public void WakesUpWithThePlayerAfterADefeat()
+    {
+        _player = PlayerAt(Middle, alive: false);
+        Run(3.0);
+        Assert.True(_pet.Sitting);
+        var clinic = Places.ClinicDoor;
+        _bus.Publish(new TeleportPlayer(clinic.Position, clinic.Yaw));
+        Assert.False(_pet.Sitting);
+        Assert.True(Flat(_pet.Position, clinic.Position) < 3f);
+    }
+
+    [Fact]
+    public void NeverWalksIntoTheHouseOnItsOwn()
+    {
+        // The player stands by the door outside; the pet starts (somehow) inside the house: it
+        // comes out to them instead of staying in.
+        var door = Places.HomeDoor;
+        _player = PlayerAt(door.Position, facing: door.Yaw);
+        _pet.PlaceAt(Places.HomeInterior.Position);
+        TickOnce();
+        Assert.NotEqual(Area.Home, Areas.At(_pet.Position.X, _pet.Position.Z));
+        Run(2.0, () => Assert.NotEqual(Area.Home, Areas.At(_pet.Position.X, _pet.Position.Z)));
     }
 
     // ---- Performance ----
 
-    [Fact]
-    public void DoesNotAllocatePerTick()
+    [Theory]
+    [InlineData(PetKind.Cat)]
+    [InlineData(PetKind.Crow)]
+    public void DoesNotAllocatePerTick(PetKind kind)
     {
-        var pet = new PetModule();
+        var pet = new PetModule { Starter = kind };
         pet.Start(new NullBus());
         var player = PlayerAt(Middle);
         var monsters = new MonsterState[12];

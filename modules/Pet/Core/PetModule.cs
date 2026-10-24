@@ -1,6 +1,6 @@
 using System;
 using System.Numerics;
-using Fungtopia.Forest;
+using Fungtopia.Map;
 using Fungtopia.Monsters;
 using Fungtopia.Player;
 using Fungtopia.Shell;
@@ -8,13 +8,17 @@ using Fungtopia.Shell;
 namespace Fungtopia.Pet;
 
 /// <summary>
-/// The player's pet (a Mushroom Cat or a Mushroom Dog): follows the player at about 2 m,
-/// catches up when far and teleports beside them when over 30 m away; goes for the nearest
-/// alive monster within 8 m of the player, bites it every second and comes back; runs around
-/// giant mushroom trunks and follows the ground; sits by the defeated player. Publishes
-/// <see cref="PetState"/> every tick and <see cref="HitMonster"/> for each bite.
+/// The player's pets: the starter (a Mushroom Cat or a Mushroom Dog) and any adopted with
+/// <see cref="AdoptPet"/> (the Mushroom Crow). Only the active pet is out with the player: it
+/// follows them at about 2 m (the Crow hovers about 2 m up beside them), catches up when far and
+/// appears beside them when over 30 m away or when they are teleported; goes for the nearest
+/// alive monster within 8 m of the player, bites it every second (the Crow swoops down and pecks
+/// every 0.8 s) and comes back; runs around obstacles on the Map's walkable ground; sits by the
+/// defeated player. Publishes <see cref="PetState"/> and <see cref="OwnedPets"/> every tick and
+/// <see cref="HitMonster"/> for each bite or peck.
 /// </summary>
-public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageHandler<MonsterState>
+public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageHandler<MonsterState>,
+    IMessageHandler<TeleportPlayer>, IMessageHandler<AdoptPet>, IMessageHandler<SetActivePet>
 {
     /// <summary>How far from the player the pet waits, meters.</summary>
     public const float FollowDistance = 2f;
@@ -34,9 +38,12 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
     public const float GiveUpRange = 10f;
     /// <summary>Gap between the pet's and the monster's footprints within which it can bite, meters.</summary>
     public const float BiteReach = 0.4f;
+    /// <summary>Seconds between the Cat's and the Dog's bites.</summary>
     public const float BiteInterval = 1f;
+    /// <summary>Seconds between the Crow's pecks.</summary>
+    public const float PeckInterval = 0.8f;
     public const int BiteDamage = 1;
-    /// <summary><see cref="HitMonster.Source"/> of the pet's bites.</summary>
+    /// <summary><see cref="HitMonster.Source"/> of the pet's bites and pecks.</summary>
     public const int BiteSource = 1;
     /// <summary>How far from the defeated player the pet sits, meters.</summary>
     public const float SitDistance = 1.1f;
@@ -44,15 +51,29 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
     public const float Radius = 0.35f;
     /// <summary>Fastest turn, radians per second.</summary>
     public const float TurnSpeed = 12f;
-    /// <summary>Extra room the pet keeps from trunks when steering around them, meters.</summary>
+    /// <summary>Extra room the pet keeps from obstacles when steering around them, meters.</summary>
     public const float Clearance = 0.3f;
-    /// <summary>How far ahead the pet looks for trunks in its way, meters.</summary>
+    /// <summary>How far ahead the pet looks for obstacles in its way, meters.</summary>
     public const float LookAhead = 3f;
     /// <summary>Monsters remembered per tick (more are ignored).</summary>
     public const int MaxMonsters = 128;
+    /// <summary>How high above the ground the Crow flies while following, meters.</summary>
+    public const float HoverHeight = 2f;
+    /// <summary>The Crow pecks once it has swooped down to this height above the ground, meters.</summary>
+    public const float PeckHeight = 0.4f;
+    /// <summary>How far to the player's right the Crow hovers, meters.</summary>
+    public const float CrowSide = 1.2f;
+    /// <summary>How fast the Crow climbs back up, meters per second.</summary>
+    public const float ClimbSpeed = 3f;
+    /// <summary>How fast the Crow swoops down, meters per second.</summary>
+    public const float SwoopSpeed = 6f;
+    /// <summary>The Crow starts swooping down when this much farther from its target than biting reach, meters.</summary>
+    public const float SwoopStart = 1.5f;
 
     private IMessageBus? _bus;
-    private PlayerState _player;
+    private Vector3 _playerPosition;
+    private float _playerFacing;
+    private bool _playerAlive = true;
     private bool _hasPlayer;
     private readonly MonsterState[] _monsters = new MonsterState[MaxMonsters];
     private int _monsterCount;
@@ -60,13 +81,56 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
     private bool _following;
     private int _avoidIndex = -1;
     private float _avoidSide;
+    private PetKind _starter = PetKind.Cat;
+    private bool _ownsCat = true, _ownsDog, _ownsCrow;
+    private Vector2 _xz;
+    /// <summary>Appeared beside the player between ticks (a teleport, a pet switch): the next tick reports it.</summary>
+    private bool _teleportPending;
 
-    /// <summary>The setting that picks the pet (Cat by default).</summary>
-    public PetKind Kind { get; set; } = PetKind.Cat;
+    public PetModule()
+    {
+        var door = Places.HomeDoor;
+        _xz = Beside(door.Position, door.Yaw, 1.5f);
+        Altitude = 0f;
+        SetPosition();
+    }
 
-    public Vector3 Position { get; private set; } =
-        Ground(ForestBounds.PlayerStart.X + 1.5f, ForestBounds.PlayerStart.Z + 1f);
+    /// <summary>
+    /// The starter pet setting (Cat by default): the player owns only it, and it is active.
+    /// Set it before the game starts; later pets come with <see cref="AdoptPet"/>.
+    /// </summary>
+    public PetKind Starter
+    {
+        get => _starter;
+        set
+        {
+            if (!Defined(value))
+                return;
+            _starter = value;
+            _ownsCat = value == PetKind.Cat;
+            _ownsDog = value == PetKind.Dog;
+            _ownsCrow = value == PetKind.Crow;
+            Kind = value;
+            Altitude = value == PetKind.Crow ? HoverHeight : 0f;
+            SetPosition();
+            State = MakeState();
+        }
+    }
+
+    /// <summary>The active pet: the one that follows the player and fights.</summary>
+    public PetKind Kind { get; private set; } = PetKind.Cat;
+
+    /// <summary>The owned pets and the active one, as published every tick.</summary>
+    public OwnedPets Owned => new(_ownsCat, _ownsDog, _ownsCrow, Kind);
+
+    public bool Owns(PetKind kind) => Owned.Owns(kind);
+
+    /// <summary>Where the active pet's feet are (in the air while the Crow flies).</summary>
+    public Vector3 Position { get; private set; }
     public float Facing { get; private set; }
+
+    /// <summary>Height of its feet above the ground, meters (0 except for the flying Crow).</summary>
+    public float Altitude { get; private set; }
 
     /// <summary>Velocity this tick, meters per second (zero on a teleport).</summary>
     public Vector3 Velocity { get; private set; }
@@ -76,13 +140,13 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
 
     public bool Attacking => TargetId >= 0;
 
-    /// <summary>Sitting by the defeated player.</summary>
+    /// <summary>Sitting by the defeated player (the Crow lands to sit).</summary>
     public bool Sitting { get; private set; }
 
     /// <summary>Whether it appeared beside the player on the latest tick.</summary>
     public bool Teleported { get; private set; }
 
-    /// <summary>Seconds since its last bite (the view pounces on a bite).</summary>
+    /// <summary>Seconds since its last bite or peck (the view pounces or pecks on one).</summary>
     public float SinceBite { get; private set; } = 100f;
 
     /// <summary>Number of ticks run; the view uses it to see new ticks.</summary>
@@ -91,19 +155,30 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
     /// <summary>The state published on the latest tick.</summary>
     public PetState State { get; private set; }
 
+    /// <summary>Seconds between attacks of a pet: the Crow pecks a little faster than the others bite.</summary>
+    public static float AttackInterval(PetKind kind) => kind == PetKind.Crow ? PeckInterval : BiteInterval;
+
     public void Start(IMessageBus bus)
     {
         ArgumentNullException.ThrowIfNull(bus);
         _bus = bus;
         bus.Subscribe<PlayerState>(this);
         bus.Subscribe<MonsterState>(this);
+        bus.Subscribe<TeleportPlayer>(this);
+        bus.Subscribe<AdoptPet>(this);
+        bus.Subscribe<SetActivePet>(this);
         State = MakeState();
     }
 
-    /// <summary>Puts the pet standing on the ground at (x, z) of <paramref name="feet"/>.</summary>
+    /// <summary>
+    /// Puts the pet at (x, z) of <paramref name="feet"/>: on the ground, or hovering
+    /// <see cref="HoverHeight"/> above it for the Crow.
+    /// </summary>
     public void PlaceAt(Vector3 feet, float facing = 0f)
     {
-        Position = Ground(feet.X, feet.Z);
+        _xz = new Vector2(feet.X, feet.Z);
+        Altitude = Kind == PetKind.Crow ? HoverHeight : 0f;
+        SetPosition();
         Facing = WrapAngle(facing);
         Velocity = Vector3.Zero;
         _following = false;
@@ -112,7 +187,9 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
 
     public void Handle(in PlayerState message)
     {
-        _player = message;
+        _playerPosition = message.Position;
+        _playerFacing = message.Facing;
+        _playerAlive = message.Alive;
         _hasPlayer = true;
     }
 
@@ -122,13 +199,69 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
             _monsters[_monsterCount++] = message;
     }
 
+    /// <summary>The player is moved at once (fast travel, the house door, the clinic): the pet comes along.</summary>
+    public void Handle(in TeleportPlayer message)
+    {
+        var p = message.Position;
+        _playerPosition = OnGround(p.X, p.Z);
+        _playerFacing = message.Facing;
+        _playerAlive = true;
+        _hasPlayer = true;
+        TargetId = -1;
+        Sitting = false;
+        TeleportBeside(_playerPosition);
+        _teleportPending = true;
+        State = MakeState();
+    }
+
+    public void Handle(in AdoptPet message)
+    {
+        if (!Defined(message.Kind))
+            return;
+        switch (message.Kind)
+        {
+            case PetKind.Cat: _ownsCat = true; break;
+            case PetKind.Dog: _ownsDog = true; break;
+            case PetKind.Crow: _ownsCrow = true; break;
+        }
+        SwitchTo(message.Kind);
+    }
+
+    public void Handle(in SetActivePet message)
+    {
+        if (Defined(message.Kind) && Owns(message.Kind))
+            SwitchTo(message.Kind);
+    }
+
+    /// <summary>The active pet goes home; <paramref name="kind"/> comes out beside the player.</summary>
+    private void SwitchTo(PetKind kind)
+    {
+        if (kind == Kind)
+            return;
+        Kind = kind;
+        TargetId = -1;
+        Sitting = false;
+        _biteCooldown = 0f;
+        SinceBite = 100f;
+        Altitude = kind == PetKind.Crow ? HoverHeight : 0f;
+        if (_hasPlayer)
+        {
+            TeleportBeside(_playerPosition);
+            _teleportPending = true;
+        }
+        else
+            SetPosition();
+        State = MakeState();
+    }
+
     public void Tick(in TickContext context)
     {
         if (_bus == null)
             throw new InvalidOperationException("PetModule.Tick before Start.");
         float dt = (float)context.StepSeconds;
         Ticks++;
-        Teleported = false;
+        Teleported = _teleportPending;
+        _teleportPending = false;
         SinceBite += dt;
         if (_biteCooldown > 0f)
             _biteCooldown -= dt;
@@ -141,20 +274,25 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
         _monsterCount = 0; // the Monsters module publishes every monster again next tick
         State = MakeState();
         _bus.Publish(State);
+        var owned = Owned;
+        _bus.Publish(owned);
     }
 
     private void Think(float dt)
     {
-        Vector3 player = _player.Position;
+        Vector3 player = _playerPosition;
+        bool crow = Kind == PetKind.Crow;
         if (Flat(Position, player) > TeleportDistance)
             TeleportBeside(player);
 
-        if (!_player.Alive)
+        if (!_playerAlive)
         {
             TargetId = -1;
             _following = false;
             if (!Sitting)
                 Sitting = !MoveToward(player, SitDistance, Speed(Flat(Position, player) - SitDistance), dt);
+            // The Crow lands beside the player to sit.
+            Fly(0f, dt);
             if (Sitting)
                 TurnToward(Yaw(player - Position), dt);
             return;
@@ -168,12 +306,16 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
             float reach = m.Radius + Radius + BiteReach;
             if (Flat(Position, m.Position) > reach)
                 MoveToward(m.Position, reach - 0.1f, AttackSpeed, dt);
-            if (Flat(Position, m.Position) <= reach)
+            float gap = Flat(Position, m.Position);
+            // The Crow swoops down as it closes in and pecks once it is low enough.
+            if (crow)
+                Fly(gap <= reach + SwoopStart ? PeckHeight : HoverHeight, dt);
+            if (gap <= reach)
             {
                 TurnToward(Yaw(m.Position - Position), dt);
-                if (_biteCooldown <= 1e-4f)
+                if (_biteCooldown <= 1e-4f && (!crow || Altitude <= PeckHeight + 1e-3f))
                 {
-                    _biteCooldown = BiteInterval;
+                    _biteCooldown = AttackInterval(Kind);
                     SinceBite = 0f;
                     _bus!.Publish(new HitMonster(m.MonsterId, BiteDamage, 0f, 0f, BiteSource));
                 }
@@ -182,14 +324,35 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
             return;
         }
 
-        // Following: wait near the player, start again once they are a little farther away.
-        float distance = Flat(Position, player);
-        if (!_following && distance > FollowDistance + FollowSlack)
+        // Following: wait near the player (the Crow beside their right shoulder), start again
+        // once they are a little farther away.
+        Vector3 goal = player;
+        float stopAt = FollowDistance;
+        if (crow)
+        {
+            var spot = new Vector2(player.X, player.Z) + Right(_playerFacing) * CrowSide;
+            goal = new Vector3(spot.X, player.Y, spot.Y);
+            stopAt = 0f;
+            Fly(HoverHeight, dt);
+        }
+        float distance = Flat(Position, goal);
+        if (!_following && distance > stopAt + FollowSlack)
             _following = true;
         if (_following)
-            _following = MoveToward(player, FollowDistance, Speed(distance - FollowDistance), dt);
+            _following = MoveToward(goal, stopAt, Speed(distance - stopAt), dt);
         if (!_following)
-            TurnToward(Yaw(player - Position), dt * 0.4f);
+            TurnToward(crow ? _playerFacing : Yaw(player - Position), dt * 0.4f);
+    }
+
+    /// <summary>Climbs or swoops toward <paramref name="height"/> above the ground (the Crow; others stay on it).</summary>
+    private void Fly(float height, float dt)
+    {
+        if (Kind != PetKind.Crow)
+            height = 0f;
+        float rate = height > Altitude ? ClimbSpeed : SwoopSpeed;
+        float diff = height - Altitude;
+        Altitude += Math.Clamp(diff, -rate * dt, rate * dt);
+        SetPosition();
     }
 
     /// <summary>Keeps a target while it is alive and near the player; else picks the nearest one to the player.</summary>
@@ -237,11 +400,11 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
 
     /// <summary>
     /// Runs toward <paramref name="goal"/> until <paramref name="stopAt"/> meters from it,
-    /// steering around trunks and staying on the ground. Returns whether it still has a way to go.
+    /// steering around obstacles and staying on walkable ground. Returns whether it still has a way to go.
     /// </summary>
     private bool MoveToward(Vector3 goal, float stopAt, float speed, float dt)
     {
-        var pos = new Vector2(Position.X, Position.Z);
+        var pos = _xz;
         var to = new Vector2(goal.X, goal.Z) - pos;
         float distance = to.Length();
         float left = distance - stopAt;
@@ -251,22 +414,35 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
         float step = MathF.Min(speed * dt, left);
         Vector2 next = pos + dir * step;
         ResolveCollisions(ref next);
+        if (!Allowed(pos, next))
+        {
+            // At the edge of the walkable ground: slide along it.
+            var alongX = new Vector2(next.X, pos.Y);
+            var alongZ = new Vector2(pos.X, next.Y);
+            next = Allowed(pos, alongX) ? alongX : Allowed(pos, alongZ) ? alongZ : pos;
+        }
         if ((next - pos).LengthSquared() > 1e-8f)
             TurnToward(Yaw(new Vector3(next.X - pos.X, 0f, next.Y - pos.Y)), dt);
-        Position = Ground(next.X, next.Y);
+        _xz = next;
+        SetPosition();
         return true;
     }
 
+    /// <summary>Whether it may step from <paramref name="from"/> to <paramref name="to"/>: onto walkable ground, or at least back toward it.</summary>
+    private static bool Allowed(Vector2 from, Vector2 to) =>
+        !Ground.Blocks(to.X, to.Y, Radius - 1e-3f)
+        && (Areas.Walkable(to.X, to.Y, Radius) || Areas.Depth(to.X, to.Y) > Areas.Depth(from.X, from.Y));
+
     /// <summary>
-    /// The direction to run in: <paramref name="dir"/>, or past the edge of the nearest trunk in
-    /// the way (kept on the same side as long as that trunk is in the way).
+    /// The direction to run in: <paramref name="dir"/>, or past the edge of the nearest obstacle in
+    /// the way (kept on the same side as long as that obstacle is in the way).
     /// </summary>
     private Vector2 Steer(Vector2 pos, Vector2 dir, float distance)
     {
         float look = MathF.Min(distance, LookAhead);
         int hit = -1;
         float hitAlong = float.MaxValue;
-        var all = Obstacles.All;
+        var all = Ground.Obstacles;
         for (int i = 0; i < all.Length; i++)
         {
             var rel = all[i].Center - pos;
@@ -292,13 +468,13 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
         float d = toCenter.Length();
         float rr = o.Radius + Radius + Clearance;
         var u = toCenter / d;
-        // Graze the edge of the padded trunk; once inside the padding, run along it and a little out.
+        // Graze the edge of the padded obstacle; once inside the padding, run along it and a little out.
         float angle = d > rr ? MathF.Asin(rr / d) : MathF.PI * 0.5f + 0.25f;
         if (hit != _avoidIndex)
         {
             _avoidIndex = hit;
             float across = dir.X * toCenter.Y - dir.Y * toCenter.X;
-            // The trunk is left of the way (across > 0): go right of it, turning clockwise from it.
+            // The obstacle is left of the way (across > 0): go right of it, turning clockwise from it.
             _avoidSide = across >= 0f ? -1f : 1f;
         }
         float a = angle * _avoidSide;
@@ -306,13 +482,12 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
         return new Vector2(u.X * cos - u.Y * sin, u.X * sin + u.Y * cos);
     }
 
-    /// <summary>Pushes (x, z) out of every trunk it overlaps and back inside the forest's square.</summary>
+    /// <summary>Pushes (x, z) out of every obstacle it overlaps.</summary>
     private static void ResolveCollisions(ref Vector2 p)
     {
-        for (int pass = 0; pass < 3; pass++)
+        for (int pass = 0; pass < 3 && Ground.Blocks(p.X, p.Y, Radius); pass++)
         {
-            bool moved = false;
-            foreach (var o in Obstacles.All)
+            foreach (var o in Ground.Obstacles)
             {
                 float dx = p.X - o.X, dz = p.Y - o.Z, r = o.Radius + Radius;
                 float d2 = dx * dx + dz * dz;
@@ -327,45 +502,54 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
                 }
                 float push = (r + 1e-4f) / d;
                 p = new Vector2(o.X + dx * push, o.Z + dz * push);
-                moved = true;
             }
-            float limit = ForestBounds.HalfSize - Radius;
-            p = new Vector2(Math.Clamp(p.X, -limit, limit), Math.Clamp(p.Y, -limit, limit));
-            if (!moved)
-                break;
         }
     }
 
-    /// <summary>Appears on free ground beside the player: to their right, left, behind or in front.</summary>
+    /// <summary>Appears beside the player (the Crow up in the air): to their right, left, behind or in front.</summary>
     private void TeleportBeside(Vector3 player)
     {
-        float f = _player.Facing;
-        // The player's right is (cos f, -sin f) in (x, z); their forward (-sin f, -cos f).
-        var right = new Vector2(MathF.Cos(f), -MathF.Sin(f));
-        var forward = new Vector2(-MathF.Sin(f), -MathF.Cos(f));
-        var at = new Vector2(player.X, player.Z);
-        Vector2 spot = at;
-        for (int ring = 1; ring <= 3; ring++)
-        {
-            float d = 1.5f * ring;
-            if (Free(at + right * d, ref spot) || Free(at - right * d, ref spot)
-                || Free(at - forward * d, ref spot) || Free(at + forward * d, ref spot))
-                break;
-        }
-        ResolveCollisions(ref spot);
-        Position = Ground(spot.X, spot.Y);
-        Facing = WrapAngle(f);
+        _xz = Beside(player, _playerFacing, Kind == PetKind.Crow ? CrowSide : 1.5f);
+        Altitude = Kind == PetKind.Crow ? HoverHeight : 0f;
+        SetPosition();
+        Facing = WrapAngle(_playerFacing);
         _following = false;
         _avoidIndex = -1;
         Teleported = true;
     }
 
+    /// <summary>A free spot <paramref name="gap"/> (or 2, 3 times that) to the right, left, behind or in front of (x, z) of <paramref name="at"/>.</summary>
+    private static Vector2 Beside(Vector3 at, float facing, float gap)
+    {
+        var right = Right(facing);
+        var forward = new Vector2(-MathF.Sin(facing), -MathF.Cos(facing));
+        var center = new Vector2(at.X, at.Z);
+        for (int ring = 1; ring <= 3; ring++)
+        {
+            float d = gap * ring;
+            Vector2 spot = center;
+            if (Free(center + right * d, ref spot) || Free(center - right * d, ref spot)
+                || Free(center - forward * d, ref spot) || Free(center + forward * d, ref spot))
+                return spot;
+        }
+        return center;
+    }
+
     private static bool Free(Vector2 p, ref Vector2 spot)
     {
-        if (!ForestBounds.Contains(p.X, p.Y, Radius) || Obstacles.Blocks(p.X, p.Y, Radius + Clearance))
+        if (!Areas.Walkable(p.X, p.Y, Radius) || Ground.Blocks(p.X, p.Y, Radius + Clearance))
             return false;
         spot = p;
         return true;
+    }
+
+    /// <summary>The right of a yaw <paramref name="facing"/> in (x, z).</summary>
+    private static Vector2 Right(float facing) => new(MathF.Cos(facing), -MathF.Sin(facing));
+
+    private void SetPosition()
+    {
+        var g = OnGround(_xz.X, _xz.Y);
+        Position = new Vector3(g.X, g.Y + Altitude, g.Z);
     }
 
     private void TurnToward(float target, float dt)
@@ -384,7 +568,9 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
         return MathF.Sqrt(dx * dx + dz * dz);
     }
 
-    private static Vector3 Ground(float x, float z) => new(x, Terrain.HeightAt(x, z), z);
+    private static Vector3 OnGround(float x, float z) => new(x, Ground.HeightAt(x, z), z);
+
+    private static bool Defined(PetKind kind) => kind is PetKind.Cat or PetKind.Dog or PetKind.Crow;
 
     /// <summary>The angle in (-π, π].</summary>
     public static float WrapAngle(float a)

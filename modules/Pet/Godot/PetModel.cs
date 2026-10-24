@@ -5,9 +5,11 @@ using Godot;
 namespace Fungtopia.Pet.View;
 
 /// <summary>
-/// One pet (cat.glb or dog.glb from modules/Pet/Models), drawn toon-shaded with ink outlines and
-/// animated procedurally: a trot on diagonal leg pairs, a pounce on each bite, sitting down, and a
-/// wagging tail. Faces -Z at zero rotation.
+/// One pet (cat.glb, dog.glb or crow.glb from modules/Pet/Models), drawn toon-shaded with ink
+/// outlines and animated procedurally: for the Cat and the Dog a trot on diagonal leg pairs, a
+/// pounce on each bite, sitting down, and a wagging tail; for the Crow flapping wings, a hovering
+/// bob, a forward lean while it swoops, a peck on each hit, and folded wings once it has landed.
+/// Faces -Z at zero rotation.
 /// </summary>
 public partial class PetModel : Node3D
 {
@@ -29,12 +31,15 @@ public partial class PetModel : Node3D
 
     private readonly Node3D _rig = new() { Name = "Rig" };
     private Part _head, _body, _legFL, _legFR, _legBL, _legBR, _tail;
+    private Part _wingL, _wingR, _legL, _legR;
 
     private float _trotPhase;
     private float _trotAmount;
     private float _sit;
     private float _time;
     private float _wagPhase;
+    private float _flapPhase;
+    private float _flight;
 
     public PetKind Kind { get; private set; }
 
@@ -69,8 +74,7 @@ public partial class PetModel : Node3D
     private void Build()
     {
         AddChild(_rig);
-        // The Crow comes later; until it has a model, it is drawn as the cat.
-        var scene = LoadGlb(Models + (Kind == PetKind.Dog ? "dog.glb" : "cat.glb"));
+        var scene = LoadGlb(Models + Kind switch { PetKind.Dog => "dog.glb", PetKind.Crow => "crow.glb", _ => "cat.glb" });
         if (scene == null)
             return;
         _rig.AddChild(scene);
@@ -82,6 +86,10 @@ public partial class PetModel : Node3D
         _legBL = new Part(Find(scene, "LegBL"));
         _legBR = new Part(Find(scene, "LegBR"));
         _tail = new Part(Find(scene, "Tail"));
+        _wingL = new Part(Find(scene, "WingL"));
+        _wingR = new Part(Find(scene, "WingR"));
+        _legL = new Part(Find(scene, "LegL"));
+        _legR = new Part(Find(scene, "LegR"));
     }
 
     /// <summary>
@@ -147,9 +155,15 @@ public partial class PetModel : Node3D
     /// <param name="sitting">Sitting by the defeated player.</param>
     /// <param name="sinceBite">Seconds since the last bite: a pounce plays right after one.</param>
     /// <param name="attacking">Going for a monster (the tail stands up, the wag gets eager).</param>
-    public void Animate(float delta, float speed, bool sitting, float sinceBite, bool attacking)
+    /// <param name="altitude">Height above the ground, meters (the Crow flies while it is above 0).</param>
+    public void Animate(float delta, float speed, bool sitting, float sinceBite, bool attacking, float altitude = 0f)
     {
         _time += delta;
+        if (Kind == PetKind.Crow)
+        {
+            AnimateCrow(delta, speed, sinceBite, attacking, altitude);
+            return;
+        }
         float trotTarget = sitting ? 0f : Math.Clamp(speed / 4f, 0f, 1f);
         _trotAmount = Mathf.MoveToward(_trotAmount, trotTarget, delta * 6f);
         // Short legs take quick steps: about three strides per meter.
@@ -189,5 +203,39 @@ public partial class PetModel : Node3D
         float wag = MathF.Sin(_wagPhase) * (0.45f + 0.2f * sit);
         float tailUp = (attacking ? 0.25f : 0f) - 0.6f * sit;
         _tail.Pose(new Vector3(tailUp, wag, 0f));
+    }
+
+    /// <summary>The Crow: flaps and bobs while it flies, leans into a swoop, pecks, and folds its wings on the ground.</summary>
+    private void AnimateCrow(float delta, float speed, float sinceBite, bool attacking, float altitude)
+    {
+        _flight = Mathf.MoveToward(_flight, altitude > 0.05f ? 1f : 0f, delta * 4f);
+        float flight = Mathf.SmoothStep(0f, 1f, _flight);
+        // Quick little wing beats, faster while it hurries.
+        _flapPhase = (_flapPhase + delta * (14f + 1.5f * speed)) % Mathf.Tau;
+        float flap = MathF.Sin(_flapPhase) * 0.85f * flight;
+        float bob = MathF.Sin(_flapPhase) * 0.03f * flight + MathF.Sin(_time * 2.2f) * 0.04f * flight;
+        float breathe = MathF.Sin(_time * 2.6f) * 0.012f * (1f - flight);
+
+        // The peck: a quick dip of the whole ball and the head toward the monster.
+        const float PeckSeconds = 0.3f;
+        float peck = sinceBite < PeckSeconds ? MathF.Sin(Mathf.Pi * sinceBite / PeckSeconds) : 0f;
+        // Leaning into the flight (more while swooping on a monster), nose down to peck.
+        float lean = -Math.Clamp(speed / 8f, 0f, 1f) * (attacking ? 0.45f : 0.25f) * flight - 0.5f * peck;
+        var basis = Basis.FromEuler(new Vector3(lean, 0f, MathF.Sin(_time * 1.7f) * 0.06f * flight))
+            * Basis.FromScale(new Vector3(1f, 1f + breathe, 1f));
+        var center = new Vector3(0f, 0.3f, 0f);
+        var origin = center - basis * center + new Vector3(0f, bob, -0.1f * peck);
+        _rig.Transform = new Transform3D(basis, origin);
+
+        // Wings beat up and down around the shoulders; folded flat against the body on the ground.
+        float folded = 1f - flight;
+        _wingL.Pose(new Vector3(0f, 0.2f * folded, -flap - 0.15f * flight));
+        _wingR.Pose(new Vector3(0f, -0.2f * folded, flap + 0.15f * flight));
+        float look = MathF.Sin(_time * 0.8f) * 0.3f * (attacking ? 0f : 1f);
+        _head.Pose(new Vector3(-0.6f * peck + 0.05f * MathF.Sin(_flapPhase) * flight, look, 0f));
+        _tail.Pose(new Vector3(0.25f * flight + 0.1f * MathF.Sin(_flapPhase + 1f) * flight, 0f, 0f));
+        // Feet dangle back in flight and stand straight once landed.
+        _legL.Pose(new Vector3(0.5f * flight, 0f, 0f));
+        _legR.Pose(new Vector3(0.5f * flight, 0f, 0f));
     }
 }
