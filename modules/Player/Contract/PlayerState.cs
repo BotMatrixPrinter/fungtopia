@@ -37,6 +37,9 @@ public readonly struct PlayerState
     /// <summary>False from defeat until the next <see cref="TeleportPlayer"/>.</summary>
     public readonly bool Alive;
 
+    /// <summary><see cref="Health"/> is at <see cref="MaxHealth"/> (nothing to heal).</summary>
+    public bool FullHealth => Health >= MaxHealth;
+
     public readonly CharacterKind Character;
 
     /// <summary>The place of the world the player is in: <see cref="Areas.At"/> at <see cref="Position"/>.</summary>
@@ -77,6 +80,25 @@ public readonly struct DamagePlayer
     {
         Amount = amount;
         From = from;
+    }
+}
+
+/// <summary>
+/// Published by anyone (eating food) to heal the player: raises <see cref="PlayerState.Health"/> by
+/// <see cref="Amount"/>, never above <see cref="PlayerState.MaxHealth"/>. Ignored while defeated
+/// (not <see cref="PlayerState.Alive"/>) and when <see cref="Amount"/> is 0 or less.
+/// </summary>
+public readonly struct HealPlayer
+{
+    /// <summary>Health to give back; <see cref="Full"/> (999) heals fully.</summary>
+    public readonly int Amount;
+
+    /// <summary>An <see cref="Amount"/> that heals fully.</summary>
+    public const int Full = 999;
+
+    public HealPlayer(int amount)
+    {
+        Amount = amount;
     }
 }
 

@@ -931,6 +931,75 @@ public class PlayerModuleTests
         Assert.Equal(9, _bus.States[^1].Health);
     }
 
+    // ---- Healing ----
+
+    [Fact]
+    public void HealingRaisesHealthAndCapsAtMax()
+    {
+        _bus.Publish(new DamagePlayer(5, Vector3.Zero));
+        TickWith(Idle);
+        Assert.False(_bus.States[^1].FullHealth);
+        _bus.Publish(new HealPlayer(1)); // a Berry Muffin
+        TickWith(Idle);
+        Assert.Equal(6, _bus.States[^1].Health);
+        Assert.False(_bus.States[^1].FullHealth);
+        _bus.Publish(new HealPlayer(3)); // a Mushroom Soup
+        TickWith(Idle);
+        Assert.Equal(9, _bus.States[^1].Health);
+        _bus.Publish(new HealPlayer(3)); // more than is missing: stops at max
+        TickWith(Idle);
+        Assert.Equal(10, _bus.States[^1].Health);
+        Assert.Equal(_bus.States[^1].MaxHealth, _bus.States[^1].Health);
+        Assert.True(_bus.States[^1].FullHealth);
+        _bus.Publish(new HealPlayer(5)); // already full: stays at max
+        TickWith(Idle);
+        Assert.Equal(10, _bus.States[^1].Health);
+        Assert.True(_bus.States[^1].FullHealth);
+    }
+
+    [Fact]
+    public void FullHealingFillsUpToMax()
+    {
+        _bus.Publish(new DamagePlayer(8, Vector3.Zero));
+        TickWith(Idle);
+        _bus.Publish(new HealPlayer(HealPlayer.Full)); // a Spore Pie
+        TickWith(Idle);
+        Assert.Equal(999, HealPlayer.Full);
+        Assert.Equal(10, _bus.States[^1].Health);
+        Assert.True(_bus.States[^1].FullHealth);
+        _bus.Publish(new HealPlayer(int.MaxValue)); // no overflow
+        TickWith(Idle);
+        Assert.Equal(10, _bus.States[^1].Health);
+    }
+
+    [Fact]
+    public void IgnoresNonPositiveHealing()
+    {
+        _bus.Publish(new DamagePlayer(4, Vector3.Zero));
+        _bus.Publish(new HealPlayer(0));
+        _bus.Publish(new HealPlayer(-3));
+        TickWith(Idle);
+        Assert.Equal(6, _bus.States[^1].Health);
+    }
+
+    [Fact]
+    public void NoHealingWhileDefeated()
+    {
+        _bus.Publish(new DamagePlayer(10, Vector3.Zero));
+        TickWith(Idle);
+        _bus.Publish(new HealPlayer(3));
+        _bus.Publish(new HealPlayer(HealPlayer.Full));
+        TickWith(Idle);
+        var s = _bus.States[^1];
+        Assert.Equal(0, s.Health);
+        Assert.False(s.Alive);
+        Assert.False(s.FullHealth);
+        // Still down until a teleport brings it back.
+        Run(1.0, Idle);
+        Assert.False(_bus.States[^1].Alive);
+        Assert.Single(_bus.Defeats);
+    }
+
     private void Defeat()
     {
         for (int hits = 0; hits < 5; hits++)

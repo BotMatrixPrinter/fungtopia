@@ -25,7 +25,7 @@ namespace Fungtopia.Player;
 /// Saved games: answers <see cref="CollectSave"/> with its <see cref="SaveModules.Player"/> part and
 /// restores it from <see cref="RestorePart"/>.
 /// </summary>
-public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessageHandler<DamagePlayer>,
+public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessageHandler<DamagePlayer>, IMessageHandler<HealPlayer>,
     IMessageHandler<TeleportPlayer>, IMessageHandler<DialogueState>, IMessageHandler<BowState>,
     IMessageHandler<GameStart>, IMessageHandler<StartScreenState>, IMessageHandler<AppearanceState>,
     IMessageHandler<WardrobeState>, IMessageHandler<PreviewYaw>, IMessageHandler<CollectSave>, IMessageHandler<RestorePart>
@@ -147,6 +147,7 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
         _bus = bus;
         bus.Subscribe<PlayerInput>(this);
         bus.Subscribe<DamagePlayer>(this);
+        bus.Subscribe<HealPlayer>(this);
         bus.Subscribe<TeleportPlayer>(this);
         bus.Subscribe<DialogueState>(this);
         bus.Subscribe<BowState>(this);
@@ -393,6 +394,13 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
             DefeatedSeconds = 0f;
             _defeatPending = true;
         }
+    }
+
+    public void Handle(in HealPlayer message)
+    {
+        if (!Alive || message.Amount <= 0)
+            return;
+        Health = message.Amount >= MaxHealth - Health ? MaxHealth : Health + message.Amount;
     }
 
     public void Tick(in TickContext context)

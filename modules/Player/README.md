@@ -29,9 +29,10 @@ positive turns left; the direction of yaw `a` is `(-sin a, 0, -cos a)`.
 
 | Message | Who publishes it | What it is |
 | --- | --- | --- |
-| `PlayerState` | Player, once every tick | `Position` (feet), `Facing` (yaw), `Velocity`, `Grounded`, `Health`, `MaxHealth`, `Alive`, `Character` (`CharacterKind.Girl` or `Boy`), `Area` (`Fungtopia.Map.Area` at `Position`; the old constructor without it computes it with `Areas.At`). |
+| `PlayerState` | Player, once every tick | `Position` (feet), `Facing` (yaw), `Velocity`, `Grounded`, `Health`, `MaxHealth`, `Alive`, `FullHealth` (`Health` at `MaxHealth`), `Character` (`CharacterKind.Girl` or `Boy`), `Area` (`Fungtopia.Map.Area` at `Position`; the old constructor without it computes it with `Areas.At`). |
 | `TeleportPlayer` | anyone (fast travel, the house door, DayNight at the clinic) | `Position`, `Facing`: the player is put on the ground there at once with zero velocity; after a defeat it also comes back `Alive` with full health. |
 | `DamagePlayer` | monsters (anyone) | `Amount` of health to take, `From` where the hit came from. |
+| `HealPlayer` | anyone (the Food module when you eat) | `Amount` of health to give back (`HealPlayer.Full`, 999: fully); never above `MaxHealth`, ignored while defeated or when 0 or less. |
 | `PlayerDefeated` | Player, once per defeat | `Position` where the player fell, on its next tick after health reached 0. |
 
 ## Core
@@ -39,7 +40,7 @@ positive turns left; the direction of yaw `a` is `(-sin a, 0, -cos a)`.
 `PlayerModule` reads `Fungtopia.Input.PlayerInput`, `Fungtopia.Dialogue.DialogueState`,
 `Fungtopia.Bow.BowState`, `Fungtopia.StartScreen.GameStart` and `StartScreenState`,
 `Fungtopia.Wardrobe.AppearanceState`, `WardrobeState` and `PreviewYaw` (and the Wardrobe's `Catalog` and `Looks`),
-`TeleportPlayer` and `DamagePlayer`, the Save Contract's `CollectSave` and `RestorePart`, and the
+`TeleportPlayer`, `DamagePlayer` and `HealPlayer`, the Save Contract's `CollectSave` and `RestorePart`, and the
 world from the Map Contract (`Ground`, `Areas`, `Places`). The Player Contract references the Map Contract (for `Area`); the Core also references the Save
 Contract. The game starts at
 `Places.HomeDoor`, facing out.
@@ -85,7 +86,8 @@ Each tick:
   of `Areas.Depth` (slides along the edges of roads, towns and the forest). If that does not
   settle (a tight corner) it stays where it was. `CanStand(x, z)` tells whether a spot is free.
 - **Health.** 10 of 10. `DamagePlayer` with `Amount > 0` lowers it (never below 0), then 0.7 s of
-  invulnerability ignores more hits. At 0: `Alive` false, one `PlayerDefeated`, no moving, for
+  invulnerability ignores more hits. `HealPlayer` with `Amount > 0` raises it up to `MaxHealth`
+  (999 or more: fully), not while defeated. At 0: `Alive` false, one `PlayerDefeated`, no moving, for
   as long as it takes: the next `TeleportPlayer` brings it back with full health (DayNight sends
   it the next morning at Dr. Jeremy's clinic).
 
