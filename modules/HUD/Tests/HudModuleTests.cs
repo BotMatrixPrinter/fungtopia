@@ -2,6 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 using Fungtopia.Bow;
+using Fungtopia.DayNight;
+using Fungtopia.Map;
+using Fungtopia.NPCs;
 using Fungtopia.Player;
 using Fungtopia.Shell;
 using Fungtopia.Wallet;
@@ -46,6 +49,12 @@ public class HudModuleTests
     private static PlayerState Player(int health, int maxHealth = 10, bool alive = true) =>
         new(Vector3.Zero, 0f, Vector3.Zero, true, health, maxHealth, alive, CharacterKind.Girl);
 
+    private static PlayerState In(Area area, bool alive = true) =>
+        new(Vector3.Zero, 0f, Vector3.Zero, true, 10, 10, alive, CharacterKind.Girl, area);
+
+    private static QuestState Quest(int progress, int goal = 5, bool complete = false, string title = "Defeat 5 Mushroom Caterpillars") =>
+        new(true, title, progress, goal, complete);
+
     private void Send<T>(T message) where T : struct => _bus.Publish(message);
 
     private void Tick(int count = 1)
@@ -57,8 +66,11 @@ public class HudModuleTests
     private static int Ticks(float seconds) => (int)Math.Ceiling(seconds * 60) + 1;
 
     [Fact]
-    public void ListensToPlayerWalletAndBowAndPublishesNothing()
+    public void ListensToPlayerWalletBowClockAndQuestAndPublishesNothing()
     {
+        Assert.True(_bus.Has<TimeOfDay>());
+        Assert.True(_bus.Has<WokeUp>());
+        Assert.True(_bus.Has<QuestState>());
         Assert.True(_bus.Has<PlayerState>());
         Assert.True(_bus.Has<PlayerDefeated>());
         Assert.True(_bus.Has<WalletState>());
@@ -285,7 +297,7 @@ public class HudModuleTests
     // Fainting
 
     [Fact]
-    public void FaintingFadesInSoftlyWithItsText()
+    public void FaintingFadesToBlackWithItsText()
     {
         Send(Player(10));
         Tick();
@@ -300,11 +312,12 @@ public class HudModuleTests
         float early = _hud.FaintFade(1f);
         Assert.InRange(early, 0.001f, 0.2f);
 
-        Tick(Ticks(HudModule.FadeSeconds / 2));
+        Tick(Ticks(HudModule.FadeInSeconds / 2));
         float middle = _hud.FaintFade(1f);
         Assert.True(middle > early && middle < HudModule.FadeMaxAlpha);
 
-        Tick(Ticks(HudModule.FadeSeconds));
+        Tick(Ticks(HudModule.FadeInSeconds));
+        Assert.Equal(1f, HudModule.FadeMaxAlpha); // fully black
         Assert.Equal(HudModule.FadeMaxAlpha, _hud.FaintFade(1f), 5);
         Assert.Equal(1f, _hud.FaintTextAlpha(1f), 5);
     }
@@ -314,14 +327,16 @@ public class HudModuleTests
     {
         Send(new PlayerDefeated(Vector3.Zero));
         Send(Player(0, alive: false));
-        Tick(Ticks(HudModule.FadeSeconds));
+        Tick(Ticks(HudModule.FadeInSeconds));
         Assert.Equal(HudModule.FadeMaxAlpha, _hud.FaintFade(1f), 5);
 
         Send(Player(10));
         Tick();
         Assert.False(_hud.Fainted);
         Assert.True(_hud.FaintFade(1f) < HudModule.FadeMaxAlpha);
-        Tick(Ticks(HudModule.FadeSeconds));
+        Tick(Ticks(HudModule.FadeOutSeconds / 2));
+        Assert.True(_hud.FaintFade(1f) > 0f); // the screen comes back slowly
+        Tick(Ticks(HudModule.FadeOutSeconds));
         Assert.Equal(0f, _hud.FaintFade(1f));
         Assert.Equal(0f, _hud.FaintTextAlpha(1f));
     }
@@ -336,6 +351,225 @@ public class HudModuleTests
         Send(Player(0, alive: false));
         Tick();
         Assert.True(_hud.Fainted);
+    }
+
+    [Fact]
+    public void WakeUpTextReplacesTheFaintAsTheScreenComesBack()
+    {
+        Assert.Equal("Day 4 - you wake up at Dr. Jeremy's", HudText.WokeUp(4));
+        Assert.False(_hud.Waking);
+        Assert.Equal(0f, _hud.WakeTextAlpha(1f));
+
+        // Defeat: black with "You fainted...".
+        Send(Player(0, alive: false));
+        Send(new PlayerDefeated(Vector3.Zero));
+        Tick(Ticks(3f));
+        Assert.Equal(1f, _hud.FaintFade(1f), 5);
+        Assert.Equal(1f, _hud.FaintTextAlpha(1f), 5);
+
+        // DayNight wakes the player at the clinic: the wake-up text takes over, still in the dark.
+        Send(new WokeUp(4));
+        Tick();
+        Assert.Equal(4, _hud.WakeDay);
+        Assert.True(_hud.Waking);
+        Assert.Equal(0f, _hud.FaintTextAlpha(1f));
+        float first = _hud.WakeTextAlpha(1f);
+        Assert.InRange(first, 0.001f, 0.2f);
+
+        // The Player comes back alive (on DayNight's teleport): the screen fades back in under the text.
+        Send(Player(10));
+        Tick(Ticks(HudModule.WakeTextInSeconds));
+        Assert.Equal(1f, _hud.WakeTextAlpha(1f), 5);
+        float fade = _hud.FaintFade(1f);
+        Assert.InRange(fade, 0.01f, 0.99f);
+        Tick(Ticks(HudModule.FadeOutSeconds));
+        Assert.Equal(0f, _hud.FaintFade(1f));
+        Assert.True(_hud.WakeTextAlpha(1f) > 0f); // read on the bright screen a moment longer
+
+        Tick(Ticks(HudModule.WakeSeconds));
+        Assert.False(_hud.Waking);
+        Assert.Equal(0f, _hud.WakeTextAlpha(1f));
+    }
+
+    // Place-name banner
+
+    [Theory]
+    [InlineData(Area.Town, "Mushroom Town")]
+    [InlineData(Area.Forest, "Mushroom Forest")]
+    [InlineData(Area.PetCity, "Pet City")]
+    [InlineData(Area.Home, "Home")]
+    [InlineData(Area.DeepForest, "Deep Forest")]
+    [InlineData(Area.Road, "")]
+    public void AreaNamesForTheBanner(Area area, string name)
+    {
+        Assert.Equal(name, HudText.AreaName(area));
+    }
+
+    [Fact]
+    public void BannerSlidesInWhenEnteringANewPlaceThenOut()
+    {
+        Assert.False(_hud.BannerVisible);
+        Send(In(Area.Town));
+        Tick();
+        Assert.True(_hud.BannerVisible);
+        Assert.Equal(Area.Town, _hud.BannerArea);
+        Assert.Equal(1, _hud.BannerCount);
+        float early = _hud.BannerSlide(1f);
+        Assert.InRange(early, 0.001f, 0.5f);
+
+        Tick(Ticks(HudModule.BannerSlideSeconds));
+        Assert.Equal(1f, _hud.BannerSlide(1f), 5);
+
+        Send(In(Area.Town)); // still in town: nothing new
+        Tick(Ticks(HudModule.BannerSeconds - HudModule.BannerSlideSeconds) - Ticks(HudModule.BannerSlideSeconds / 2));
+        float leaving = _hud.BannerSlide(1f);
+        Assert.InRange(leaving, 0.01f, 0.99f);
+        Tick(Ticks(HudModule.BannerSlideSeconds));
+        Assert.False(_hud.BannerVisible);
+        Assert.Equal(0f, _hud.BannerSlide(1f));
+        Assert.Equal(1, _hud.BannerCount);
+
+        Send(In(Area.Forest));
+        Tick();
+        Assert.True(_hud.BannerVisible);
+        Assert.Equal(Area.Forest, _hud.BannerArea);
+        Assert.Equal(2, _hud.BannerCount);
+    }
+
+    [Fact]
+    public void RoadsShowNoBannerAndComingBackToTheSamePlaceShowsNone()
+    {
+        Send(In(Area.Town));
+        Tick(Ticks(HudModule.BannerSeconds));
+        Send(In(Area.Road));
+        Tick();
+        Assert.False(_hud.BannerVisible);
+        Send(In(Area.Town)); // turned back on the road
+        Tick();
+        Assert.False(_hud.BannerVisible);
+        Assert.Equal(1, _hud.BannerCount);
+
+        Send(In(Area.Road));
+        Tick();
+        Send(In(Area.PetCity));
+        Tick();
+        Assert.True(_hud.BannerVisible);
+        Assert.Equal(Area.PetCity, _hud.BannerArea);
+        Assert.Equal("Pet City", HudText.AreaName(_hud.BannerArea));
+    }
+
+    [Fact]
+    public void NoBannerWhileFaintedThenTheWakingPlace()
+    {
+        Send(In(Area.Forest));
+        Tick(Ticks(HudModule.BannerSeconds));
+        Send(new PlayerDefeated(Vector3.Zero));
+        Send(In(Area.Town, alive: false));
+        Tick();
+        Assert.False(_hud.BannerVisible);
+        Send(In(Area.Town)); // woken at the clinic in town
+        Tick();
+        Assert.True(_hud.BannerVisible);
+        Assert.Equal(Area.Town, _hud.BannerArea);
+    }
+
+    // Clock
+
+    [Theory]
+    [InlineData(0, "12:00 AM")]
+    [InlineData(9 * 60 + 5, "9:05 AM")]
+    [InlineData(12 * 60, "12:00 PM")]
+    [InlineData(20 * 60 + 30, "8:30 PM")]
+    [InlineData(23 * 60 + 59, "11:59 PM")]
+    public void ClockTimeTexts(int minute, string text)
+    {
+        Assert.Equal(text, HudText.Time(minute));
+    }
+
+    [Fact]
+    public void ClockShowsTheDayTimeAndSunOrMoon()
+    {
+        Assert.False(_hud.HasClock);
+        Assert.Equal("Day 3", HudText.Day(3));
+
+        Send(new TimeOfDay(3, 9.09f, false));
+        Tick();
+        Assert.True(_hud.HasClock);
+        Assert.Equal(3, _hud.Day);
+        Assert.Equal(9 * 60 + 5, _hud.ClockMinute);
+        Assert.False(_hud.IsNight); // the sun
+        Assert.Equal("9:05 AM", HudText.Time(_hud.ClockMinute));
+
+        Send(new TimeOfDay(3, 22.5f, true));
+        Tick();
+        Assert.True(_hud.IsNight); // the moon
+        Assert.Equal("10:30 PM", HudText.Time(_hud.ClockMinute));
+
+        Send(new TimeOfDay(4, 23.9999f, true));
+        Assert.Equal(4, _hud.Day);
+        Assert.Equal(24 * 60 - 1, _hud.ClockMinute);
+    }
+
+    // Quest tracker
+
+    [Fact]
+    public void QuestTrackerText()
+    {
+        Assert.Equal("Defeat 5 Mushroom Caterpillars 3/5", HudText.Quest("Defeat 5 Mushroom Caterpillars", 3, 5));
+    }
+
+    [Fact]
+    public void QuestTrackerFollowsTheActiveQuestAndChecksWhenComplete()
+    {
+        Assert.False(_hud.QuestActive);
+        Send(new QuestState(false, "", 0, 0, false)); // before Millie gives one
+        Assert.False(_hud.QuestActive);
+
+        Send(Quest(3));
+        Tick();
+        Assert.True(_hud.QuestActive);
+        Assert.False(_hud.QuestComplete);
+        Assert.Equal("Defeat 5 Mushroom Caterpillars 3/5", HudText.Quest(_hud.QuestTitle, _hud.QuestProgress, _hud.QuestGoal));
+
+        Send(Quest(5, complete: true));
+        Tick();
+        Assert.True(_hud.QuestComplete); // the check
+        Assert.Equal("Defeat 5 Mushroom Caterpillars 5/5", HudText.Quest(_hud.QuestTitle, _hud.QuestProgress, _hud.QuestGoal));
+
+        Send(Quest(0, goal: 3, title: "Defeat 3 Mushroom Ants")); // paid out, the next one
+        Assert.False(_hud.QuestComplete);
+        Assert.Equal("Defeat 3 Mushroom Ants 0/3", HudText.Quest(_hud.QuestTitle, _hud.QuestProgress, _hud.QuestGoal));
+
+        Send(new QuestState(false, "", 0, 0, false));
+        Assert.False(_hud.QuestActive);
+    }
+
+    [Fact]
+    public void QuestVersionChangesOnlyWithTheTrackerAndProgressPops()
+    {
+        Send(Quest(1));
+        Tick(Ticks(HudModule.PopSeconds));
+        int version = _hud.QuestVersion;
+        Assert.Equal(1f, _hud.QuestPopScale(1f));
+        Send(Quest(1));
+        Send(Quest(1, title: new string("Defeat 5 Mushroom Caterpillars".ToCharArray()))); // equal text, another string
+        Assert.Equal(version, _hud.QuestVersion);
+
+        Send(Quest(2));
+        Tick();
+        Assert.Equal(version + 1, _hud.QuestVersion);
+        Assert.True(_hud.QuestPopScale(1f) > 1f);
+        Tick(Ticks(HudModule.PopSeconds));
+        Assert.Equal(1f, _hud.QuestPopScale(1f));
+    }
+
+    [Fact]
+    public void QuestProgressIsClampedToTheGoal()
+    {
+        Send(new QuestState(true, "Bring me... earn 500 M¢ in the forest", 730, 500, true));
+        Assert.Equal(500, _hud.QuestProgress);
+        Send(new QuestState(true, "Bring me... earn 500 M¢ in the forest", -4, 500, false));
+        Assert.Equal(0, _hud.QuestProgress);
     }
 
     // Interpolation, determinism, allocations
@@ -367,11 +601,18 @@ public class HudModuleTests
                 bus.Publish(new BowState(t % 40 / 40f, 0));
                 if (t % 30 == 0)
                     bus.Publish(new CoinsEarned(50, Vector3.Zero));
+                bus.Publish(In(t < 60 ? Area.Town : Area.Forest));
+                bus.Publish(new QuestState(true, "Defeat 5 Mushroom Caterpillars", t / 30, 5, false));
+                if (t == 40)
+                    bus.Publish(new WokeUp(2));
                 hud.Tick(new TickContext(t, Step));
                 values.Add(hud.HeartsShake(0.3f));
                 values.Add(hud.CoinsPopScale(0.3f));
                 values.Add(hud.DrawRing(0.3f));
                 values.Add(hud.Floater(0).Rise(0.3f));
+                values.Add(hud.BannerSlide(0.3f));
+                values.Add(hud.QuestPopScale(0.3f));
+                values.Add(hud.WakeTextAlpha(0.3f));
             }
             return values.ToArray();
         }
@@ -387,12 +628,20 @@ public class HudModuleTests
         var earned = new CoinsEarned(50, Vector3.Zero);
         var bow = new BowState(0.5f, 1);
         var defeated = new PlayerDefeated(Vector3.Zero);
+        var town = In(Area.Town);
+        var forest = In(Area.Forest);
+        var time = new TimeOfDay(2, 13.5f, false);
+        var woke = new WokeUp(2);
+        var quest = Quest(2);
+        var questMore = Quest(3);
         var context = new TickContext(0, Step);
         // Warm up (JIT) before measuring.
         for (int i = 0; i < 3; i++)
         {
             _hud.Handle(full); _hud.Handle(hit); _hud.Handle(wallet); _hud.Handle(earned);
             _hud.Handle(bow); _hud.Handle(defeated); _hud.Tick(context);
+            _hud.Handle(town); _hud.Handle(forest); _hud.Handle(time); _hud.Handle(woke);
+            _hud.Handle(quest); _hud.Handle(questMore);
         }
         long before = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < 200; i++)
@@ -400,6 +649,7 @@ public class HudModuleTests
             _hud.Handle(full); _hud.Handle(hit); _hud.Handle(wallet); _hud.Handle(earned);
             _hud.Handle(bow); _hud.Handle(defeated); _hud.Tick(context);
             _hud.HeartsShake(0.5f); _hud.CoinsPopScale(0.5f); _hud.FaintFade(0.5f);
+            _hud.BannerSlide(0.5f); _hud.WakeTextAlpha(0.5f); _hud.FaintTextAlpha(0.5f); _hud.QuestPopScale(0.5f);
         }
         Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
     }
