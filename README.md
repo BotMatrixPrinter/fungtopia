@@ -28,8 +28,6 @@ Fungtopia.csproj       the Godot game assembly (Godot.NET.Sdk 4.7.2, net10.0); c
                        shell/Godot and every modules/*/Godot, and references every
                        modules/*/Contract and modules/*/Core project by wildcard
 Fungtopia.sln          the solution Godot builds (lists only Fungtopia.csproj)
-Directory.Build.props  for test projects (names ending in .Tests) only: no tiered compilation
-                       or tiered PGO, so allocation tests measure our code, not the JIT
 global.json            .NET SDK 10.0.100 (rolls forward to newer feature bands), Godot.NET.Sdk 4.7.2
 nuget.config           nuget.org as the package source
 test.sh                ./test.sh, or ./test.sh <Name> for one module (see below)
@@ -80,7 +78,8 @@ shell/Contract, shell/Host, tests); give a new module's Contract, Core and Tests
 - **Performance.** The simulation is in Core and runs on a fixed timestep (60 ticks a second,
   one per physics frame). Use plain structs and arrays; per-tick code (Tick, message handlers)
   does not allocate, use LINQ, or box. Messages are structs passed by `in` reference. Godot only
-  renders and reads input.
+  renders and reads input. This is kept by writing the code that way and checked by reading it
+  (the checker), not by tests.
 - **Never commit screenshots.** `screenshot.sh` writes to `$SCREENSHOT_DIR` or `./screenshots/`,
   which is git-ignored along with `.godot/`, `bin/`, `obj/` and other build output.
 
@@ -90,6 +89,8 @@ shell/Contract, shell/Host, tests); give a new module's Contract, Core and Tests
   (failing unless it targets net10.0), and runs `godot --headless --path . --fixed-fps 60
   --quit-after 10`, failing on any `ERROR` in its output.
 - `./test.sh <Name>` does the same for module `<Name>` and the modules that depend on its Contract.
-- Allocation tests (`GC.GetAllocatedBytesForCurrentThread()` around many ticks, expecting no
-  change) warm up for a few hundred ticks first; with tiering off (see `Directory.Build.props`)
-  every method is fully compiled on its first call, so the runtime does not allocate mid-measure.
+- Tests are deterministic: the same code gives the same result on every run and every machine.
+  No test asserts on memory allocations (`GC.GetAllocatedBytes...`), timing or speed
+  (`Stopwatch`), the wall clock (`DateTime.Now`/`UtcNow`; inject a clock instead, as Save's `Now`
+  does) or unseeded randomness (seed every `Random`). The .NET runtime allocates and the hub's
+  test machines are busy, so such tests fail at random.

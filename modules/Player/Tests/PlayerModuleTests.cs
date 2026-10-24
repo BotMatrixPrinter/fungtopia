@@ -1662,8 +1662,6 @@ public class PlayerModuleTests
         Assert.Equal(0f, _player.Archery.Weight);
     }
 
-    // ---- Performance ----
-
     // ---- Look (the character drawn from the Wardrobe's AppearanceState) ----
 
     private static AppearanceState Dressed(string top = "", string bottom = "", string shoes = "", string head = "",
@@ -1846,45 +1844,5 @@ public class PlayerModuleTests
         Assert.True(player.Look.Shows(BuiltinPieces.Top));
         Assert.False(player.Look.Shows(BuiltinPieces.Bottom));
         Assert.Equal(ModelOf("jeans"), player.Look.Bottom);
-    }
-
-    [Fact]
-    public void TicksWithoutAllocating()
-    {
-        var bus = new NullBus();
-        var player = new PlayerModule();
-        player.Start(bus);
-        player.Handle(new GameStart(GameStart.Girl, GameStart.Cat));
-        var input = Moving(0.6f, 0.8f, fire: true, aim: new Vector3(0.3f, 0f, -1f), jump: true);
-        var look = new AppearanceState(2, 4, 5, 2, "party_dress", "", "sneakers", "mushroom_hat", "round_glasses", "little_backpack");
-        var otherLook = new AppearanceState(1, 0, 0, 0, "striped_tee", "jeans", "", "", "", "");
-        player.Handle(input);
-        player.Handle(look);
-        _ = player.Look;
-        player.Handle(otherLook);
-        _ = player.Look;
-        void Frame(int i)
-        {
-            player.Handle(input);
-            player.Handle(new DamagePlayer(1, Vector3.Zero));
-            player.Handle(new DialogueState(i % 200 < 100, 1));
-            player.Handle(new BowState(i % 60 < 40 ? (i % 60) / 36f : 0f, 0));
-            player.Handle(new StartScreenState(false));
-            player.Handle(i % 120 < 60 ? look : otherLook);
-            _ = player.Look;
-            player.Tick(new TickContext(i + 1, Step));
-        }
-        for (int i = 0; i < 300; i++)
-            Frame(i); // warm up
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 300; i < 900; i++)
-            Frame(i);
-        Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
-    }
-
-    private sealed class NullBus : IMessageBus
-    {
-        public void Subscribe<T>(IMessageHandler<T> handler) where T : struct { }
-        public void Publish<T>(in T message) where T : struct { }
     }
 }

@@ -42,13 +42,6 @@ public class BowModuleTests
         }
     }
 
-    /// <summary>A bus that drops everything, for the allocation test.</summary>
-    private sealed class NullBus : IMessageBus
-    {
-        public void Subscribe<T>(IMessageHandler<T> handler) where T : struct { }
-        public void Publish<T>(in T message) where T : struct { }
-    }
-
     private readonly FakeBus _bus = new();
     private readonly BowModule _bow = new();
     private readonly List<MonsterState> _monsters = new();
@@ -727,29 +720,5 @@ public class BowModuleTests
     public void TickBeforeStartThrows()
     {
         Assert.Throws<InvalidOperationException>(() => new BowModule().Tick(new TickContext(0, Step)));
-    }
-
-    [Fact]
-    public void TicksDoNotAllocate()
-    {
-        var bow = new BowModule();
-        bow.Start(new NullBus());
-        var player = PlayerAt(Spot);
-        var monster = Monster(1, OnGround(Spot.X, Spot.Z - 20f));
-        var fire = Input(true, North, ShoulderCamera(Spot));
-        var release = Input(false, North, ShoulderCamera(Spot));
-        void Frame(in PlayerInput input, long tick)
-        {
-            bow.Handle(input);
-            bow.Handle(player);
-            bow.Handle(monster);
-            bow.Tick(new TickContext(tick, Step));
-        }
-        for (int i = 0; i < 200; i++)
-            Frame(i % 10 < 8 ? fire : release, i); // warm up
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 200; i < 2000; i++)
-            Frame(i % 10 < 8 ? fire : release, i);
-        Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
     }
 }

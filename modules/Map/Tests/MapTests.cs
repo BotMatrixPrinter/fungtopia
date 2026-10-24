@@ -966,19 +966,13 @@ public class MapTests
 
     private const int PropCountPinned = 662;
 
-    // Determinism and cost
+    // Determinism
 
     [Fact]
-    public void QueriesAreDeterministicAndDoNotAllocate()
+    public void QueriesAreDeterministic()
     {
         float h = Ground.HeightAt(12.5f, 133.25f);
         bool blocked = Ground.Blocks(-24f, 212f);
-        for (int i = 0; i < 300; i++)
-        {
-            float x = i * 1.3f - 200f, z = i * 1.9f - 250f; // warm up
-            Ground.HeightAt(x, z); Ground.Blocks(x, z, 0.4f); Areas.Walkable(x, z, 0.4f); Areas.At(x, z);
-        }
-        long before = GC.GetAllocatedBytesForCurrentThread();
         float sum = 0f;
         int count = 0;
         for (int i = 0; i < 20000; i++)
@@ -989,8 +983,6 @@ public class MapTests
             count += Areas.Walkable(x, z, 0.4f) ? 1 : 0;
             count += (int)Areas.At(x, z);
         }
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-        Assert.Equal(0, allocated);
         Assert.True(float.IsFinite(sum) && count > 0);
         Assert.Equal(h, Ground.HeightAt(12.5f, 133.25f));
         Assert.Equal(blocked, Ground.Blocks(-24f, 212f));

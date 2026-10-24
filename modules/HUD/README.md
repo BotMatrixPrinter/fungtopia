@@ -54,7 +54,7 @@ cream spots and an ink outline), soft colors and a bold friendly font.
   `woke` (the wake-up text as the screen comes back) or `deep` (entering the Deep Forest).
 - `Tests/` — `HudModuleTests.cs`: xUnit tests of `HudModule` and `HudText` with a fake
   `IMessageBus`: hearts, coins, the draw ring and when the crosshair shows, the faint and wake-up, the banner (and the spooky
-  Deep Forest one), the clock, the quest tracker, hiding under the start screen, determinism and no allocations per tick.
+  Deep Forest one), the clock, the quest tracker, hiding under the start screen and determinism.
 
 The font is the system's first of Nunito, Fredoka, Baloo 2, Varela Round, Comic Neue, Quicksand,
 at weight 800, falling back to DejaVu Sans Bold.

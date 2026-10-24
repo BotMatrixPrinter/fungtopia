@@ -61,6 +61,6 @@ and publishes one `CameraPose` per fixed tick.
   following, ground, trunk and wall pull-in, the front view's framing (left half, inside the home
   room), holding still and transitions, the aim camera (left of and above the head, the head not hiding
   the bow hand at level and ±20 degree aims, the same view direction, smooth easing in and out,
-  pull-in), no allocations per tick, determinism.
+  pull-in), determinism.
 
 Test it with `./test.sh Camera` from the repository root.

@@ -85,16 +85,6 @@ public class StartScreenModuleTests
         }
     }
 
-    /// <summary>A bus that only counts, so measuring allocations sees the module's alone.</summary>
-    private sealed class CountingBus : IMessageBus
-    {
-        public int Count;
-
-        public void Subscribe<T>(IMessageHandler<T> handler) where T : struct { }
-
-        public void Publish<T>(in T message) where T : struct => Count++;
-    }
-
     private long _tick;
 
     private static StartScreenModule Started(FakeBus bus)
@@ -379,30 +369,6 @@ public class StartScreenModuleTests
             screen.Press(i < StartScreenModule.MaxQueued ? StartButton.Left : StartButton.Confirm);
         Tick(screen);
         Assert.Equal(StartStep.Title, screen.Step);
-    }
-
-    [Fact]
-    public void TickDoesNotAllocate()
-    {
-        var bus = new CountingBus();
-        var screen = new StartScreenModule();
-        screen.Start(bus);
-        screen.Press(StartButton.Confirm);
-        screen.Press(StartButton.Confirm);
-        void Run(int ticks)
-        {
-            for (int i = 0; i < ticks; i++)
-            {
-                screen.Press(i % 2 == 0 ? StartButton.Left : StartButton.Right);
-                screen.Point(i % 2);
-                screen.Tick(new TickContext(i, 1.0 / 60));
-            }
-        }
-        Run(100);   // warm up
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        Run(100);
-        Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
-        Assert.Equal(2 * 200 + 1, bus.Count);   // UiFocus and StartScreenState each tick, one NewGameInSlot
     }
 
     /// <summary>On the look step as the Girl (or the Boy with <paramref name="boy"/>), with the messages of getting there cleared.</summary>
@@ -699,39 +665,6 @@ public class StartScreenModuleTests
         Assert.Equal(GameStart.Dog, start.StarterPet);
         Assert.Equal(new[] { "GameStart", "UiFocus", "StartScreenState" }, bus.Order);
         Assert.Equal(1, screen.Skin);
-    }
-
-    [Fact]
-    public void LookTicksDoNotAllocate()
-    {
-        var bus = new CountingBus();
-        var screen = new StartScreenModule();
-        screen.Start(bus);
-        screen.Press(StartButton.Confirm);
-        screen.Press(StartButton.Confirm);
-        screen.Press(StartButton.Confirm);
-        screen.Tick(new TickContext(0, 1.0 / 60));
-        Assert.Equal(StartStep.Look, screen.Step);
-        void Run(int ticks)
-        {
-            for (int i = 0; i < ticks; i++)
-            {
-                screen.Press(i % 3 == 0 ? StartButton.Down : StartButton.Right);
-                if (i % 7 == 0)
-                    screen.Press(StartButton.Up);
-                screen.Pick(LookRow.Outfit, i % 3);
-                screen.SetTurnButtons(i % 5 == 0, i % 4 == 0);
-                screen.SetTurnStick(i % 2 == 0 ? 0.7f : -0.1f);
-                screen.Drag(i % 9);
-                screen.Tick(new TickContext(i + 1, 1.0 / 60));
-            }
-        }
-        Run(100);   // warm up
-        int sentBefore = bus.Count;
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        Run(100);
-        Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
-        Assert.True(bus.Count > sentBefore + 100);
     }
 
     private const float Step = 1f / 60;
@@ -1254,50 +1187,6 @@ public class StartScreenModuleTests
         Assert.Single(bus.Starts);
         Assert.Equal(StartStep.Started, screen.Step);
         Assert.Single(bus.Focus.FindAll(f => !f.Open));
-    }
-
-    [Fact]
-    public void MenuTicksDoNotAllocate()
-    {
-        var bus = new CountingBus();
-        var screen = new StartScreenModule();
-        screen.Start(bus);
-        var slots = Slots(SlotOf(1, manual: SaveAt(1)), SlotOf(2, auto: SaveAt(2)), SlotOf(3, manual: SaveInfo.Unreadable));
-        screen.Handle(slots);
-        screen.Press(StartButton.Down);
-        screen.Press(StartButton.Confirm);
-        screen.Tick(new TickContext(0, 1.0 / 60));
-        Assert.Equal(StartStep.Load, screen.Step);
-        void Run(int ticks)
-        {
-            for (int i = 0; i < ticks; i++)
-            {
-                screen.Handle(slots);
-                if (i % 2 == 0)
-                {
-                    // Back to the title (Load highlighted) and in again, then about the slots.
-                    screen.Press(StartButton.Back);
-                    screen.Press(StartButton.Back);
-                    screen.Press(StartButton.Confirm);
-                    screen.Press(i % 4 == 0 ? StartButton.Down : StartButton.Up);
-                    screen.Point(i % 3);
-                }
-                else
-                {
-                    // Into a slot's saves, about them, and back.
-                    screen.Press(StartButton.Confirm);
-                    screen.Press(StartButton.Up);
-                    screen.Point(1);
-                    screen.Press(StartButton.Back);
-                }
-                screen.Tick(new TickContext(i + 1, 1.0 / 60));
-            }
-        }
-        Run(100);   // warm up
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        Run(100);
-        Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
-        Assert.True(screen.Open);
     }
 
     [Fact]

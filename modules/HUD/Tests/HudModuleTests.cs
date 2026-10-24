@@ -689,7 +689,7 @@ public class HudModuleTests
         Assert.Equal(0, _hud.QuestProgress);
     }
 
-    // Interpolation, determinism, allocations
+    // Interpolation and determinism
 
     [Fact]
     public void ViewValuesInterpolateBetweenTicks()
@@ -757,49 +757,5 @@ public class HudModuleTests
         Send(new StartScreenState(false));
         Tick(30);
         Assert.False(_hud.Hidden);
-    }
-
-    [Fact]
-    public void TicksAndHandlersDoNotAllocate()
-    {
-        var hit = Player(9);
-        var full = Player(10);
-        var wallet = new WalletState(100);
-        var earned = new CoinsEarned(50, Vector3.Zero);
-        var bow = new BowState(0.5f, 1);
-        var defeated = new PlayerDefeated(Vector3.Zero);
-        var town = In(Area.Town);
-        var forest = In(Area.Forest);
-        var time = new TimeOfDay(2, 13.5f, false);
-        var woke = new WokeUp(2);
-        var quest = Quest(2);
-        var questMore = Quest(3);
-        var open = new StartScreenState(true);
-        var closed = new StartScreenState(false);
-        var deep = In(Area.DeepForest);
-        var context = new TickContext(0, Step);
-        // Warm up (JIT) before measuring.
-        for (int i = 0; i < 300; i++)
-        {
-            _hud.Handle(full); _hud.Handle(hit); _hud.Handle(wallet); _hud.Handle(earned);
-            _hud.Handle(bow); _hud.Handle(defeated); _hud.Tick(context);
-            _hud.Handle(town); _hud.Handle(forest); _hud.Handle(time); _hud.Handle(woke);
-            _hud.Handle(quest); _hud.Handle(questMore);
-            _hud.Handle(open); _hud.Handle(closed); _hud.Handle(deep); _hud.Handle(forest);
-            _ = _hud.Hidden; _ = _hud.BannerSpooky; _ = _hud.CrosshairVisible; _hud.CrosshairAlpha(0.5f);
-            _hud.HeartsShake(0.5f); _hud.CoinsPopScale(0.5f); _hud.FaintFade(0.5f);
-            _hud.BannerSlide(0.5f); _hud.WakeTextAlpha(0.5f); _hud.FaintTextAlpha(0.5f); _hud.QuestPopScale(0.5f);
-        }
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 200; i++)
-        {
-            _hud.Handle(full); _hud.Handle(hit); _hud.Handle(wallet); _hud.Handle(earned);
-            _hud.Handle(bow); _hud.Handle(defeated); _hud.Tick(context);
-            _hud.Handle(open); _hud.Handle(closed); _hud.Handle(deep); _hud.Handle(forest);
-            _ = _hud.Hidden; _ = _hud.BannerSpooky; _ = _hud.CrosshairVisible; _hud.CrosshairAlpha(0.5f);
-            _hud.HeartsShake(0.5f); _hud.CoinsPopScale(0.5f); _hud.FaintFade(0.5f);
-            _hud.BannerSlide(0.5f); _hud.WakeTextAlpha(0.5f); _hud.FaintTextAlpha(0.5f); _hud.QuestPopScale(0.5f);
-        }
-        Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
     }
 }

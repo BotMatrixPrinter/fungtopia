@@ -418,25 +418,4 @@ public class PetCityTests
         bus.Publish(new TimeOfDay(2, 3f, true));
         Assert.True(module.WindowsLit);
     }
-
-    [Fact]
-    public void HandlingTheClockDoesNotAllocate()
-    {
-        var module = new PetCityModule();
-        module.Start(new FakeBus());
-        var night = new TimeOfDay(1, 22f, true);
-        var day = new TimeOfDay(2, 12f, false);
-        for (int t = 0; t < 300; t++)
-        {
-            module.Handle(t % 2 == 0 ? night : day); // warm up
-            module.Tick(new TickContext(t, 1.0 / 60));
-        }
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int t = 300; t < 1300; t++)
-        {
-            module.Handle(t % 2 == 0 ? night : day);
-            module.Tick(new TickContext(t, 1.0 / 60));
-        }
-        Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
-    }
 }

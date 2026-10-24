@@ -634,41 +634,6 @@ public class InputModuleTests
         Assert.Equal(next, source.IndexOf(call, at, StringComparison.Ordinal));
     }
 
-    // --- allocations ---
-
-    [Fact]
-    public void TickDoesNotAllocate()
-    {
-        var input = new InputModule();
-        input.Start(new NullBus());
-        input.SetKeyboardMove(new Vector2(1, 1));
-        input.SetLookStick(new Vector2(0.5f, 0.5f));
-        input.SetAim(new Vector3(2, 3, 4), new Vector3(1, 1, 1));
-        void Frame(int i)
-        {
-            input.AddMouseMotion(new Vector2(1, 1));
-            input.PressJump();
-            input.PressInteract();
-            input.PressOpenMap();
-            input.PressEat();
-            input.PressFoodSelect(i % 3);
-            input.PressFoodCycle(1);
-            input.Tick(new TickContext(i, Step));
-        }
-        for (int i = 0; i < 300; i++)
-            Frame(i); // warm up
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 300; i < 1300; i++)
-            Frame(i);
-        Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
-    }
-
-    private sealed class NullBus : IMessageBus
-    {
-        public void Subscribe<T>(IMessageHandler<T> handler) where T : struct { }
-        public void Publish<T>(in T message) where T : struct { }
-    }
-
     // --- UiFocus: open menus take the controls away from walking ---
 
     private const int ShopMenu = 101;

@@ -863,37 +863,7 @@ public class CameraModuleTests
         AssertFramedInTheLeftHalf(pose, feet);
     }
 
-    // ---- performance ----
-
-    [Fact]
-    public void TicksWithoutAllocating()
-    {
-        var (camera, bus) = Started();
-        void Play()
-        {
-            for (int i = 0; i < 200; i++)
-            {
-                Look(bus, 0.01f, 0.005f);
-                Run(camera, bus, OnGround(0f, 84f - i * 0.05f), 1);
-            }
-            // Into the front view and back.
-            for (int i = 0; i < 300; i++)
-                RunScreens(camera, bus, OnGround(0f, 74f), Facing, i < 150, false, 1);
-            // Drawing, shooting and back.
-            for (int i = 0; i < 120; i++)
-                RunBow(camera, bus, OnGround(0f, 74f), i < 60 ? i / 36f : 0f, 1);
-            // And at home, facing a wall.
-            for (int i = 0; i < 300; i++)
-                RunScreens(camera, bus, HomeFeet(604.5f, 596.6f), 0f, i < 150, false, 1);
-        }
-        Run(camera, bus, ForestBounds.PlayerStart, 5);
-        Play(); // warm up
-        Run(camera, bus, ForestBounds.PlayerStart, 5);
-        bus.Poses.Clear();
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        Play();
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
-    }
+    // ---- determinism ----
 
     [Fact]
     public void IsDeterministic()

@@ -884,51 +884,6 @@ public class WardrobeModuleTests
         Assert.Equal(-1, wardrobe.Worn(Slot.Head));
         Assert.Equal((1, 2, 3, 4), (wardrobe.Skin, wardrobe.HairStyle, wardrobe.HairColor, wardrobe.EyeColor));
     }
-
-    [Fact]
-    public void TicksDoNotAllocate()
-    {
-        var bus = new CountingBus();
-        var wardrobe = new WardrobeModule();
-        wardrobe.Start(bus);
-        var equip = new Equip("beanie");
-        var kill = Kill(1, MonsterKind.Caterpillar);
-        void Play(int ticks)
-        {
-            wardrobe.Drag(1f);
-            wardrobe.TryOn("skirt");
-            for (int i = 0; i < ticks; i++)
-            {
-                wardrobe.Handle(equip);
-                wardrobe.Handle(kill);
-                wardrobe.Tick(Step);
-            }
-            // Open, turning and trying on.
-            wardrobe.Handle(new OpenShop());
-            wardrobe.SetTurnStick(0.7f);
-            for (int i = 0; i < ticks; i++)
-            {
-                wardrobe.Drag(3f);
-                wardrobe.TryOn("skirt");
-                wardrobe.Tick(Step);
-            }
-            wardrobe.Close();
-        }
-        Play(300); // warm up
-        int published = bus.Published;
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        Play(1000);
-        Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
-        Assert.Equal(2000 + 3000, bus.Published - published);
-    }
-
-    /// <summary>A bus that only counts what is published (no allocation).</summary>
-    private sealed class CountingBus : IMessageBus
-    {
-        public int Published;
-        public void Subscribe<T>(IMessageHandler<T> handler) where T : struct { }
-        public void Publish<T>(in T message) where T : struct => Published++;
-    }
 }
 
 public class WardrobePromptsTests

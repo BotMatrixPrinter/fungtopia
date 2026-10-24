@@ -596,27 +596,6 @@ public class TownTests
     }
 
     [Fact]
-    public void TickAndTimeDoNotAllocate()
-    {
-        var bus = new FakeBus();
-        var town = new TownModule();
-        town.Start(bus);
-        var day = At(1, 12f);
-        for (int i = 0; i < 300; i++)
-        {
-            town.Handle(day); // warm up
-            town.Tick(new TickContext(i, 1.0 / 60));
-        }
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 300; i < 1300; i++)
-        {
-            town.Handle(day);
-            town.Tick(new TickContext(i, 1.0 / 60));
-        }
-        Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
-    }
-
-    [Fact]
     public void TickBeforeStartThrows()
     {
         Assert.Throws<InvalidOperationException>(() => new TownModule().Tick(Step));

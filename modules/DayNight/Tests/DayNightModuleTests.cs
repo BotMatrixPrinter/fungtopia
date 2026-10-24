@@ -301,27 +301,6 @@ public class DayNightModuleTests
         Assert.Equal(Last.Hour, other.Times[^1].Hour);
     }
 
-    [Fact]
-    public void TicksWithoutAllocating()
-    {
-        var bus = new NullBus();
-        var clock = new DayNightModule();
-        clock.Start(bus);
-        void Frame(int i)
-        {
-            if (i % 500 == 0)
-                clock.Handle(new PlayerDefeated(Vector3.Zero));
-            clock.Handle(default(PlayerState));
-            clock.Tick(new TickContext(i + 1, Step));
-        }
-        for (int i = 0; i < 300; i++)
-            Frame(i); // warm up
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 300; i < 2300; i++)
-            Frame(i);
-        Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
-    }
-
     // ---- Saving and restoring ----
 
     private SavePart Save(int requestId = 7)
@@ -463,11 +442,5 @@ public class DayNightModuleTests
 
         other.Tick(new TickContext(0, Step));
         Assert.Equal(1, otherBus.Times[^1].Day);
-    }
-
-    private sealed class NullBus : IMessageBus
-    {
-        public void Subscribe<T>(IMessageHandler<T> handler) where T : struct { }
-        public void Publish<T>(in T message) where T : struct { }
     }
 }

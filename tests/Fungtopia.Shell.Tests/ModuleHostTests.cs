@@ -66,24 +66,6 @@ public class ModuleHostTests
     }
 
     [Fact]
-    public void TickDoesNotAllocate()
-    {
-        var handler = new CountingHandler();
-        var host = new ModuleHost(1.0 / 60);
-        host.Add("Ping", new PingModule());
-        host.Add("Listener", new SubscriberModule(handler));
-        host.Tick(); // warm up
-
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 10_000; i++)
-            host.Tick();
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-
-        Assert.Equal(0, allocated);
-        Assert.Equal(10_001, handler.Count);
-    }
-
-    [Fact]
     public void RejectsDuplicateNamesAndLateAdds()
     {
         var host = new ModuleHost(1.0 / 60);

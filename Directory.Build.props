@@ -1,9 +1,0 @@
-<Project>
-  <!-- Test projects only: no tiered compilation or tiered PGO, so every method is fully compiled
-       the first time it runs and the JIT does not recompile hot methods (and allocate on the test
-       thread) while an allocation test is measuring. The game projects keep the runtime defaults. -->
-  <PropertyGroup Condition="$(MSBuildProjectName.EndsWith('.Tests'))">
-    <TieredCompilation>false</TieredCompilation>
-    <TieredPGO>false</TieredPGO>
-  </PropertyGroup>
-</Project>

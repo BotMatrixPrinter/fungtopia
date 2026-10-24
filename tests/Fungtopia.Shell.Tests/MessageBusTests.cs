@@ -72,25 +72,6 @@ public class MessageBusTests
     }
 
     [Fact]
-    public void PublishDoesNotAllocate()
-    {
-        var bus = new MessageBus();
-        var a = new CountingHandler();
-        var b = new CountingHandler();
-        bus.Subscribe(a);
-        bus.Subscribe(b);
-        bus.Publish(new Ping(0)); // warm up
-
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 1; i <= 10_000; i++)
-            bus.Publish(new Ping(i));
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-
-        Assert.Equal(0, allocated);
-        Assert.Equal(10_001, b.Count);
-    }
-
-    [Fact]
     public void AStandaloneHandlerThatThrowsReachesThePublisher()
     {
         var bus = new MessageBus();

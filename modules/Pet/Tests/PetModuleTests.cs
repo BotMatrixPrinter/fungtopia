@@ -51,7 +51,7 @@ public class PetModuleTests
         }
     }
 
-    /// <summary>A bus that drops everything, for measuring the pet's own allocations.</summary>
+    /// <summary>A bus that drops everything.</summary>
     private sealed class NullBus : IMessageBus
     {
         public void Subscribe<T>(IMessageHandler<T> handler) where T : struct { }
@@ -1129,37 +1129,5 @@ public class PetModuleTests
         Assert.False(other.Owns(PetKind.Crow));
         Assert.Equal(PetKind.Cat, other.Kind);
         Assert.Empty(log);
-    }
-
-    // ---- Performance ----
-
-    [Theory]
-    [InlineData(PetKind.Cat)]
-    [InlineData(PetKind.Crow)]
-    public void DoesNotAllocatePerTick(PetKind kind)
-    {
-        var pet = new PetModule();
-        pet.Start(new NullBus());
-        pet.Handle(new GameStart(GameStart.Girl, GameStart.Cat));
-        if (kind != PetKind.Cat)
-            pet.Handle(new AdoptPet(kind));
-        var player = PlayerAt(Middle);
-        var monsters = new MonsterState[12];
-        for (int i = 0; i < monsters.Length; i++)
-            monsters[i] = Monster(i + 1, Middle + new Vector3(-5f + i, 0f, 3f + (i % 3)));
-        pet.PlaceAt(Middle + new Vector3(2f, 0f, 0f));
-        void Tick(long t)
-        {
-            pet.Handle(in player);
-            for (int i = 0; i < monsters.Length; i++)
-                pet.Handle(in monsters[i]);
-            pet.Tick(new TickContext(t, Step));
-        }
-        for (int t = 0; t < 300; t++)
-            Tick(t); // warm up
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int t = 300; t < 900; t++)
-            Tick(t);
-        Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
     }
 }

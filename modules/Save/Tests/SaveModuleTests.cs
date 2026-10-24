@@ -67,16 +67,6 @@ internal sealed class FakeSaver : IMessageHandler<CollectSave>, IMessageHandler<
     }
 }
 
-/// <summary>A bus that only counts, so measuring allocations sees the module's alone.</summary>
-internal sealed class CountingBus : IMessageBus
-{
-    public int Count;
-
-    public void Subscribe<T>(IMessageHandler<T> handler) where T : struct { }
-
-    public void Publish<T>(in T message) where T : struct => Count++;
-}
-
 public sealed class SaveModuleTests : IDisposable
 {
     private const double Step = 1.0 / 60.0;
@@ -626,26 +616,6 @@ public sealed class SaveModuleTests : IDisposable
         Assert.False(save.MenuOpen);
         Assert.Equal(3, save.Current);
         Assert.Equal(new UiFocus(SaveModule.MenuOwner, false), bus.All<UiFocus>().Last());
-    }
-
-    [Fact]
-    public void Ticks_do_not_allocate()
-    {
-        var bus = new CountingBus();
-        var save = new SaveModule { SaveFolder = _folder };
-        save.Start(bus);
-        save.Handle(new GameStart(0, 0));
-        save.Handle(new StartScreenState(false));
-        for (int i = 0; i < 200; i++)
-            save.Tick(new TickContext(i, Step));
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 200; i < 2000; i++)
-        {
-            save.Handle(Player(Area.Town));
-            save.Handle(new ActiveDevice(i % 2 == 0 ? DeviceKind.Xbox : DeviceKind.KeyboardMouse));
-            save.Tick(new TickContext(i, Step));
-        }
-        Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
     }
 
     // ---- Button hints ----

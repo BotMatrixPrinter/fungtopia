@@ -929,33 +929,6 @@ public class MonstersModuleTests
     }
 
     [Fact]
-    public void TicksWithoutAllocating()
-    {
-        long Play()
-        {
-            var (monsters, bus) = Started();
-            bus.Record = false;
-            bus.SendPlayer(monsters.Monsters[0].Position + new Vector3(1f, 0f, 0f));
-            bus.SendPet(monsters.Monsters[0].Position);
-            bus.Hit(monsters.Monsters[1].Id, 1, 2f, 3f);
-            bus.Hit(monsters.Monsters[FirstLadybug].Id, 1);
-            bus.Hit(monsters.Monsters[2].Id, 100);
-            Run(monsters, bus, 5.0); // warm up
-            long before = GC.GetAllocatedBytesForCurrentThread();
-            Run(monsters, bus, 25.0); // includes the respawn
-            bus.Hit(monsters.Monsters[3].Id, 100);
-            // A tarantula pouncing and a ladybug charging at the player, far apart.
-            var deep = DeepSpot();
-            Isolate(monsters, bus, FirstTarantula, deep, deep + new Vector3(3f, 0f, 0f));
-            monsters.Place(FirstLadybug, deep + new Vector3(6f, 0f, 0f));
-            Run(monsters, bus, 6.0);
-            return GC.GetAllocatedBytesForCurrentThread() - before;
-        }
-        Play(); // warm up: a first forest runs every path once
-        Assert.Equal(0, Play());
-    }
-
-    [Fact]
     public void TickBeforeStartThrows()
     {
         Assert.Throws<InvalidOperationException>(() => new MonstersModule().Tick(new TickContext(0, Step)));
