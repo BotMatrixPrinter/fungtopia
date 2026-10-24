@@ -9,6 +9,7 @@ using Fungtopia.Map;
 using Fungtopia.Monsters;
 using Fungtopia.Pet;
 using Fungtopia.Player;
+using Fungtopia.Save;
 using Fungtopia.Shell;
 using Fungtopia.Wallet;
 using Fungtopia.Wardrobe;
@@ -574,6 +575,210 @@ public class NPCsModuleTests
         Assert.Empty(rig.Bus.All<SpendCoins>());
     }
 
+    /// <summary>Answers a CollectSave as the Save module asks for it; returns the one "NPCs" part.</summary>
+    private static SavePart Collect(Rig rig, int requestId = 42)
+    {
+        int before = rig.Bus.Published.Count;
+        rig.Npcs.Handle(new CollectSave(requestId));
+        var parts = rig.Bus.Published.Skip(before).OfType<SavePart>().ToList();
+        var part = Assert.Single(parts);
+        Assert.Equal(requestId, part.RequestId);
+        Assert.Equal(SaveModules.NPCs, part.Module);
+        return part;
+    }
+
+    /// <summary>A rig that has finished two quests (the second gave the flower clip), counts 50 / 500 M¢ on the third and bought the crow.</summary>
+    private static Rig PlayedRig()
+    {
+        var rig = new Rig(Near(Millie)) { Coins = 3000 };
+        rig.Press();
+        rig.ReadAll();
+        Kill(rig, MonsterKind.Caterpillar, 5);
+        rig.Press();
+        rig.ReadAll();
+        Kill(rig, MonsterKind.Ant, 3);
+        rig.Press();
+        rig.ReadAll();
+        rig.Npcs.Handle(new CoinsEarned(50, InForest));
+        rig.Tick();
+        rig.Position = Near(Lucy);
+        HearTheOffer(rig);
+        rig.Press();
+        rig.ReadAll();
+        rig.Tick();
+        return rig;
+    }
+
+    private static void AssertSameSavedState(NPCsModule expected, NPCsModule actual)
+    {
+        Assert.Equal(expected.QuestsDone, actual.QuestsDone);
+        Assert.Equal(expected.QuestActive, actual.QuestActive);
+        Assert.Equal(expected.QuestComplete, actual.QuestComplete);
+        Assert.Equal(expected.QuestProgress, actual.QuestProgress);
+        Assert.Equal(expected.QuestGoal, actual.QuestGoal);
+        Assert.Equal(expected.QuestReward, actual.QuestReward);
+        Assert.Equal(expected.CurrentQuestKind, actual.CurrentQuestKind);
+        Assert.Equal(expected.QuestTitle, actual.QuestTitle);
+        Assert.Equal(expected.RewardsGiven, actual.RewardsGiven);
+        Assert.Equal(expected.CrowBought, actual.CrowBought);
+        Assert.Equal(expected.SaveJson(), actual.SaveJson());
+    }
+
+    /// <summary>The messages that would be a side effect of a restore.</summary>
+    private static void AssertNoSideEffects(Rig rig)
+    {
+        Assert.Empty(rig.Bus.All<SayLine>());
+        Assert.Empty(rig.Bus.All<GrantCoins>());
+        Assert.Empty(rig.Bus.All<GrantItem>());
+        Assert.Empty(rig.Bus.All<SpendCoins>());
+        Assert.Empty(rig.Bus.All<AdoptPet>());
+        Assert.Empty(rig.Bus.All<OpenShop>());
+    }
+
+    [Fact]
+    public void CollectSaveAnswersWithCompactVersionedJson()
+    {
+        var rig = PlayedRig();
+        var part = Collect(rig, 7);
+        Assert.DoesNotContain("\n", part.Json);
+        Assert.DoesNotContain(": ", part.Json);
+        var data = System.Text.Json.JsonSerializer.Deserialize<NPCsModule.SaveData>(part.Json)!;
+        Assert.Equal(NPCsModule.SaveVersion, data.Version);
+        Assert.Equal(2, data.QuestsDone);
+        Assert.True(data.QuestActive);
+        Assert.Equal(50, data.QuestProgress);
+        Assert.False(data.QuestComplete);
+        Assert.Equal(new[] { "flower_clip" }, data.RewardsGiven);
+        Assert.True(data.CrowBought);
+    }
+
+    [Fact]
+    public void SaveThenRestoreGivesBackTheSameStateWithoutSideEffects()
+    {
+        var played = PlayedRig();
+        Assert.Equal(2, played.Npcs.QuestsDone);
+        Assert.Equal(50, played.Npcs.QuestProgress);
+        Assert.True(played.Npcs.CrowBought);
+        var part = Collect(played);
+
+        var rig = new Rig(Far);
+        rig.Npcs.Handle(new RestorePart(SaveModules.NPCs, part.Json));
+        rig.Wait(3);
+        AssertSameSavedState(played.Npcs, rig.Npcs);
+        AssertNoSideEffects(rig);
+        Assert.Equal(new QuestState(true, "Bring me... earn 500 M¢ in the forest", 50, 500, false), rig.Quest);
+
+        // Play goes on from there: Lucy knows the crow is yours, the quest counts on, and pays once.
+        rig.Position = Near(Lucy);
+        rig.Press();
+        Assert.Contains(rig.ReadAll(), t => t.Contains("already have the crow"));
+        Assert.Empty(rig.Bus.All<SpendCoins>());
+        rig.Position = Near(Millie);
+        rig.Npcs.Handle(new CoinsEarned(450, InForest));
+        rig.Tick();
+        Assert.True(rig.Quest.Complete);
+        rig.Press();
+        rig.ReadAll();
+        Assert.Equal(new[] { 200 }, rig.Bus.All<GrantCoins>().Select(g => g.Amount));
+        Assert.Empty(rig.Bus.All<GrantItem>());
+        Assert.Equal(3, rig.Npcs.QuestsDone);
+    }
+
+    [Fact]
+    public void RestoringACompleteQuestOrANewGameRoundTrips()
+    {
+        // A finished but unpaid fourth quest: restoring does not pay it; talking to Millie does, with the backpack.
+        var played = new Rig(Near(Millie));
+        played.Npcs.Restore(System.Text.Json.JsonSerializer.Serialize(
+            new NPCsModule.SaveData(NPCsModule.SaveVersion, 3, true, 10, true, new[] { "flower_clip" }, false)));
+        played.Tick();
+        Assert.True(played.Quest.Complete);
+        Assert.Equal("Defeat 10 Mushroom Caterpillars", played.Quest.Title);
+        AssertNoSideEffects(played);
+
+        var rig = new Rig(Near(Millie));
+        rig.Npcs.Handle(new RestorePart(SaveModules.NPCs, Collect(played).Json));
+        rig.Tick();
+        AssertSameSavedState(played.Npcs, rig.Npcs);
+        AssertNoSideEffects(rig);
+        rig.Press();
+        rig.ReadAll();
+        Assert.Equal(300, Assert.Single(rig.Bus.All<GrantCoins>()).Amount);
+        Assert.Equal("mushroom_backpack", Assert.Single(rig.Bus.All<GrantItem>()).ItemId);
+        Assert.Equal(new[] { "flower_clip", "mushroom_backpack" }, rig.Npcs.RewardsGiven);
+
+        // A new game's state restores onto a played one as a new game.
+        var fresh = new Rig(Far);
+        var other = PlayedRig();
+        other.Npcs.Handle(new RestorePart(SaveModules.NPCs, Collect(fresh).Json));
+        AssertSameSavedState(fresh.Npcs, other.Npcs);
+        Assert.False(other.Npcs.QuestActive);
+    }
+
+    [Fact]
+    public void RestorePartsOfOtherModulesAreIgnored()
+    {
+        var rig = PlayedRig();
+        string before = rig.Npcs.SaveJson();
+        rig.Npcs.Handle(new RestorePart(SaveModules.Wallet, "{\"Coins\":5}"));
+        rig.Npcs.Handle(new RestorePart(SaveModules.Pet, "garbage"));
+        Assert.Equal(before, rig.Npcs.SaveJson());
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("not json")]
+    [InlineData("{\"Version\":1,\"QuestsDone\":")]
+    [InlineData("null")]
+    [InlineData("[1,2,3]")]
+    [InlineData("{}")]
+    [InlineData("{\"Version\":2,\"QuestsDone\":4,\"QuestActive\":true,\"QuestProgress\":1,\"QuestComplete\":false,\"RewardsGiven\":[],\"CrowBought\":true}")]
+    [InlineData("{\"Version\":1,\"QuestsDone\":-3,\"QuestActive\":true,\"QuestProgress\":1,\"QuestComplete\":false,\"RewardsGiven\":[],\"CrowBought\":true}")]
+    [InlineData("{\"Version\":1,\"QuestsDone\":\"two\",\"CrowBought\":true}")]
+    public void BadOrUnknownJsonKeepsTheDefaultsAndLogsOnce(string json)
+    {
+        string defaults = new NPCsModule().SaveJson();
+        var rig = PlayedRig();
+        int before = rig.Bus.Published.Count;
+        var log = new List<string>();
+        rig.Npcs.Log = log.Add;
+
+        rig.Npcs.Handle(new RestorePart(SaveModules.NPCs, json));
+        Assert.Single(log);
+        Assert.Contains("NPCs", log[0]);
+        Assert.Equal(before, rig.Bus.Published.Count);
+        Assert.Equal(defaults, rig.Npcs.SaveJson());
+        Assert.False(rig.Npcs.QuestActive);
+        Assert.Equal(0, rig.Npcs.QuestsDone);
+        Assert.Empty(rig.Npcs.RewardsGiven);
+        Assert.False(rig.Npcs.CrowBought);
+        rig.Tick();
+        Assert.Equal(new QuestState(false, "", 0, 0, false), rig.Quest);
+    }
+
+    [Fact]
+    public void RestoreDuringATalkOrOfferEndsThemQuietly()
+    {
+        var rig = new Rig(Near(Lucy)) { Coins = 5000 };
+        HearTheOffer(rig);
+        Assert.True(rig.Npcs.OfferingCrow);
+        rig.Npcs.Restore(new NPCsModule().SaveJson());
+        Assert.False(rig.Npcs.OfferingCrow);
+        Assert.Equal(-1, rig.Npcs.Talking);
+
+        rig.Position = Near(Abby);
+        rig.Press();
+        Assert.Equal(Abby, rig.Npcs.Talking);
+        int lines = rig.Bus.All<SayLine>().Count;
+        rig.Npcs.Restore(new NPCsModule().SaveJson());
+        rig.Open = false;
+        rig.Npcs.Handle(new DialogueClosed(NPCsModule.SpeakerId(Abby)));
+        rig.Tick();
+        Assert.Equal(-1, rig.Npcs.Talking);
+        Assert.Empty(rig.Bus.All<OpenShop>());
+        Assert.Equal(lines, rig.Bus.All<SayLine>().Count);
+    }
+
     [Fact]
     public void SubscribesToWhatItReads()
     {
@@ -582,7 +787,8 @@ public class NPCsModuleTests
                  {
                      typeof(PlayerInput), typeof(PlayerState), typeof(DialogueState), typeof(DialogueAdvanced),
                      typeof(DialogueClosed), typeof(WokeUp), typeof(MonsterKilled), typeof(CoinsEarned),
-                     typeof(SpendResult), typeof(OwnedPets), typeof(WardrobeState),
+                     typeof(SpendResult), typeof(OwnedPets), typeof(WardrobeState), typeof(CollectSave),
+                     typeof(RestorePart),
                  })
             Assert.Contains(type, rig.Bus.Subscribed);
     }

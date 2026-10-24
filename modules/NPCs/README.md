@@ -18,7 +18,8 @@ Interact starts a conversation in speech bubbles (the Dialogue module shows them
 - `Tests/` — `NPCsModuleTests.cs`: xUnit tests of `NPCsModule` with a fake `IMessageBus`, a fake
   Dialogue, player and wallet: the prompt, facing, conversation flow, Jeremy's wake-up greeting,
   Millie's quests (progress, completion, payment, clothing rewards, the next ones), buying the
-  crow (success, not enough coins, walking away, already owned) and Abby opening her shop.
+  crow (success, not enough coins, walking away, already owned), Abby opening her shop, and saving
+  and restoring (round trip, no side effects, bad or unknown JSON keeps the defaults).
 
 Test it with `./test.sh NPCs` from the repository root.
 
@@ -28,9 +29,10 @@ Test it with `./test.sh NPCs` from the repository root.
 (`Position`, `Alive`), `Fungtopia.Dialogue` (`DialogueState`, `DialogueAdvanced`,
 `DialogueClosed`), `Fungtopia.DayNight.WokeUp`, `Fungtopia.Monsters.MonsterKilled`,
 `Fungtopia.Wallet` (`CoinsEarned`, `SpendResult`), `Fungtopia.Pet.OwnedPets` and
-`Fungtopia.Wardrobe.WardrobeState`, and the spots from `Fungtopia.Map.Places`. It publishes
-`SayLine`, `QuestState` (every tick), `GrantCoins`, `SpendCoins`, `AdoptPet`, and
-`Fungtopia.Wardrobe` `GrantItem` and `OpenShop`.
+`Fungtopia.Wardrobe.WardrobeState`, `Fungtopia.Save` `CollectSave` and `RestorePart`, and the
+spots from `Fungtopia.Map.Places`. It publishes `SayLine`, `QuestState` (every tick),
+`GrantCoins`, `SpendCoins`, `AdoptPet`, `Fungtopia.Wardrobe` `GrantItem` and `OpenShop`, and
+`Fungtopia.Save.SavePart`.
 
 | NPC (index) | Spot | Speaker id | Voice |
 | --- | --- | --- | --- |
@@ -73,6 +75,15 @@ Each tick:
   3,000 M¢." When the crow is owned she just says so.
 - **Abby.** Talking to her says "Ooh, you'd look so cute in something new!"; once that line is
   dismissed she publishes `OpenShop` (the Wardrobe module shows the shop).
+
+- **Saving.** On `CollectSave` it answers at once with one `SavePart` (module `"NPCs"`): compact
+  JSON of `NPCsModule.SaveData` (`Version` = `SaveVersion` 1, `QuestsDone`, `QuestActive`,
+  `QuestProgress`, `QuestComplete`, `RewardsGiven` (the clothes ids Millie gave) and `CrowBought`).
+  On `RestorePart` for `"NPCs"` it restores exactly that (the quest's goal, reward and title follow
+  from its number), quietly: no lines, coins, items, purchases or shop; any talk, crow offer or
+  purchase under way is dropped. Empty, unreadable, negative or unknown-version JSON keeps the
+  defaults (a new game's state) and logs one `WARNING: Fungtopia: NPCs: ...` line (`Log`, stderr).
+  Millie never gives the same clothes twice.
 
 No allocations per tick (only the occasional dialogue lines are built when a talk starts).
 

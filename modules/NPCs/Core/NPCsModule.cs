@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Text.Json;
 using System.Numerics;
 using Fungtopia.DayNight;
 using Fungtopia.Dialogue;
@@ -7,6 +9,7 @@ using Fungtopia.Map;
 using Fungtopia.Monsters;
 using Fungtopia.Pet;
 using Fungtopia.Player;
+using Fungtopia.Save;
 using Fungtopia.Shell;
 using Fungtopia.Wallet;
 using Fungtopia.Wardrobe;
@@ -22,11 +25,14 @@ namespace Fungtopia.NPCs;
 /// gives quests (<see cref="QuestState"/> every tick) and pays them with <see cref="GrantCoins"/> (some
 /// also with clothes, <see cref="GrantItem"/>), Lucy sells the Mushroom Crow (<see cref="SpendCoins"/>,
 /// then <see cref="AdoptPet"/>), and Abby greets you and opens her shop (<see cref="OpenShop"/>).
+/// Quest progress and the crow purchase are saved (<see cref="CollectSave"/>) and restored
+/// (<see cref="RestorePart"/>) as the "NPCs" part.
 /// </summary>
 public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessageHandler<PlayerState>,
     IMessageHandler<DialogueState>, IMessageHandler<DialogueAdvanced>, IMessageHandler<DialogueClosed>,
     IMessageHandler<WokeUp>, IMessageHandler<MonsterKilled>, IMessageHandler<CoinsEarned>,
-    IMessageHandler<SpendResult>, IMessageHandler<OwnedPets>, IMessageHandler<WardrobeState>
+    IMessageHandler<SpendResult>, IMessageHandler<OwnedPets>, IMessageHandler<WardrobeState>,
+    IMessageHandler<CollectSave>, IMessageHandler<RestorePart>
 {
     public const int Jeremy = 0;
     public const int Millie = 1;
@@ -59,6 +65,23 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
     public const string CrowTooPoor = "Come back with 3,000 M¢.";
     public const string CrowAskAgain = "Press E / X again to buy.";
     public const string AbbyGreeting = "Ooh, you'd look so cute in something new!";
+
+    /// <summary>The <see cref="SaveData.Version"/> this module writes and reads.</summary>
+    public const int SaveVersion = 1;
+
+    /// <summary>
+    /// The saved state (the "NPCs" <see cref="SavePart"/>): Millie's quests and whether Lucy's crow
+    /// was bought.
+    /// </summary>
+    /// <param name="Version">Always <see cref="SaveVersion"/>; other versions are not read.</param>
+    /// <param name="QuestsDone">Quests paid so far (also the number of the current quest).</param>
+    /// <param name="QuestActive">Millie has given the current quest.</param>
+    /// <param name="QuestProgress">The current quest's count.</param>
+    /// <param name="QuestComplete">The current quest's goal is reached (not yet paid).</param>
+    /// <param name="RewardsGiven">The <see cref="Catalog"/> ids of the clothes Millie has given.</param>
+    /// <param name="CrowBought">The Mushroom Crow was bought from Lucy.</param>
+    public sealed record SaveData(int Version, int QuestsDone, bool QuestActive, int QuestProgress, bool QuestComplete,
+        string[] RewardsGiven, bool CrowBought);
 
     /// <summary>Millie's quest kinds, given in this order and then again with bigger numbers.</summary>
     public enum QuestKind
@@ -117,8 +140,11 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
     private int _questNumber;
     private string _questTitle = "";
 
+    private readonly List<string> _rewardsGiven = new();
+
     // Lucy's crow.
     private bool _ownsCrow;
+    private bool _crowBought;
     private int _pendingRequest = -1;
     private int _nextRequestId = FirstRequestId;
     private bool _spendAnswered;
@@ -170,6 +196,15 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
     /// <summary>Quests paid so far.</summary>
     public int QuestsDone => _questNumber;
 
+    /// <summary>The <see cref="Catalog"/> ids of the clothes Millie has given, in order.</summary>
+    public IReadOnlyList<string> RewardsGiven => _rewardsGiven;
+
+    /// <summary>The Mushroom Crow was bought from Lucy (in this game, saved and restored).</summary>
+    public bool CrowBought => _crowBought;
+
+    /// <summary>Where a save that cannot be restored is reported (one line per <see cref="RestorePart"/>).</summary>
+    public Action<string> Log { get; set; } = Console.Error.WriteLine;
+
     public long Ticks { get; private set; }
 
     /// <summary>The goal and reward of Millie's quest number <paramref name="number"/> (0 is the first).</summary>
@@ -211,6 +246,8 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
         bus.Subscribe<SpendResult>(this);
         bus.Subscribe<OwnedPets>(this);
         bus.Subscribe<WardrobeState>(this);
+        bus.Subscribe<CollectSave>(this);
+        bus.Subscribe<RestorePart>(this);
     }
 
     public void Handle(in PlayerInput message)
@@ -276,6 +313,96 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
 
     public void Handle(in WardrobeState message) => _wardrobeOpen = message.Open;
 
+    public void Handle(in CollectSave message) =>
+        _bus?.Publish(new SavePart(message.RequestId, SaveModules.NPCs, SaveJson()));
+
+    public void Handle(in RestorePart message)
+    {
+        if (message.Module == SaveModules.NPCs)
+            Restore(message.Json);
+    }
+
+    /// <summary>The saved state as compact JSON (what <see cref="CollectSave"/> is answered with).</summary>
+    public string SaveJson() => JsonSerializer.Serialize(new SaveData(SaveVersion, _questNumber, QuestActive,
+        QuestProgress, QuestComplete, _rewardsGiven.ToArray(), _crowBought));
+
+    /// <summary>
+    /// Restores the state <see cref="SaveJson"/> wrote, quietly: no lines, coins, items or pets are
+    /// published. Missing, unreadable or unknown-version JSON keeps the defaults (a new game's state)
+    /// and logs one line.
+    /// </summary>
+    public void Restore(string? json)
+    {
+        ResetSaved();
+        SaveData? data = null;
+        string problem = "";
+        if (string.IsNullOrWhiteSpace(json))
+            problem = "it is empty";
+        else
+        {
+            try
+            {
+                data = JsonSerializer.Deserialize<SaveData>(json);
+                if (data == null)
+                    problem = "it is null";
+                else if (data.Version != SaveVersion)
+                    problem = $"version {data.Version} is unknown";
+                else if (data.QuestsDone < 0 || data.QuestProgress < 0)
+                    problem = "it has negative counts";
+            }
+            catch (JsonException e)
+            {
+                problem = "it is not readable: " + e.Message;
+            }
+        }
+        if (problem.Length > 0 || data == null)
+        {
+            Log($"WARNING: Fungtopia: NPCs: saved state not restored ({problem}); keeping the defaults.");
+            return;
+        }
+
+        _questNumber = data.QuestsDone;
+        if (data.QuestActive)
+        {
+            GiveQuest();
+            QuestProgress = Math.Min(QuestGoal, data.QuestProgress);
+            QuestComplete = QuestProgress >= QuestGoal;
+        }
+        if (data.RewardsGiven != null)
+            foreach (var id in data.RewardsGiven)
+                if (!string.IsNullOrEmpty(id) && !_rewardsGiven.Contains(id))
+                    _rewardsGiven.Add(id);
+        _crowBought = data.CrowBought;
+        _ownsCrow = data.CrowBought;
+    }
+
+    /// <summary>Back to a new game's quests and crow, and no conversation, offer or purchase under way.</summary>
+    private void ResetSaved()
+    {
+        _questNumber = 0;
+        _questTitle = "";
+        QuestActive = false;
+        QuestComplete = false;
+        QuestProgress = 0;
+        QuestGoal = 0;
+        QuestReward = 0;
+        CurrentQuestKind = QuestKind.Caterpillars;
+        _rewardsGiven.Clear();
+        _crowBought = false;
+        _ownsCrow = false;
+        OfferingCrow = false;
+        _pendingRequest = -1;
+        _spendAnswered = false;
+        _offerOnClose = false;
+        _shopOnClose = false;
+        Talking = -1;
+        _lineCount = 0;
+        _lineIndex = 0;
+        _advanced = -1;
+        _closed = -1;
+        _wokeUp = false;
+    }
+
     public void Tick(in TickContext context)
     {
         if (_bus == null)
@@ -297,6 +424,7 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
             if (_spendOk)
             {
                 _ownsCrow = true;
+                _crowBought = true;
                 _bus.Publish(new AdoptPet(PetKind.Crow));
                 Begin(Lucy, CrowCongrats);
             }
@@ -369,8 +497,9 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
             int reward = QuestReward;
             _bus!.Publish(new GrantCoins(reward, "Millie's quest"));
             string thanks = "Yay, you did it! You're the best! Here's " + Format(reward) + " M¢!";
-            if (Catalog.TryGet(QuestItem(_questNumber), out var item))
+            if (Catalog.TryGet(QuestItem(_questNumber), out var item) && !_rewardsGiven.Contains(item.Id))
             {
+                _rewardsGiven.Add(item.Id);
                 _bus.Publish(new GrantItem(item.Id, "Millie's quest"));
                 thanks = "Yay, you did it! You're the best! Here's " + Format(reward) + " M¢ and my " + item.Name + "!";
             }
