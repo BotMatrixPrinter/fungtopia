@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Fungtopia.Bow</RootNamespace>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../shell/Contract/Fungtopia.Shell.Contract.csproj" />
+    <ProjectReference Include="../Contract/Fungtopia.Bow.Contract.csproj" />
+    <ProjectReference Include="../../Input/Contract/Fungtopia.Input.Contract.csproj" />
+    <ProjectReference Include="../../Player/Contract/Fungtopia.Player.Contract.csproj" />
+    <ProjectReference Include="../../Monsters/Contract/Fungtopia.Monsters.Contract.csproj" />
+    <ProjectReference Include="../../Forest/Contract/Fungtopia.Forest.Contract.csproj" />
+  </ItemGroup>
+</Project>
