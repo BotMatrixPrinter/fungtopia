@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Fungtopia.Shell;
 using Godot;
 using GodotInput = Godot.Input;
@@ -6,7 +7,8 @@ namespace Fungtopia.Input.View;
 
 /// <summary>
 /// Reads mouse, keyboard and gamepad into the Input module's Core, finds the aim ray from the
-/// current 3D camera through the screen center. It draws nothing: the HUD owns the crosshair.
+/// current 3D camera through the screen center, and tells the Core which device was used last.
+/// It draws nothing: the HUD owns the crosshair. It also makes the prompt icons loadable (see <see cref="GlyphTextures"/>).
 /// </summary>
 public partial class InputView : Control, IModuleView
 {
@@ -14,6 +16,7 @@ public partial class InputView : Control, IModuleView
 
     private InputModule? _input;
     private bool _ignoreFireUntilRelease;
+    private readonly Dictionary<long, DeviceKind> _families = new();
 
     public void Bind(IModule module) => _input = (InputModule)module;
 
@@ -24,12 +27,47 @@ public partial class InputView : Control, IModuleView
         MouseFilter = MouseFilterEnum.Ignore;
         SetAnchorsPreset(LayoutPreset.FullRect);
         GodotInput.MouseMode = GodotInput.MouseModeEnum.Captured;
+        GlyphTextures.Register();
+        GodotInput.Singleton.JoyConnectionChanged += OnJoyConnectionChanged;
+    }
+
+    public override void _ExitTree() => GodotInput.Singleton.JoyConnectionChanged -= OnJoyConnectionChanged;
+
+    private void OnJoyConnectionChanged(long device, bool connected) => _families.Remove(device);
+
+    private DeviceKind Family(int device)
+    {
+        if (!_families.TryGetValue(device, out var family))
+            _families[device] = family = JoypadFamily.Detect(GodotInput.GetJoyName(device), GodotInput.GetJoyGuid(device));
+        return family;
+    }
+
+    /// <summary>Tells the Core which device this event comes from, when it is real input.</summary>
+    private void NoteDevice(InputEvent e)
+    {
+        switch (e)
+        {
+            case InputEventKey { Pressed: true, Echo: false }:
+            case InputEventMouseButton { Pressed: true }:
+                _input!.NoteKeyboardMouse();
+                break;
+            case InputEventMouseMotion motion:
+                _input!.NoteMouseMotion(new System.Numerics.Vector2(motion.Relative.X, motion.Relative.Y));
+                break;
+            case InputEventJoypadButton { Pressed: true } button:
+                _input!.NoteGamepadButton(Family(button.Device));
+                break;
+            case InputEventJoypadMotion motion:
+                _input!.NoteGamepadAxis(Family(motion.Device), motion.AxisValue);
+                break;
+        }
     }
 
     public override void _Input(InputEvent e)
     {
         if (_input == null)
             return;
+        NoteDevice(e);
         bool captured = GodotInput.MouseMode == GodotInput.MouseModeEnum.Captured;
         switch (e)
         {
@@ -72,9 +110,11 @@ public partial class InputView : Control, IModuleView
             case InputEventKey { PhysicalKeycode: Key.Key3, Pressed: true, Echo: false }:
                 _input.PressFoodSelect(2);
                 break;
+            case InputEventMouseButton { ButtonIndex: MouseButton.WheelUp, Pressed: true } when captured:
             case InputEventJoypadButton { ButtonIndex: JoyButton.DpadLeft, Pressed: true }:
                 _input.PressFoodCycle(-1);
                 break;
+            case InputEventMouseButton { ButtonIndex: MouseButton.WheelDown, Pressed: true } when captured:
             case InputEventJoypadButton { ButtonIndex: JoyButton.DpadRight, Pressed: true }:
                 _input.PressFoodCycle(1);
                 break;

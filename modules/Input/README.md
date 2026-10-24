@@ -1,7 +1,8 @@
 # Input module
 
-Reads mouse, keyboard and gamepad and publishes one `PlayerInput` message per fixed tick.
-Other modules (player, camera, bow) read it from the bus.
+Reads mouse, keyboard and gamepad and publishes one `PlayerInput` and one `ActiveDevice` message per
+fixed tick. Other modules (player, camera, bow) read them from the bus; modules that show button
+prompts use `ActiveDevice` with `Prompts` to show only the buttons of the device in use, as icons.
 
 - `Contract/`: `Fungtopia.Input.Contract`, the `PlayerInput` struct (namespace `Fungtopia.Input`):
   - `Move`: x right, y forward, relative to the camera, length 0..1. Keyboard diagonals are
@@ -31,17 +32,38 @@ Other modules (player, camera, bow) read it from the bus.
   `Jump`, `Fire` and `Eat` false, `FoodSelect` -1 and `FoodCycle` 0; `Interact` and `OpenMap` are still reported, so menus and dialogue can use
   them. Owners are tracked one by one: an owner that opens twice needs one close, closing an owner
   that is not open changes nothing, and the controls come back when the last open owner closes.
+- `Contract/` also has the prompt helpers (see [Prompts](#prompts)): `ActiveDevice` (`DeviceKind Kind`,
+  `bool IsGamepad`), `enum DeviceKind { KeyboardMouse, Xbox, PlayStation, Nintendo, Generic }`,
+  `enum PromptAction` and `static class Prompts`.
 - `Core/`: `Fungtopia.Input.Core`, `InputModule`. It keeps the latest device state its view
   reports. Mouse motion and jump, interact, map, eat and food presses (`PressEat`, `PressFoodSelect(slot)`,
   `PressFoodCycle(direction)`) that arrive between ticks are added up and handed out once (presses made while a menu is open are dropped, not saved for later). `MenuOpen` is true while
   any `UiFocus` owner is open. `SetAim(origin, direction)` takes the camera ray (a non-finite origin or a zero or
-  non-finite direction means no aim). Settings: `StickDeadZone` (0.2), `StickLookRadiansPerSecond` (3),
+  non-finite direction means no aim). `Device` is the device used last (keyboard and mouse at start),
+published as `ActiveDevice` every tick (also while a menu is open): `NoteKeyboardMouse()` (a key,
+mouse button or wheel press), `NoteMouseMotion(pixels)` (switches from `MouseSwitchPixels`, 2, in one
+event), `NoteGamepadButton(family)` and `NoteGamepadAxis(family, value)` (switches only past
+`StickDeadZone`). `JoypadFamily.Detect(name, guid)` tells the family from Godot's joypad name
+(PlayStation / DualShock / DualSense / Sony / PS3-5, Nintendo / Switch / Joy-Con / Pro Controller,
+Xbox / XInput / Microsoft) or else the USB vendor in its SDL GUID (054c Sony, 057e Nintendo,
+045e Microsoft); any other pad is Generic. Settings: `StickDeadZone` (0.2), `StickLookRadiansPerSecond` (3),
   `MouseRadiansPerPixel` (0.003), `TriggerThreshold` (0.5).
 - `Godot/`: `Main.tscn` with `InputView`, a full-screen `Control` that ignores the mouse. It
-  reads the devices before each tick, casts the aim ray with
+  reads the devices before each tick, reports which device each real input came from (the family of
+  each joypad is detected once per connection), casts the aim ray with
   `GetViewport().GetCamera3D()`: `ProjectRayOrigin(center)` (the camera's position) and
   `ProjectRayNormal(center)`. It draws nothing on screen: the
-  crosshair (shown only while a weapon is in use) belongs to the HUD.
+  crosshair (shown only while a weapon is in use) belongs to the HUD. `GlyphTextures.Register()` (called
+  in its `_Ready`) makes the icons loadable by their res:// paths even when Godot has not imported
+  them (a fresh checkout run without the editor): each unimported SVG is rasterized and put in the
+  resource cache under its own path. `GlyphSheet.tscn` shows every icon:
+  `./screenshot.sh modules/Input/Godot/GlyphSheet.tscn glyphs.png`.
+- `Glyphs/`: the icons, 64x64 SVG files made by `make_glyphs.py` (run it with `python3` to remake them;
+  letters are drawn as strokes because Godot's SVG loader does not draw `<text>`). `key_*` (E Q F M R
+  W A S D 1 2 3, Esc, Enter, Space, Shift, arrows, the `wasd` and `arrows` clusters), `mouse_*` (left,
+  right, move, wheel up / down), `xbox_*` (a b x y, lb rb lt rt, ls rs, dpad_up/down/left/right, view,
+  menu), `ps_*` (cross circle square triangle, l1 r1 l2 r2, ls rs, dpad_*, share, options), `ns_*`
+  (a b x y, l r zl zr, ls rs, dpad_*, minus, plus).
 - `Tests/`: xUnit tests of `InputModule` with a fake `IMessageBus`.
 
 ## Controls
@@ -56,10 +78,38 @@ Other modules (player, camera, bow) read it from the bus.
 | Open map | M (physical key) | Back / Select or Touchpad |
 | Eat the selected food | F (physical key) | D-pad Up |
 | Select food 1 / 2 / 3 | 1 / 2 / 3 (physical keys, top row) | |
-| Previous / next food | | D-pad Left / Right |
+| Previous / next food | Mouse wheel up / down (when captured) | D-pad Left / Right |
 | Free the mouse | Esc | |
 | Capture the mouse again | Left click (this click does not fire) | |
 
 The mouse is captured when the game starts.
+
+## Prompts
+
+`Prompts.Icon(action, device)` is the res:// path of the button's icon, `Prompts.Rich(action, device,
+size = 28)` RichTextLabel BBCode for it (`[img=28]res://modules/Input/Glyphs/key_e.svg[/img]`, set
+`BbcodeEnabled`), `Prompts.Text(action, device)` a plain name ("E", "A", "Cross"), and
+`Prompts.Glyph(action, device)` the icon's file name ("key_e"). Show prompts for the `ActiveDevice`
+the bus delivers (it arrives from the first tick on, after every view is ready, so the icons are
+loadable by then). Generic pads show the Xbox buttons. Godot's gamepad buttons are positional, so a
+Nintendo pad's bottom button is B and its right one A.
+
+| PromptAction | Keyboard / mouse | Xbox (and Generic) | PlayStation | Nintendo | Used by |
+|---|---|---|---|---|---|
+| Interact | E | X | Square | Y | this module |
+| Jump | Space | A | Cross | B | this module |
+| Fire | Left click | RT | R2 | ZR | this module |
+| Back | Esc | B | Circle | A | menus (Home also takes Q) |
+| Confirm | Enter | A | Cross | B | menus (the start screen also takes E) |
+| OpenMap | M | View | Share | - | this module |
+| Eat | F | D-pad Up | D-pad Up | D-pad Up | this module |
+| FoodPrev | Wheel up | D-pad Left | D-pad Left | D-pad Left | this module (keys 1-3 pick a slot) |
+| FoodNext | Wheel down | D-pad Right | D-pad Right | D-pad Right | this module |
+| Pause | Esc | Menu | Options | + | pause menu |
+| MenuUp / Down / Left / Right | Arrow keys | D-pad | D-pad | D-pad | menus (most also take WASD and the left stick) |
+| TurnLeft | Q | LB | L1 | L | wardrobe |
+| TurnRight | E | RB | R1 | R | wardrobe |
+| Move | W A S D | Left stick | Left stick | Left stick | this module |
+| Look | Mouse | Right stick | Right stick | Right stick | this module |
 
 Test it with `./test.sh Input` from the repository root.

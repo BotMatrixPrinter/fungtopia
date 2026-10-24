@@ -11,12 +11,13 @@ public class InputModuleTests
     private const double Step = 1.0 / 60;
 
     /// <summary>
-    /// Fake of the shell's bus: records every PlayerInput published and delivers UiFocus to its
-    /// subscribers.
+    /// Fake of the shell's bus: records every PlayerInput and ActiveDevice published and delivers
+    /// UiFocus to its subscribers.
     /// </summary>
     private sealed class FakeBus : IMessageBus
     {
         public readonly List<PlayerInput> Published = new();
+        public readonly List<ActiveDevice> Devices = new();
         public readonly List<IMessageHandler<UiFocus>> FocusHandlers = new();
         public int OtherMessages;
 
@@ -30,6 +31,8 @@ public class InputModuleTests
         {
             if (message is PlayerInput input)
                 Published.Add(input);
+            else if (message is ActiveDevice device)
+                Devices.Add(device);
             else if (message is UiFocus focus)
                 foreach (var handler in FocusHandlers)
                     handler.Handle(focus);
@@ -62,14 +65,16 @@ public class InputModuleTests
     // --- one message per tick ---
 
     [Fact]
-    public void PublishesExactlyOnePlayerInputPerTick()
+    public void PublishesExactlyOnePlayerInputAndOneActiveDevicePerTick()
     {
         var bus = new FakeBus();
         var input = Started(bus);
         Assert.Empty(bus.Published);
+        Assert.Empty(bus.Devices);
         for (int i = 0; i < 5; i++)
             input.Tick(new TickContext(i, Step));
         Assert.Equal(5, bus.Published.Count);
+        Assert.Equal(5, bus.Devices.Count);
         Assert.Equal(0, bus.OtherMessages);
     }
 
@@ -842,5 +847,305 @@ public class InputModuleTests
         AssertSuppressed(TickWithEverything(input, bus));
         bus.Focus(19, false);
         AssertLive(TickWithEverything(input, bus));
+    }
+
+    // --- active device ---
+
+    private static DeviceKind TickDevice(InputModule input, FakeBus bus)
+    {
+        input.Tick(new TickContext(0, Step));
+        Assert.Equal(input.Device.Kind, bus.Devices[^1].Kind);
+        return bus.Devices[^1].Kind;
+    }
+
+    [Fact]
+    public void KeyboardAndMouseIsActiveUntilAGamepadIsUsed()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        Assert.Equal(DeviceKind.KeyboardMouse, TickDevice(input, bus));
+        Assert.False(bus.Devices[^1].IsGamepad);
+        Assert.Equal(DeviceKind.KeyboardMouse, default(ActiveDevice).Kind);
+    }
+
+    [Fact]
+    public void TheLastDeviceUsedIsActiveAndItSwitchesBothWays()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        input.NoteGamepadButton(DeviceKind.PlayStation);
+        Assert.Equal(DeviceKind.PlayStation, TickDevice(input, bus));
+        Assert.True(bus.Devices[^1].IsGamepad);
+        // It stays until another device is used.
+        Assert.Equal(DeviceKind.PlayStation, TickDevice(input, bus));
+        input.NoteKeyboardMouse();
+        Assert.Equal(DeviceKind.KeyboardMouse, TickDevice(input, bus));
+        input.NoteGamepadAxis(DeviceKind.Nintendo, -0.9f);
+        Assert.Equal(DeviceKind.Nintendo, TickDevice(input, bus));
+        input.NoteMouseMotion(new Vector2(5, 0));
+        Assert.Equal(DeviceKind.KeyboardMouse, TickDevice(input, bus));
+        input.NoteGamepadButton(DeviceKind.Xbox);
+        Assert.Equal(DeviceKind.Xbox, TickDevice(input, bus));
+        // The last one between two ticks wins.
+        input.NoteKeyboardMouse();
+        input.NoteGamepadButton(DeviceKind.Generic);
+        Assert.Equal(DeviceKind.Generic, TickDevice(input, bus));
+    }
+
+    [Fact]
+    public void StickDriftInsideTheDeadZoneDoesNotSwitch()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        input.NoteGamepadAxis(DeviceKind.Xbox, 0.15f);
+        input.NoteGamepadAxis(DeviceKind.Xbox, -0.2f);
+        Assert.Equal(DeviceKind.KeyboardMouse, TickDevice(input, bus));
+        input.NoteGamepadAxis(DeviceKind.Xbox, 0.25f);
+        Assert.Equal(DeviceKind.Xbox, TickDevice(input, bus));
+        input.NoteGamepadAxis(DeviceKind.PlayStation, float.NaN);
+        Assert.Equal(DeviceKind.Xbox, TickDevice(input, bus));
+    }
+
+    [Fact]
+    public void TinyMouseMotionDoesNotSwitch()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        input.NoteGamepadButton(DeviceKind.Nintendo);
+        input.NoteMouseMotion(new Vector2(1, 1));
+        Assert.Equal(DeviceKind.Nintendo, TickDevice(input, bus));
+        input.NoteMouseMotion(new Vector2(0, -3));
+        Assert.Equal(DeviceKind.KeyboardMouse, TickDevice(input, bus));
+    }
+
+    [Fact]
+    public void AGamepadReportedAsKeyboardMouseCountsAsGeneric()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        input.NoteGamepadButton(DeviceKind.KeyboardMouse);
+        Assert.Equal(DeviceKind.Generic, TickDevice(input, bus));
+        input.NoteGamepadButton((DeviceKind)42);
+        Assert.Equal(DeviceKind.Generic, TickDevice(input, bus));
+    }
+
+    [Fact]
+    public void TheDeviceIsPublishedWhileAMenuIsOpen()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        bus.Focus(7, true);
+        input.NoteGamepadButton(DeviceKind.Xbox);
+        Assert.Equal(DeviceKind.Xbox, TickDevice(input, bus));
+    }
+
+    [Theory]
+    [InlineData("Xbox Series X Controller", "")]
+    [InlineData("Xbox 360 Controller", "")]
+    [InlineData("Xbox One Wireless Controller", "")]
+    [InlineData("XInput Controller", "")]
+    [InlineData("Controller", "030000005e040000130b000000010000")]
+    public void XboxPadsAreDetected(string name, string guid) =>
+        Assert.Equal(DeviceKind.Xbox, JoypadFamily.Detect(name, guid));
+
+    [Theory]
+    [InlineData("PS4 Controller", "")]
+    [InlineData("PS5 Controller", "")]
+    [InlineData("PS3 Controller", "")]
+    [InlineData("DualSense Wireless Controller", "")]
+    [InlineData("Sony Interactive Entertainment Wireless Controller", "")]
+    [InlineData("PlayStation 5 DualSense Edge", "")]
+    [InlineData("Wireless Controller", "030000004c050000e60c000000016800")]
+    public void PlayStationPadsAreDetected(string name, string guid) =>
+        Assert.Equal(DeviceKind.PlayStation, JoypadFamily.Detect(name, guid));
+
+    [Theory]
+    [InlineData("Nintendo Switch Pro Controller", "")]
+    [InlineData("Switch Pro Controller", "")]
+    [InlineData("Nintendo Switch Joy-Con (L)", "")]
+    [InlineData("Joy-Con (R)", "")]
+    [InlineData("Joy-Con (L/R)", "")]
+    [InlineData("Pro Controller", "")]
+    [InlineData("Wireless Gamepad", "030000007e0500000920000000026803")]
+    public void NintendoPadsAreDetected(string name, string guid) =>
+        Assert.Equal(DeviceKind.Nintendo, JoypadFamily.Detect(name, guid));
+
+    [Theory]
+    [InlineData("Logitech Dual Action", "030000006d04000016c2000000000000")]
+    [InlineData("8BitDo SN30 Pro", "03000000c82d00000161000000000000")]
+    [InlineData("Generic USB Joystick", "")]
+    [InlineData("", "")]
+    [InlineData(null, null)]
+    [InlineData("Wireless Controller", "short")]
+    public void OtherPadsAreGeneric(string? name, string? guid) =>
+        Assert.Equal(DeviceKind.Generic, JoypadFamily.Detect(name, guid));
+
+    [Fact]
+    public void TheNameWinsOverTheGuidAndCaseDoesNotMatter()
+    {
+        Assert.Equal(DeviceKind.PlayStation, JoypadFamily.Detect("DUALSHOCK 4", "030000005e040000130b000000010000"));
+        Assert.Equal(DeviceKind.Xbox, JoypadFamily.Detect("xbox wireless controller", "030000004C050000E60C000000016800"));
+        Assert.Equal(DeviceKind.PlayStation, JoypadFamily.Detect("Wireless Controller", "030000004C050000E60C000000016800"));
+    }
+
+    // --- prompts ---
+
+    private static readonly DeviceKind[] AllDevices = Enum.GetValues<DeviceKind>();
+    private static readonly PromptAction[] AllActions = Enum.GetValues<PromptAction>();
+
+    private static string RepoRoot([System.Runtime.CompilerServices.CallerFilePath] string here = "") =>
+        System.IO.Path.GetFullPath(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(here)!, "..", "..", ".."));
+
+    private static string FileOf(string resPath)
+    {
+        Assert.StartsWith("res://", resPath);
+        return System.IO.Path.Combine(RepoRoot(), resPath["res://".Length..]);
+    }
+
+    [Fact]
+    public void TheEnumsHaveTheAgreedMembers()
+    {
+        Assert.Equal(new[] { "KeyboardMouse", "Xbox", "PlayStation", "Nintendo", "Generic" }, Enum.GetNames<DeviceKind>());
+        Assert.Equal(new[] { "Interact", "Jump", "Fire", "Back", "Confirm", "OpenMap", "Eat", "FoodPrev", "FoodNext",
+            "Pause", "MenuUp", "MenuDown", "MenuLeft", "MenuRight", "TurnLeft", "TurnRight", "Move", "Look" },
+            Enum.GetNames<PromptAction>());
+    }
+
+    [Fact]
+    public void EveryActionHasAnIconFileAndATextOnEveryDevice()
+    {
+        foreach (var action in AllActions)
+            foreach (var device in AllDevices)
+            {
+                string icon = Prompts.Icon(action, device);
+                Assert.StartsWith(Prompts.GlyphDirectory, icon);
+                Assert.EndsWith(".svg", icon);
+                Assert.Equal(Prompts.GlyphDirectory + Prompts.Glyph(action, device) + ".svg", icon);
+                Assert.True(System.IO.File.Exists(FileOf(icon)), $"{action} on {device}: {icon} is missing");
+                Assert.False(string.IsNullOrWhiteSpace(Prompts.Text(action, device)), $"{action} on {device} has no text");
+            }
+    }
+
+    [Fact]
+    public void EachDeviceShowsOnlyItsOwnButtons()
+    {
+        foreach (var action in AllActions)
+        {
+            Assert.Matches("^(key|mouse)_", Prompts.Glyph(action, DeviceKind.KeyboardMouse));
+            Assert.StartsWith("xbox_", Prompts.Glyph(action, DeviceKind.Xbox));
+            Assert.StartsWith("ps_", Prompts.Glyph(action, DeviceKind.PlayStation));
+            Assert.StartsWith("ns_", Prompts.Glyph(action, DeviceKind.Nintendo));
+            // Generic pads use the Xbox-style buttons.
+            Assert.Equal(Prompts.Icon(action, DeviceKind.Xbox), Prompts.Icon(action, DeviceKind.Generic));
+            Assert.Equal(Prompts.Text(action, DeviceKind.Xbox), Prompts.Text(action, DeviceKind.Generic));
+            foreach (var device in AllDevices)
+                Assert.DoesNotContain("/", Prompts.Text(action, device));
+        }
+    }
+
+    [Theory]
+    [InlineData(PromptAction.Interact, "key_e", "xbox_x", "ps_square", "ns_y")]
+    [InlineData(PromptAction.Jump, "key_space", "xbox_a", "ps_cross", "ns_b")]
+    [InlineData(PromptAction.Fire, "mouse_left", "xbox_rt", "ps_r2", "ns_zr")]
+    [InlineData(PromptAction.Back, "key_esc", "xbox_b", "ps_circle", "ns_a")]
+    [InlineData(PromptAction.Confirm, "key_enter", "xbox_a", "ps_cross", "ns_b")]
+    [InlineData(PromptAction.OpenMap, "key_m", "xbox_view", "ps_share", "ns_minus")]
+    [InlineData(PromptAction.Eat, "key_f", "xbox_dpad_up", "ps_dpad_up", "ns_dpad_up")]
+    [InlineData(PromptAction.FoodPrev, "mouse_wheel_up", "xbox_dpad_left", "ps_dpad_left", "ns_dpad_left")]
+    [InlineData(PromptAction.FoodNext, "mouse_wheel_down", "xbox_dpad_right", "ps_dpad_right", "ns_dpad_right")]
+    [InlineData(PromptAction.Pause, "key_esc", "xbox_menu", "ps_options", "ns_plus")]
+    [InlineData(PromptAction.MenuUp, "key_up", "xbox_dpad_up", "ps_dpad_up", "ns_dpad_up")]
+    [InlineData(PromptAction.MenuDown, "key_down", "xbox_dpad_down", "ps_dpad_down", "ns_dpad_down")]
+    [InlineData(PromptAction.MenuLeft, "key_left", "xbox_dpad_left", "ps_dpad_left", "ns_dpad_left")]
+    [InlineData(PromptAction.MenuRight, "key_right", "xbox_dpad_right", "ps_dpad_right", "ns_dpad_right")]
+    [InlineData(PromptAction.TurnLeft, "key_q", "xbox_lb", "ps_l1", "ns_l")]
+    [InlineData(PromptAction.TurnRight, "key_e", "xbox_rb", "ps_r1", "ns_r")]
+    [InlineData(PromptAction.Move, "key_wasd", "xbox_ls", "ps_ls", "ns_ls")]
+    [InlineData(PromptAction.Look, "mouse_move", "xbox_rs", "ps_rs", "ns_rs")]
+    public void BindingsMatchTheControls(PromptAction action, string keyboard, string xbox, string playStation, string nintendo)
+    {
+        Assert.Equal(keyboard, Prompts.Glyph(action, DeviceKind.KeyboardMouse));
+        Assert.Equal(xbox, Prompts.Glyph(action, DeviceKind.Xbox));
+        Assert.Equal(playStation, Prompts.Glyph(action, DeviceKind.PlayStation));
+        Assert.Equal(nintendo, Prompts.Glyph(action, DeviceKind.Nintendo));
+    }
+
+    [Fact]
+    public void TextNamesTheButton()
+    {
+        Assert.Equal("E", Prompts.Text(PromptAction.Interact, DeviceKind.KeyboardMouse));
+        Assert.Equal("X", Prompts.Text(PromptAction.Interact, DeviceKind.Xbox));
+        Assert.Equal("A", Prompts.Text(PromptAction.Confirm, DeviceKind.Xbox));
+        Assert.Equal("Cross", Prompts.Text(PromptAction.Confirm, DeviceKind.PlayStation));
+        Assert.Equal("B", Prompts.Text(PromptAction.Confirm, DeviceKind.Nintendo));
+        Assert.Equal("Esc", Prompts.Text(PromptAction.Back, DeviceKind.KeyboardMouse));
+        Assert.Equal("Circle", Prompts.Text(PromptAction.Back, DeviceKind.PlayStation));
+        Assert.Equal("Options", Prompts.Text(PromptAction.Pause, DeviceKind.PlayStation));
+        Assert.Equal("+", Prompts.Text(PromptAction.Pause, DeviceKind.Nintendo));
+    }
+
+    [Fact]
+    public void RichIsAnImageTagOfTheIcon()
+    {
+        Assert.Equal("[img=28]res://modules/Input/Glyphs/key_e.svg[/img]", Prompts.Rich(PromptAction.Interact, DeviceKind.KeyboardMouse));
+        Assert.Equal("[img=28]res://modules/Input/Glyphs/ps_cross.svg[/img]", Prompts.Rich(PromptAction.Jump, DeviceKind.PlayStation));
+        Assert.Equal("[img=40]res://modules/Input/Glyphs/xbox_b.svg[/img]", Prompts.Rich(PromptAction.Back, DeviceKind.Generic, 40));
+        foreach (var action in AllActions)
+            foreach (var device in AllDevices)
+                Assert.Equal($"[img=28]{Prompts.Icon(action, device)}[/img]", Prompts.Rich(action, device));
+    }
+
+    [Fact]
+    public void UnknownActionsAndDevicesThrow()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => Prompts.Icon((PromptAction)99, DeviceKind.Xbox));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Prompts.Icon(PromptAction.Jump, (DeviceKind)99));
+    }
+
+    [Theory]
+    [InlineData("key_e", "key_q", "key_f", "key_m", "key_r", "key_esc", "key_enter", "key_space", "key_shift",
+        "key_1", "key_2", "key_3", "key_up", "key_down", "key_left", "key_right", "key_w", "key_a", "key_s", "key_d",
+        "key_wasd", "key_arrows", "mouse_left", "mouse_right", "mouse_move", "mouse_wheel_up", "mouse_wheel_down")]
+    [InlineData("xbox_a", "xbox_b", "xbox_x", "xbox_y", "xbox_lb", "xbox_rb", "xbox_lt", "xbox_rt", "xbox_ls", "xbox_rs",
+        "xbox_dpad_up", "xbox_dpad_down", "xbox_dpad_left", "xbox_dpad_right", "xbox_view", "xbox_menu")]
+    [InlineData("ps_cross", "ps_circle", "ps_square", "ps_triangle", "ps_l1", "ps_r1", "ps_l2", "ps_r2", "ps_ls", "ps_rs",
+        "ps_dpad_up", "ps_dpad_down", "ps_dpad_left", "ps_dpad_right", "ps_share", "ps_options")]
+    [InlineData("ns_a", "ns_b", "ns_x", "ns_y", "ns_l", "ns_r", "ns_zl", "ns_zr", "ns_ls", "ns_rs",
+        "ns_dpad_up", "ns_dpad_down", "ns_dpad_left", "ns_dpad_right", "ns_minus", "ns_plus")]
+    public void TheGlyphSetIsComplete(params string[] glyphs)
+    {
+        foreach (var glyph in glyphs)
+            Assert.True(System.IO.File.Exists(FileOf(Prompts.GlyphDirectory + glyph + ".svg")), $"{glyph}.svg is missing");
+    }
+
+    [Fact]
+    public void EveryGlyphIsASmall64PixelSvgWithoutText()
+    {
+        var files = System.IO.Directory.GetFiles(FileOf(Prompts.GlyphDirectory), "*.svg");
+        Assert.True(files.Length >= 75, $"only {files.Length} glyphs");
+        foreach (var file in files)
+        {
+            // Godot's SVG loader does not draw <text>: letters are paths.
+            var svg = System.Xml.Linq.XDocument.Load(file).Root!;
+            Assert.Equal("svg", svg.Name.LocalName);
+            Assert.Equal("64", (string?)svg.Attribute("width"));
+            Assert.Equal("64", (string?)svg.Attribute("height"));
+            Assert.DoesNotContain(svg.Descendants(), e => e.Name.LocalName is "text" or "image");
+            Assert.True(new System.IO.FileInfo(file).Length < 16_000, $"{file} is large");
+        }
+    }
+
+    [Fact]
+    public void ViewReportsDevicesAndMakesTheIconsLoadable()
+    {
+        var source = ViewSource();
+        Assert.Contains("GlyphTextures.Register()", source);
+        Assert.Contains("NoteKeyboardMouse()", source);
+        Assert.Contains("NoteMouseMotion(", source);
+        Assert.Contains("NoteGamepadButton(Family(button.Device))", source);
+        Assert.Contains("NoteGamepadAxis(Family(motion.Device), motion.AxisValue)", source);
+        Assert.Contains("JoypadFamily.Detect(GodotInput.GetJoyName(device), GodotInput.GetJoyGuid(device))", source);
+        Assert.Contains("MouseButton.WheelUp", source);
+        Assert.Contains("MouseButton.WheelDown", source);
     }
 }

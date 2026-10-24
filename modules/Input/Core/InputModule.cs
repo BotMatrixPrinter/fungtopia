@@ -6,7 +6,7 @@ namespace Fungtopia.Input;
 
 /// <summary>
 /// Keeps the latest device state reported by its Godot view and publishes one
-/// <see cref="PlayerInput"/> per tick. Mouse look and jump, interact, map, eat and food presses that arrive between ticks
+/// <see cref="PlayerInput"/> and one <see cref="ActiveDevice"/> per tick. Mouse look and jump, interact, map, eat and food presses that arrive between ticks
 /// are gathered and handed out once, on the next tick.
 /// </summary>
 public sealed class InputModule : IModule, IMessageHandler<UiFocus>
@@ -22,6 +22,9 @@ public sealed class InputModule : IModule, IMessageHandler<UiFocus>
 
     /// <summary>Right trigger value (0..1) at and above which it counts as firing.</summary>
     public float TriggerThreshold { get; set; } = 0.5f;
+
+    /// <summary>Mouse motion of at least this many pixels in one event switches to keyboard and mouse.</summary>
+    public float MouseSwitchPixels { get; set; } = 2f;
 
     private IMessageBus? _bus;
     private Vector2 _keyboardMove;
@@ -44,6 +47,9 @@ public sealed class InputModule : IModule, IMessageHandler<UiFocus>
 
     /// <summary>The input published on the latest tick.</summary>
     public PlayerInput Latest { get; private set; }
+
+    /// <summary>The device used last (keyboard and mouse until a gamepad is used); published every tick.</summary>
+    public ActiveDevice Device { get; private set; } = new(DeviceKind.KeyboardMouse);
 
     public void Start(IMessageBus bus)
     {
@@ -119,6 +125,29 @@ public sealed class InputModule : IModule, IMessageHandler<UiFocus>
     /// </summary>
     public void PressFoodCycle(int direction) => _foodCyclePressed += Math.Sign(direction);
 
+    /// <summary>A key, mouse button or mouse wheel was pressed: keyboard and mouse become the active device.</summary>
+    public void NoteKeyboardMouse() => Device = new ActiveDevice(DeviceKind.KeyboardMouse);
+
+    /// <summary>The mouse moved (pixels, any mode): switches to keyboard and mouse when it moved at least <see cref="MouseSwitchPixels"/>.</summary>
+    public void NoteMouseMotion(Vector2 pixels)
+    {
+        if (pixels.Length() >= MouseSwitchPixels)
+            NoteKeyboardMouse();
+    }
+
+    /// <summary>
+    /// A gamepad button was pressed: the gamepad of <paramref name="family"/> becomes the active device
+    /// (<see cref="DeviceKind.KeyboardMouse"/> is taken as Generic).
+    /// </summary>
+    public void NoteGamepadButton(DeviceKind family) => Device = new ActiveDevice(Gamepad(family));
+
+    /// <summary>A gamepad stick or trigger moved to <paramref name="value"/>: switches only past <see cref="StickDeadZone"/>.</summary>
+    public void NoteGamepadAxis(DeviceKind family, float value)
+    {
+        if (MathF.Abs(value) > StickDeadZone)
+            NoteGamepadButton(family);
+    }
+
     /// <summary>Whether the fire button (left mouse) is held.</summary>
     public void SetFireButton(bool held) => _fireButton = held;
 
@@ -185,6 +214,8 @@ public sealed class InputModule : IModule, IMessageHandler<UiFocus>
         _foodSelectPressed = -1;
         _foodCyclePressed = 0;
         _bus.Publish(Latest);
+        var device = Device;
+        _bus.Publish(device);
     }
 
     /// <summary>
@@ -206,6 +237,9 @@ public sealed class InputModule : IModule, IMessageHandler<UiFocus>
         float length = v.Length();
         return length > 1f ? v / length : v;
     }
+
+    private static DeviceKind Gamepad(DeviceKind family) =>
+        family is DeviceKind.Xbox or DeviceKind.PlayStation or DeviceKind.Nintendo ? family : DeviceKind.Generic;
 
     private static Vector2 Finite(Vector2 v) => float.IsFinite(v.X) && float.IsFinite(v.Y) ? v : Vector2.Zero;
 }
