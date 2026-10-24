@@ -131,7 +131,7 @@ public static class Props
         Ground.AddBuildingCircles(layout.Solid);
         foreach (var p in new[]
                  {
-                     Places.HomeDoor, Places.ClinicDoor, Places.MillieSpot, Places.FurnitureShopSpot, Places.AbbySpot,
+                     Places.HomeDoor, Places.ClinicDoor, Places.MillieSpot, Places.FurnitureShopSpot, Places.AbbySpot, Places.FoodSpot,
                      Places.LucySpot, Places.SignpostTown, Places.SignpostForestSouth, Places.SignpostForestNorth,
                      Places.SignpostPetCity, Places.SignpostDeepForest,
                  })

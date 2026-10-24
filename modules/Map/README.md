@@ -35,7 +35,9 @@ are yaws in radians about +Y (Godot's `rotation.y`); yaw 0 faces -Z.
            │       Mushroom Town      │   x -80..80, z 150..290; fountain in the square (0, 215);
   z = +290 └──────────────────────────┘   your house west of it, Millie's next door, the clinic
                                           and the furniture stall east of it, Abby's clothing
-                                          shop south of it (0, 246) facing it, four more houses
+                                          shop south of it (0, 246) facing it, the Mushroom
+                                          Munchies food stall on the square's north-west side
+                                          (-5.2, 205.3) facing the fountain, four more houses
 
   West of the forest, beyond a 10 m strip of cliff:
   x = -280          -110  -100
@@ -70,14 +72,14 @@ Everything is pure, deterministic (no random seed, no clock) and allocation-free
 | `Areas.HomeFloorY` | -50: the home room's floor height. |
 | `Areas.TownPathDistance(x, z)`, `TownPathHalfWidth` (1.5) | Distance to Mushroom Town's dirt paths: the street from the entrance (0, 150) to the square, and one from the square to 1 m in front of each building. |
 | `Place` | `Position` (`Vector3` on the ground: `Y == Ground.HeightAt(X, Z)`), `Yaw`, `Facing` (unit horizontal vector). |
-| `Places.HomeDoor`, `ClinicDoor`, `MillieSpot`, `FurnitureShopSpot`, `LucySpot`, `AbbySpot` | 1.6 m (`Places.FrontGap`) in front of the building's front, facing out from it. Lucy's counter is the pet store's open front; Abby stands at her clothing shop's door, facing the square. |
+| `Places.HomeDoor`, `ClinicDoor`, `MillieSpot`, `FurnitureShopSpot`, `LucySpot`, `AbbySpot`, `FoodSpot` | 1.6 m (`Places.FrontGap`) in front of the building's front, facing out from it. Lucy's counter is the pet store's open front; Abby stands at her clothing shop's door, facing the square; `FoodSpot` is in front of the food stall's counter, on the square, facing the fountain. |
 | `Places.HomeInterior`, `HomeExit` | Inside the home room: where you appear on entering (facing into the room), and the spot by its door that leaves the house (facing the door). |
 | `Places.SignpostTown`, `SignpostForestSouth`, `SignpostForestNorth`, `SignpostPetCity` | The signposts, beside the road at each entrance, facing into their own area. |
 | `Places.SignpostDeepForest` | The Deep Forest's entrance signpost, just inside the west gap beside the path, facing west into it. |
 | `Places.Signpost(Area)` | Town, Forest (its south signpost), PetCity or DeepForest; throws for Road and Home. |
-| `enum BuildingKind` | `PlayerHouse`, `MillieHouse`, `Clinic`, `FurnitureShop`, `House`, `Fountain`, `PetStore`, `CityBlock`, `ClothingShop` (Abby's boutique mushroom house, added last). |
+| `enum BuildingKind` | `PlayerHouse`, `MillieHouse`, `Clinic`, `FurnitureShop`, `House`, `Fountain`, `PetStore`, `CityBlock`, `ClothingShop` (Abby's boutique mushroom house), `FoodStall` ("Mushroom Munchies", a small open stall 4.2 m x 2.4 m, 3 m tall, on the town square between the street and the path to the north-west house; added last). |
 | `Building` | `Kind`, `Area`, `X`, `Z`, `Rotation` (yaw; at 0 the front faces -Z), `Width` (local X), `Depth` (local Z), `Height` (suggested drawing height), `Center`, `Front`, `ToWorld(localX, localZ)`, `Contains(x, z, margin)`. |
-| `Buildings.All`, `Count`, `First(kind)`, `TownSquare` (0, 215), `CityPlaza` (0, -215) | Every building and the fountain, in a fixed order (Abby's clothing shop last): Town draws the Town ones, PetCity the PetCity ones, exactly there. |
+| `Buildings.All`, `Count`, `First(kind)`, `TownSquare` (0, 215), `CityPlaza` (0, -215) | Every building and the fountain, in a fixed order (Abby's clothing shop, then the food stall last): Town draws the Town ones, PetCity the PetCity ones, exactly there. |
 | `enum PropKind` | `MediumMushroom`, `Lamp`, `Bench`, `FenceSegment`, `Planter`, `Crate`, `Statue`; new kinds are added at the end. |
 | `Prop` | `Kind`, `Area`, `X`, `Z`, `Rotation` (yaw; at 0 its front faces -Z), `Radius`, `Height`, `Center`, `Front`, `Along` (its local X), `CircleCount`, `Circle(k)`: its obstacle circles, one of `Radius` for most kinds; a `FenceSegment` runs along local X, `Radius` is half its length, and is a row of `Props.FencePostRadius` (0.2 m) circles at most `Props.FenceCircleSpacing` (0.3 m) apart. A bench's seat is along local X too (`Radius` half its length). |
 | `Props.All`, `Count` | Every solid prop, in a fixed order (Mushroom Forest, Deep Forest, Town, Pet City, roads), see **Props** below. |

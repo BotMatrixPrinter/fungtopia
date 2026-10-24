@@ -36,6 +36,7 @@ public class MapTests
         yield return Places.MillieSpot;
         yield return Places.FurnitureShopSpot;
         yield return Places.AbbySpot;
+        yield return Places.FoodSpot;
         yield return Places.LucySpot;
         yield return Places.SignpostTown;
         yield return Places.SignpostForestSouth;
@@ -470,6 +471,7 @@ public class MapTests
         Check(Places.MillieSpot, Area.Town);
         Check(Places.FurnitureShopSpot, Area.Town);
         Check(Places.AbbySpot, Area.Town);
+        Check(Places.FoodSpot, Area.Town);
         Check(Places.SignpostTown, Area.Town);
         Check(Places.SignpostForestSouth, Area.Forest);
         Check(Places.SignpostForestNorth, Area.Forest);
@@ -521,6 +523,7 @@ public class MapTests
         Check(Places.MillieSpot, BuildingKind.MillieHouse, 2.5f);
         Check(Places.FurnitureShopSpot, BuildingKind.FurnitureShop, 2.5f);
         Check(Places.AbbySpot, BuildingKind.ClothingShop, 2.5f);
+        Check(Places.FoodSpot, BuildingKind.FoodStall, 2.5f);
         Check(Places.LucySpot, BuildingKind.PetStore, 2.5f);
         // Millie lives next door.
         var home = Buildings.First(BuildingKind.PlayerHouse);
@@ -536,7 +539,7 @@ public class MapTests
     public void BuildingsAreWhereTheDesignPutsThem()
     {
         int houses = 0, blocks = 0;
-        foreach (var kind in new[] { BuildingKind.PlayerHouse, BuildingKind.MillieHouse, BuildingKind.Clinic, BuildingKind.FurnitureShop, BuildingKind.Fountain, BuildingKind.PetStore, BuildingKind.ClothingShop })
+        foreach (var kind in new[] { BuildingKind.PlayerHouse, BuildingKind.MillieHouse, BuildingKind.Clinic, BuildingKind.FurnitureShop, BuildingKind.Fountain, BuildingKind.PetStore, BuildingKind.ClothingShop, BuildingKind.FoodStall })
         {
             int n = 0;
             foreach (var b in Buildings.All)
@@ -570,11 +573,9 @@ public class MapTests
     [Fact]
     public void AbbysClothingShopIsABoutiqueNearTheTownSquare()
     {
-        // Added at the end of the enum and of Buildings.All, so older kinds and indices keep their values.
-        var kinds = Enum.GetValues<BuildingKind>();
-        Assert.Equal(BuildingKind.ClothingShop, kinds[^1]);
+        // Added after every older kind and building, so their values and indices stay.
         Assert.Equal(8, (int)BuildingKind.ClothingShop);
-        Assert.Equal(BuildingKind.ClothingShop, Buildings.All[Buildings.Count - 1].Kind);
+        Assert.Equal(BuildingKind.ClothingShop, Buildings.All[20].Kind);
 
         var shop = Buildings.First(BuildingKind.ClothingShop);
         Assert.Equal(Area.Town, shop.Area);
@@ -597,7 +598,79 @@ public class MapTests
         for (int i = Ground.ForestTrunkCount; i < Ground.PropCircleStart; i++)
             found |= shop.Contains(all[i].X, all[i].Z);
         Assert.True(found, "no obstacle circle on the clothing shop");
-        Assert.True(shop.Contains(all[Ground.PropCircleStart - 1].X, all[Ground.PropCircleStart - 1].Z), "the shop's circles are not the last building circles");
+    }
+
+    [Fact]
+    public void TheFoodStallIsASmallOpenStallOnTheTownSquare()
+    {
+        // Added at the end of the enum and of Buildings.All, so older kinds and indices keep their values.
+        var kinds = Enum.GetValues<BuildingKind>();
+        Assert.Equal(BuildingKind.FoodStall, kinds[^1]);
+        Assert.Equal(9, (int)BuildingKind.FoodStall);
+        Assert.Equal(22, Buildings.Count);
+        Assert.Equal(BuildingKind.FoodStall, Buildings.All[Buildings.Count - 1].Kind);
+
+        var stall = Buildings.First(BuildingKind.FoodStall);
+        var square = Buildings.TownSquare;
+        Assert.Equal(Area.Town, stall.Area);
+        // Small and open: lower and smaller than the furniture stall, nothing like a house.
+        var furniture = Buildings.First(BuildingKind.FurnitureShop);
+        Assert.True(stall.Height <= furniture.Height && stall.Width * stall.Depth < furniture.Width * furniture.Depth, "the food stall is a small stall");
+        // On the square's stone paving (12 m around the fountain), its counter facing the fountain.
+        for (float u = -0.5f; u <= 0.5f; u += 0.25f)
+        for (float v = -0.5f; v <= 0.5f; v += 0.25f)
+        {
+            var p = stall.ToWorld(u * stall.Width, v * stall.Depth);
+            Assert.True(Vector2.Distance(p, square) < 12.5f, $"stall corner {p} off the square");
+        }
+        Assert.True(Vector2.Dot(Vector2.Normalize(square - stall.Center), stall.Front) > 0.99f, "the counter does not face the fountain");
+
+        // Not in the way: half a meter around it is clear of the street, every other building's path,
+        // the roads, the fountain and the other buildings; it keeps 3 m from every door or named spot.
+        var fountain = Buildings.First(BuildingKind.Fountain);
+        for (float u = -0.5f; u <= 0.5f; u += 0.05f)
+        for (float v = -0.5f; v <= 0.5f; v += 0.05f)
+        {
+            var p = stall.ToWorld(u * (stall.Width + 1f), v * (stall.Depth + 1f));
+            float paths = Segment(p, new Vector2(0f, Areas.Town.MinZ), square);
+            foreach (var b in Buildings.All)
+            {
+                if (b.Equals(stall))
+                    continue;
+                Assert.False(b.Contains(p.X, p.Y), $"the stall's surroundings {p} run into the {b.Kind}");
+                if (b.Area == Area.Town && b.Kind != BuildingKind.Fountain)
+                    paths = MathF.Min(paths, Segment(p, square, b.Center + b.Front * (b.Depth * 0.5f + 1f)));
+            }
+            Assert.True(paths > Areas.TownPathHalfWidth, $"the stall blocks a town path at {p}");
+            Assert.True(Areas.RoadDistance(p.X, p.Y) > Areas.RoadHalfWidth + 10f);
+            Assert.True(Vector2.Distance(p, fountain.Center) > fountain.Width * 0.5f + 3f, "the stall crowds the fountain");
+        }
+        foreach (var place in TownAndCityPlaces())
+            if (!place.Equals(Places.FoodSpot))
+                Assert.False(stall.Contains(place.Position.X, place.Position.Z, 3f), $"the stall stands in front of a door or spot at {place.Position}");
+
+        // Solid: its obstacle circles are the last building circles, before the props' and the Deep Forest's trunks.
+        Assert.True(Ground.Blocks(stall.X, stall.Z));
+        var all = Ground.Obstacles;
+        var last = all[Ground.PropCircleStart - 1];
+        Assert.True(stall.Contains(last.X, last.Z), "the stall's circles are not the last building circles");
+
+        // The food spot is in front of its counter on the square, facing out, walkable and free.
+        var spot = new Vector2(Places.FoodSpot.Position.X, Places.FoodSpot.Position.Z);
+        Assert.Equal(Ground.HeightAt(spot.X, spot.Y), Places.FoodSpot.Position.Y);
+        Assert.True(Vector2.Distance(spot, stall.Center + stall.Front * (stall.Depth * 0.5f + Places.FrontGap)) < 1e-3f);
+        Assert.True(Vector2.Dot(new Vector2(Places.FoodSpot.Facing.X, Places.FoodSpot.Facing.Z), stall.Front) > 0.99f);
+        Assert.True(Vector2.Distance(spot, square) < 12f, "the food spot is not on the square");
+        Assert.True(Areas.Walkable(spot.X, spot.Y, 0.5f));
+        Assert.True(Free(spot.X, spot.Y));
+        Assert.False(Ground.Blocks(spot.X, spot.Y, 0.5f));
+    }
+
+    private static float Segment(Vector2 p, Vector2 a, Vector2 b)
+    {
+        var ab = b - a;
+        float t = Math.Clamp(Vector2.Dot(p - a, ab) / ab.LengthSquared(), 0f, 1f);
+        return Vector2.Distance(p, a + ab * t);
     }
 
     [Fact]

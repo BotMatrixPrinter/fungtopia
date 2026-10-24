@@ -24,6 +24,8 @@ public enum BuildingKind
     CityBlock,
     /// <summary>Abby's clothing shop: a boutique mushroom house on the town square's south side; she stands at its door (<see cref="Places.AbbySpot"/>).</summary>
     ClothingShop,
+    /// <summary>"Mushroom Munchies": a small open food stall on the town square, its counter facing the fountain (<see cref="Places.FoodSpot"/>).</summary>
+    FoodStall,
 }
 
 /// <summary>
@@ -92,6 +94,10 @@ public static class Buildings
     /// <summary>Pet City's plaza center (x, z).</summary>
     public static readonly Vector2 CityPlaza = new(0f, -215f);
 
+    // Declared before s_all, which uses it (static fields initialize in order).
+    /// <summary>The food stall's yaw: its front faces the fountain from (-5.2, 205.3).</summary>
+    private static readonly float FoodStallYaw = MathF.Atan2(-5.2f, -9.7f);
+
     private static readonly Building[] s_all =
     {
         // Mushroom Town: around the square, the road comes in from the north (z = 150).
@@ -121,6 +127,10 @@ public static class Buildings
 
         // Mushroom Town again: Abby's clothing shop, south across the square from the road, its door facing the fountain.
         new(BuildingKind.ClothingShop, Area.Town, 0f, 246f, FaceNorth, 10f, 9f, 8f),
+
+        // Mushroom Town again: the food stall on the square's north-west side, between the street and
+        // the path to the north-west house, its counter facing the fountain.
+        new(BuildingKind.FoodStall, Area.Town, -5.2f, 205.3f, FoodStallYaw, 4.2f, 2.4f, 3f),
     };
 
     /// <summary>Every building, in a fixed order.</summary>

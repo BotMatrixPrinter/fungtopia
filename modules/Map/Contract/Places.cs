@@ -62,6 +62,9 @@ public static class Places
     /// <summary>Where Abby stands at her clothing shop's door (its counter), facing the town square.</summary>
     public static readonly Place AbbySpot = InFront(BuildingKind.ClothingShop);
 
+    /// <summary>In front of the food stall's counter ("Mushroom Munchies"), facing out from it towards the fountain.</summary>
+    public static readonly Place FoodSpot = InFront(BuildingKind.FoodStall);
+
     /// <summary>The signpost at Mushroom Town's north entrance, beside the road, facing into town.</summary>
     public static readonly Place SignpostTown = new(4.5f, 156f, South);
 
