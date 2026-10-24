@@ -311,4 +311,30 @@ public class WalletModuleTests
     {
         Assert.Throws<InvalidOperationException>(() => new WalletModule().Tick(Step));
     }
+
+    /// <summary>The materials of coin.glb (the exported Mushroom Coin), read from its glTF JSON chunk.</summary>
+    private static List<string> CoinMaterials()
+    {
+        var dir = new System.IO.DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !System.IO.File.Exists(System.IO.Path.Combine(dir.FullName, "modules/Wallet/Models/coin.glb")))
+            dir = dir.Parent;
+        Assert.NotNull(dir);
+        var glb = System.IO.File.ReadAllBytes(System.IO.Path.Combine(dir!.FullName, "modules/Wallet/Models/coin.glb"));
+        Assert.Equal("glTF", System.Text.Encoding.ASCII.GetString(glb, 0, 4));
+        int length = BitConverter.ToInt32(glb, 12);
+        Assert.Equal("JSON", System.Text.Encoding.ASCII.GetString(glb, 16, 4));
+        using var json = System.Text.Json.JsonDocument.Parse(new ReadOnlyMemory<byte>(glb, 20, length));
+        var names = new List<string>();
+        foreach (var material in json.RootElement.GetProperty("materials").EnumerateArray())
+            names.Add(material.GetProperty("name").GetString()!);
+        return names;
+    }
+
+    [Fact]
+    public void TheCoinIsAGoldCoinWithASpottedMushroomAndNoEyes()
+    {
+        var materials = CoinMaterials();
+        Assert.Equal(new[] { "Gold", "GoldRim", "Cap", "Spots", "Stem" }, materials);
+        Assert.DoesNotContain(materials, m => m.Contains("Eye", StringComparison.OrdinalIgnoreCase));
+    }
 }

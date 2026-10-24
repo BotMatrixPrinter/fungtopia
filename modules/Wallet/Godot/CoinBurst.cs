@@ -19,7 +19,7 @@ public partial class CoinBurst : Node3D
     private const float Gravity = 7f;
 
     /// <summary>Surfaces drawn without an ink outline (small soft details).</summary>
-    private static readonly HashSet<string> NoOutline = new() { "EyeShine", "Spots", "Eye" };
+    private static readonly HashSet<string> NoOutline = new() { "Spots" };
     private static readonly Dictionary<string, ShaderMaterial> s_materials = new();
     private static (GltfDocument, GltfState)? s_model;
     private static bool s_loaded;
@@ -227,7 +227,7 @@ public partial class CoinBurst : Node3D
         var material = new ShaderMaterial { Shader = s_toon };
         // glTF stores linear colors; the shader's albedo is an sRGB color like Blender's swatch.
         material.SetShaderParameter("albedo", color.SrgbToLinear());
-        material.SetShaderParameter("self_light", name switch { "EyeShine" => 0.6f, "Gold" or "GoldRim" => 0.25f, _ => 0f });
+        material.SetShaderParameter("self_light", name switch { "Gold" or "GoldRim" => 0.25f, _ => 0f });
         if (!NoOutline.Contains(name))
             material.NextPass = s_outline;
         s_materials[key] = material;

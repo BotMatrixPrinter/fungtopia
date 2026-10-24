@@ -3,8 +3,8 @@
 #   blender -b --factory-startup --python modules/Wallet/Models/coin.py
 #
 # A chunky gold coin with a fat raised rim and, on both faces, a little embossed spotted
-# mushroom with big round eyes. Meters, centered at the origin, standing upright: its faces look
-# along Blender -Y / +Y (Godot +Z / -Z after the glTF export). One object, "Coin".
+# mushroom (no eyes: only creatures have eyes). Meters, centered at the origin, standing
+# upright: its faces look along Blender -Y / +Y (Godot +Z / -Z after the glTF export). One object, "Coin".
 # Materials carry plain colors only; the game draws them toon-shaded with ink outlines.
 import math
 import os
@@ -24,8 +24,6 @@ COLORS = {
     "Cap": (0.92, 0.32, 0.18),
     "Spots": (1.0, 0.95, 0.75),
     "Stem": (1.0, 0.9, 0.62),
-    "Eye": (0.2, 0.1, 0.05),
-    "EyeShine": (1.0, 1.0, 1.0),
 }
 ORDER = list(COLORS)
 
@@ -118,9 +116,6 @@ for side in (-1, 1):
     add(bm, dome(0.075, 0.06, on_face(0, 0, -0.012) @ Matrix.Diagonal((1, flat, 1, 1))), "Cap")
     for x, z, r in ((-0.042, 0.012, 0.012), (0.04, 0.02, 0.014), (0.0, 0.042, 0.011)):
         add(bm, sphere(r, on_face(x, 0.016, z), scale=(1, 0.5, 1), segments=12, rings=6), "Spots")
-    for x in (-0.016, 0.016):
-        add(bm, sphere(0.011, on_face(x, 0.008, -0.04), scale=(1, 0.5, 1.15), segments=12, rings=6), "Eye")
-        add(bm, sphere(0.004, on_face(x + 0.004, 0.0135, -0.035), segments=8, rings=4), "EyeShine")
 
 mesh = bpy.data.meshes.new("Coin")
 bm.to_mesh(mesh)

@@ -18,7 +18,7 @@ reward pops a little burst of gold mushroom coins out of the kill.
   `./screenshot.sh modules/Wallet/Godot/Preview.tscn`, or one coin up close with
   `WALLET_PREVIEW=close`); `Shaders/` (toon surface, ink outline).
 - `Models/` — `coin.py`, the Blender script that builds and exports `coin.glb` next to it: a
-  chunky gold coin with a spotted mushroom with big round eyes on both faces.
+  chunky gold coin with a spotted mushroom on both faces (no eyes: only creatures have eyes).
 - `Tests/` — `WalletModuleTests.cs`: xUnit tests of `WalletModule` with a fake `IMessageBus`.
 
 Test it with `./test.sh Wallet` from the repository root.
