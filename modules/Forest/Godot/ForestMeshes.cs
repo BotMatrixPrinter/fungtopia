@@ -5,22 +5,21 @@ using Godot;
 namespace Fungtopia.Forest.View;
 
 /// <summary>
-/// Builds the forest's chunky meshes in code: lathed mushroom stems, caps and logs, and
-/// fern and grass tufts. Every mesh carries UV.y as a part mask or root-to-tip ramp for its shader.
+/// Builds the forest's chunky meshes in code: lathed mushroom stems and caps, and
+/// ferns, flowers and grass tufts. Every mesh carries UV.y as a part mask or root-to-tip ramp for its shader.
 /// </summary>
 internal static class ForestMeshes
 {
     private const int Segments = 28;
 
-    /// <summary>A fat stem of radius about 1 and height 1, bulging at the foot.</summary>
+    /// <summary>A fat stem of height 1 bulging to radius 1 at the foot (<see cref="ForestScenery.StemProfile"/>): never wider than its circle.</summary>
     public static ArrayMesh Stem()
     {
         var profile = new List<Vector2> { new(0f, 1f) };
         for (int i = 10; i >= 0; i--)
         {
             float t = i / 10f;
-            float r = 1f + 0.4f * MathF.Pow(1f - t, 4f) - 0.14f * t;
-            profile.Add(new Vector2(r, t));
+            profile.Add(new Vector2(ForestScenery.StemProfile(t), t));
         }
         var b = new Builder();
         b.Lathe(profile.ToArray(), (i, n) => profile[i].Y);
@@ -43,16 +42,6 @@ internal static class ForestMeshes
         var b = new Builder();
         b.Lathe(top.ToArray(), (_, _) => 1f);
         b.Lathe(under, (_, _) => 0f);
-        return b.Commit();
-    }
-
-    /// <summary>A log: a cylinder of radius 1 and length 1 along Y, centered, with cut ends (UV.y = 0).</summary>
-    public static ArrayMesh Log()
-    {
-        var b = new Builder();
-        b.Lathe(new[] { new Vector2(0f, 0.5f), new Vector2(1f, 0.5f) }, (_, _) => 0f);
-        b.Lathe(new[] { new Vector2(1f, 0.5f), new Vector2(1.03f, 0f), new Vector2(1f, -0.5f) }, (_, _) => 1f);
-        b.Lathe(new[] { new Vector2(1f, -0.5f), new Vector2(0f, -0.5f) }, (_, _) => 0f);
         return b.Commit();
     }
 
@@ -106,6 +95,32 @@ internal static class ForestMeshes
             b.Add(foot + side, Vector3.Up, new Vector2(1f, 0f));
             b.Add(tip, Vector3.Up, new Vector2(0.5f, 1f));
             b.Tri(i, i + 2, i + 1);
+        }
+        return b.Commit();
+    }
+
+    /// <summary>A little flower 1 tall: a stem blade (UV.y 0..0.5) and five flat petals around its top (UV.y 1), 0.6 across in radius.</summary>
+    public static ArrayMesh Flower()
+    {
+        var b = new Builder();
+        var top = Vector3.Up * 0.92f;
+        b.Add(new Vector3(-0.04f, 0f, 0f), Vector3.Up, new Vector2(0f, 0f));
+        b.Add(new Vector3(0.04f, 0f, 0f), Vector3.Up, new Vector2(1f, 0f));
+        b.Add(top, Vector3.Up, new Vector2(0.5f, 0.5f));
+        b.Tri(0, 2, 1);
+        const int petals = 5;
+        for (int k = 0; k < petals; k++)
+        {
+            float yaw = k * MathF.Tau / petals;
+            var dir = new Vector3(MathF.Cos(yaw), 0.12f, MathF.Sin(yaw));
+            var side = new Vector3(-MathF.Sin(yaw), 0f, MathF.Cos(yaw)) * 0.16f;
+            int i = b.Count;
+            b.Add(top, Vector3.Up, new Vector2(0.5f, 1f));
+            b.Add(top + dir * 0.3f - side, Vector3.Up, new Vector2(0f, 1f));
+            b.Add(top + dir * 0.55f, Vector3.Up, new Vector2(0.5f, 1f));
+            b.Add(top + dir * 0.3f + side, Vector3.Up, new Vector2(1f, 1f));
+            b.Tri(i, i + 2, i + 1);
+            b.Tri(i, i + 3, i + 2);
         }
         return b.Commit();
     }

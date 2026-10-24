@@ -12,13 +12,17 @@ whether it is night, for the glowing mushrooms.
 - `Core/` — `Fungtopia.Forest.Core`: `ForestModule`, the module's one `IModule` (no work per tick;
   reads `Fungtopia.DayNight.TimeOfDay` into `IsNight`), `ForestRing`, where the view's ring of
   giant mushrooms may stand and where it stands (`Mushrooms`), `ForestProps`, where props may
-  stand, the logs, the west gap's overgrown trail and dark mushrooms, and `ForestRandom`, the fixed
-  hash the layout uses.
+  stand, the west gap's overgrown trail and tiny dark mushrooms, `ForestScenery`, everything the view
+  draws standing in the forest and how big (giant and medium mushrooms, small decoration), and
+  `ForestRandom`, the fixed hash the layout uses.
 - `Godot/` — `Main.tscn` with `ForestView`, which draws the forest from the Contract.
 - `Tests/` — `ForestTests.cs`: xUnit tests of the Contract (its forwarding values equal the Map's; `Obstacles` are exactly the Map's obstacles in the forest area; at least 80, radii up to 3 m, inside the square or on its wall, the same on every call, off paths, clearings, road gaps and the start, with no fixed count, so they hold once the Map adds solid props),
   of `ForestRing` (it matches the Map's obstacles and walkable ground; it opens at the west gap just
   as wide as the Map's path and is closed along the rest of the strip), of `ForestProps` (no prop
-  blocks the west gap or the trail) and of `ForestModule` with a fake `IMessageBus`.
+  blocks the west gap or the trail), of `ForestScenery` (the drawn medium mushrooms are exactly the
+  Map's forest `MediumMushroom` props; giant stems are exactly the trunk circles and the stem mesh is
+  never wider than its circle; all decoration is under 0.4 m tall and 0.6 m across; everything
+  taller inside the square stands within an obstacle) and of `ForestModule` with a fake `IMessageBus`.
 
 Test it with `./test.sh Forest` from the repository root.
 
@@ -46,8 +50,9 @@ references `Fungtopia.Map.Contract`; members marked *forwarding* just pass on th
 `ForestView` builds everything in code at startup (no imported assets, so a fresh checkout loads
 headless): the forest square's floor from `Map.Ground.HeightAt` on a 1 m grid from -100 to 100
 (the Map draws the ground around it on the same grid, so the seam matches; vertex-colored grass,
-moss, meadow clearings and dirt paths), a giant mushroom on every `Obstacles` circle (stem radius
-= the circle's radius; fat stems, big spotted caps in reds, browns and purples, about one in six
+moss, meadow clearings and dirt paths), a giant mushroom on every forest trunk
+(`ForestScenery.Giants`, the first `Map.Ground.ForestTrunkCount` of `Obstacles`; stem radius
+= the circle's radius, the stem mesh bulging to exactly that at its foot and narrower above; fat stems, big spotted caps in reds, browns and purples, about one in six
 glowing softly; plain caps, no eyes or faces: only creatures have eyes), the ring of dense giant
 mushrooms outside the square (`ForestRing.Mushrooms`: open in the Map's road gaps,
 `Areas.ForestGapSouth` and `ForestGapNorth`, `ForestGapHalfWidth` 5 m to each side, and in its
@@ -55,22 +60,29 @@ west gap to the Deep Forest, `Areas.ForestGapWest` and `DeepForestPath`; off eve
 walkable ground by `WalkableClearance` 1.5 m and clear of all `Map.Ground.Obstacles`; not beside
 the roads where the Map draws its own cliff mushrooms; a row of stems closes the narrow strip
 between the square and the Deep Forest, its first stems right at the west gap's edges; within
-`DarkReach` 16 m of the west gap their caps are dark Deep Forest purples and blues), small mushroom
-clusters, ferns, grass tufts, mossy logs and fireflies.
+`DarkReach` 16 m of the west gap their caps are dark Deep Forest purples and blues; they stand
+off all walkable ground), a medium mushroom on every Map prop of kind `MediumMushroom` in
+`Area.Forest` (`ForestScenery.MediumMushrooms`: exactly at the prop, turned by its `Rotation`, stem
+radius = `Radius`, `Height` tall to the top of its cap, which may overhang), small walkable
+decoration (`ForestScenery.Decoration`: tiny mushroom clusters, small ferns, flowers, grass tufts,
+each under `DecorationMaxHeight` 0.4 m tall and `DecorationMaxRadius` 0.3 m in radius) and
+fireflies.
 
 The west gap: the Map's 8 m Deep Forest path (x -112..-96, z -4..4) runs through the ring
 unblocked, and inside the square an overgrown little trail (`ForestProps.TrailPoints`, 1.1 m
 half-width, patchy dark soil under moss) winds from the gap between the trunks to the forest's west
-path at (-80, 26). A few small dark mushrooms (`ForestProps.DarkMushrooms`) stand beside it at the
+path at (-80, 26). A few tiny dark mushrooms (`ForestProps.DarkMushrooms`, under 0.4 m) stand beside it at the
 gap's mouth. Small props
 and all mushrooms are MultiMesh instances (one draw per kind). Shaders in `Godot/Shaders/`: soft
 two-band toon light with ink outlines. The glowing caps shine 2.4 times as bright at night
 (`ForestModule.IsNight`, fading over about two seconds). The forest has no light, sky or
 environment of its own: DayNight's global sun and `WorldEnvironment` light it.
 
-Props (clusters, ferns, logs, grass) are not obstacles: walkers may cross them. Clusters, ferns
-and logs stand only where `ForestProps.Open` allows: inside the square, off trunks, paths, the
-trail and the Deep Forest path. Only ankle-high grass tufts grow on the trail and in the gap (the
+Rule: anything drawn taller than 0.4 m (or wider than 0.6 m) inside the square is a mushroom on
+one of the Map's obstacles, drawn exactly where and as large as the Map says; only the small
+decoration is scattered freely, and walkers cross it. Tiny mushrooms, ferns and flowers stand only
+where `ForestProps.Open` allows: inside the square, off obstacles, paths, the trail and the Deep
+Forest path. Only ankle-high grass tufts grow on the trail and in the gap (the
 overgrowth); off the square they keep off the Map's walkable ground.
 
 A `PreviewCamera` stands at `PlayerStart` at eye height (1.6 m) looking north up the path; it is

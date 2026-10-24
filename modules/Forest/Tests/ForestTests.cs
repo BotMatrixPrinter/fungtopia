@@ -338,13 +338,14 @@ public class ForestTests
     {
         var path = Areas.DeepForestPath;
         Assert.Equal(-Areas.ForestHalfSize, Areas.ForestGapWest.X);
-        // Every ring mushroom, small dark mushroom and log keeps off the Map's Deep Forest path.
+        // Every ring mushroom, small dark mushroom and piece of decoration keeps off the Map's Deep Forest path.
         foreach (var m in ForestRing.Mushrooms)
             Assert.True(path.Depth(m.X, m.Z) < -m.Radius, $"ring mushroom at ({m.X}, {m.Z}) in the west gap");
         foreach (var m in ForestProps.DarkMushrooms)
             Assert.True(path.Depth(m.X, m.Z) < -m.Size, $"dark mushroom at ({m.X}, {m.Z}) in the west gap");
-        foreach (var log in ForestProps.Logs)
-            Assert.True(path.Depth(log.X, log.Z) < -(log.Length * 0.5f + log.Radius), $"log at ({log.X}, {log.Z}) in the west gap");
+        foreach (var d in ForestScenery.Decoration)
+            if (d.Kind != DecorKind.Grass) // only grass overgrows the gap
+                Assert.True(path.Depth(d.X, d.Z) < -d.Radius, $"{d.Kind} at ({d.X}, {d.Z}) in the west gap");
         // The whole gap, from inside the square out to the Deep Forest: walkable, no prop may stand
         // there, and no ring mushroom is there.
         for (float x = path.MinX; x <= path.MaxX; x += 0.5f)
@@ -438,16 +439,103 @@ public class ForestTests
         }
     }
 
+    // What the view draws
+
     [Fact]
-    public void LogsLieInTheOpen()
+    public void DrawnMediumMushroomsAreExactlyTheMapsForestProps()
     {
-        var logs = ForestProps.Logs;
-        Assert.Equal(30, logs.Length);
-        foreach (var log in logs)
+        var expected = new List<Prop>();
+        foreach (var p in Props.All)
+            if (p.Kind == PropKind.MediumMushroom && p.Area == Area.Forest)
+                expected.Add(p);
+        Assert.True(expected.Count >= 50, $"only {expected.Count} medium mushrooms in the forest");
+        var drawn = ForestScenery.MediumMushrooms;
+        Assert.Equal(expected.Count, drawn.Length);
+        for (int i = 0; i < drawn.Length; i++)
         {
-            Assert.True(ForestProps.Open(log.X, log.Z, log.Length * 0.5f + log.Radius), $"log at ({log.X}, {log.Z}) on a path, trunk or the gap");
-            Assert.True(ForestLayout.ClearingDepth(log.X, log.Z) <= -1f);
+            var p = expected[i];
+            var m = drawn[i];
+            Assert.Equal(p.X, m.X);
+            Assert.Equal(p.Z, m.Z);
+            Assert.Equal(p.Rotation, m.Yaw);
+            Assert.Equal(p.Radius, m.StemRadius);
+            Assert.Equal(p.Height, m.Height);
+            Assert.True(m.CapRadius >= m.StemRadius, "the cap is narrower than the stem");
+            Assert.InRange(m.CapHeight, 0.05f, m.Height * 0.5f);
+            // Each stands on its own obstacle circle in the forest.
+            Assert.Contains(Obstacles.All.ToArray(), o => o.X == p.X && o.Z == p.Z && o.Radius == p.Radius);
         }
+    }
+
+    [Fact]
+    public void GiantStemsAreExactlyTheTrunkObstacles()
+    {
+        var giants = ForestScenery.Giants;
+        Assert.Equal(Ground.ForestTrunkCount, giants.Length);
+        for (int i = 0; i < giants.Length; i++)
+        {
+            var o = Ground.Obstacles[i];
+            Assert.Equal(o.X, giants[i].X);
+            Assert.Equal(o.Z, giants[i].Z);
+            Assert.Equal(o.Radius, giants[i].StemRadius);
+            Assert.True(giants[i].Height > 5f);
+            Assert.True(giants[i].CapRadius > giants[i].StemRadius); // the cap may overhang
+        }
+        // The stem mesh at radius scale 1 is never wider than 1 anywhere along it, so a stem of the
+        // obstacle's radius stays inside the obstacle's circle.
+        Assert.Equal(1f, ForestScenery.StemMeshMaxRadius);
+        for (float t = 0f; t <= 1f; t += 0.01f)
+            Assert.InRange(ForestScenery.StemProfile(t), 0.3f, ForestScenery.StemMeshMaxRadius);
+        Assert.Equal(1f, ForestScenery.StemProfile(0f), 4);
+    }
+
+    [Fact]
+    public void DecorationIsSmallAndWalkable()
+    {
+        var decoration = ForestScenery.Decoration;
+        var kinds = new HashSet<DecorKind>();
+        foreach (var d in decoration)
+        {
+            kinds.Add(d.Kind);
+            Assert.InRange(d.Height, 0.02f, ForestScenery.DecorationMaxHeight - 0.001f);
+            Assert.InRange(d.Radius, 0.01f, ForestScenery.DecorationMaxRadius - 0.001f);
+            if (d.Kind is DecorKind.Mushroom or DecorKind.DarkMushroom)
+                Assert.InRange(d.CapHeight, 0.01f, d.Height * 0.5f);
+            // Off trunks and paths (grass may grow on the trail, in the gap and around the square).
+            Assert.False(Obstacles.Blocks(d.X, d.Z, 0.05f), $"{d.Kind} at ({d.X}, {d.Z}) inside an obstacle");
+            Assert.True(ForestLayout.PathDistance(d.X, d.Z) > ForestLayout.PathHalfWidth, $"{d.Kind} at ({d.X}, {d.Z}) on a path");
+            if (d.Kind != DecorKind.Grass)
+                Assert.True(ForestProps.Open(d.X, d.Z, 0f), $"{d.Kind} at ({d.X}, {d.Z}) not in the open");
+        }
+        Assert.Equal(new HashSet<DecorKind> { DecorKind.Mushroom, DecorKind.DarkMushroom, DecorKind.Fern, DecorKind.Flower, DecorKind.Grass }, kinds);
+        int tiny = 0;
+        foreach (var d in decoration)
+            if (d.Kind == DecorKind.Mushroom)
+                tiny++;
+        Assert.True(tiny > 300, $"only {tiny} tiny mushrooms");
+    }
+
+    [Fact]
+    public void EverythingTallerThanTheLimitInsideTheSquareStandsOnAnObstacle()
+    {
+        // Inside the square only the giant and medium mushrooms rise above the decoration limit,
+        // and each stem lies wholly within one obstacle circle; the ring stands off all walkable ground.
+        var tall = new List<DrawnMushroom>();
+        tall.AddRange(ForestScenery.Giants.ToArray());
+        tall.AddRange(ForestScenery.MediumMushrooms.ToArray());
+        foreach (var m in tall)
+        {
+            Assert.True(m.Height > ForestScenery.DecorationMaxHeight);
+            bool inside = false;
+            foreach (var o in Ground.Obstacles)
+                if (Vector2.Distance(new Vector2(o.X, o.Z), new Vector2(m.X, m.Z)) + m.StemRadius * ForestScenery.StemMeshMaxRadius <= o.Radius + 1e-4f)
+                    inside = true;
+            Assert.True(inside, $"mushroom at ({m.X}, {m.Z}) stands outside every obstacle");
+        }
+        foreach (var d in ForestScenery.Decoration)
+            Assert.True(d.Height < ForestScenery.DecorationMaxHeight);
+        foreach (var r in ForestRing.Mushrooms)
+            Assert.True(Areas.Depth(r.X, r.Z) < -r.Radius, $"ring mushroom at ({r.X}, {r.Z}) on walkable ground");
     }
 
     [Fact]

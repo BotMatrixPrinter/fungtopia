@@ -9,11 +9,11 @@ namespace Fungtopia.Forest.View;
 
 /// <summary>
 /// Draws the Mushroom Forest: the forest square's floor from the Map's <see cref="MapGround.HeightAt"/>
-/// (the Map draws the ground around it on the same 1 m grid), a giant mushroom on every
-/// <see cref="Obstacles"/> circle, the ring of giant mushrooms around <see cref="ForestBounds"/>
+/// (the Map draws the ground around it on the same 1 m grid), the giant and medium mushrooms of
+/// <see cref="ForestScenery"/> (on the trunks and the Map's forest props), the ring of giant mushrooms around <see cref="ForestBounds"/>
 /// with the Map's gaps left open (<see cref="ForestRing"/>), darker toward the west gap with its
-/// overgrown trail (<see cref="ForestProps"/>), and instanced small props (mushroom clusters, ferns,
-/// grass, logs, fireflies). Mushrooms have plain spotted caps and no faces. The glowing caps glow brighter at night
+/// overgrown trail (<see cref="ForestProps"/>), and instanced small walkable decoration under
+/// 0.4 m (tiny mushrooms, ferns, flowers, grass) and fireflies. Mushrooms have plain spotted caps and no faces. The glowing caps glow brighter at night
 /// (<see cref="ForestModule.IsNight"/>). Sun, sky and environment are the DayNight module's. Also
 /// a preview camera at the player's start that any other current camera replaces.
 /// </summary>
@@ -58,7 +58,6 @@ public partial class ForestView : Node3D, IModuleView
         BuildGround();
         BuildMushrooms();
         BuildFoliage();
-        BuildLogs();
         BuildFireflies();
         BuildPreviewCamera();
     }
@@ -79,9 +78,6 @@ public partial class ForestView : Node3D, IModuleView
     }
 
     private static Vector3 Ground(float x, float z) => new(x, MapGround.HeightAt(x, z), z);
-
-    /// <summary>Whether a prop of <paramref name="radius"/> at (x, z) stays off paths, trunks, the trail and the west gap.</summary>
-    private static bool Open(float x, float z, float radius) => ForestProps.Open(x, z, radius);
 
     private static ShaderMaterial Material(string shader, bool outline = false)
     {
@@ -205,61 +201,57 @@ public partial class ForestView : Node3D, IModuleView
     {
         var stems = new Instances();
         var caps = new Instances();
-        int seed = 0;
 
-        void Mushroom(float x, float z, float stemRadius, float height, float capRadius, bool dark = false)
+        // Height is the cap's top above the ground; the stem's foot sinks a little into it.
+        void Mushroom(DrawnMushroom m, Color color, bool glow, float glowStrength)
         {
-            int id = seed++;
-            float yaw = Rand(id, 1) * MathF.Tau;
-            var foot = Ground(x, z) + Vector3.Down * MathF.Min(0.4f, height * 0.08f);
+            int id = m.Id;
+            float sink = MathF.Min(0.4f, m.Height * 0.08f);
+            var foot = Ground(m.X, m.Z) + Vector3.Down * sink;
+            float stemHeight = m.Height + sink - m.CapHeight * 0.82f;
             var stemColor = new Color(0.97f, 0.91f, 0.8f).Lerp(new Color(0.93f, 0.82f, 0.7f), Rand(id, 2));
-            stems.Add(Placed(foot, yaw, new Vector3(stemRadius, height, stemRadius)), stemColor);
+            stems.Add(Placed(foot, m.Yaw, new Vector3(m.StemRadius, stemHeight, m.StemRadius)), stemColor);
+            var tilt = new Basis(new Vector3(MathF.Cos(m.Yaw), 0f, MathF.Sin(m.Yaw)), 0.08f * (Rand(id, 7) - 0.5f));
+            var capBasis = tilt * new Basis(Vector3.Up, m.Yaw) * Basis.FromScale(new Vector3(m.CapRadius, m.CapHeight, m.CapRadius));
+            var capCustom = new Color(Rand(id, 8), glow ? glowStrength : 0f, 0f, 0f);
+            caps.Add(new Transform3D(capBasis, foot + Vector3.Up * (stemHeight - m.CapHeight * 0.18f)), color, capCustom);
+        }
 
+        void Colored(DrawnMushroom m, bool dark = false)
+        {
+            int id = m.Id;
             bool glow = Rand(id, 3) < 0.16f;
             var color = glow ? GlowColors[(int)(Rand(id, 4) * GlowColors.Length)]
                 : dark ? DarkCapColors[(int)(Rand(id, 4) * DarkCapColors.Length)]
                 : CapColors[(int)(Rand(id, 4) * CapColors.Length)];
-            color = color.Lightened(0.08f * (Rand(id, 5) - 0.5f));
-            float capHeight = capRadius * (0.5f + 0.3f * Rand(id, 6));
-            var tilt = new Basis(new Vector3(MathF.Cos(yaw), 0f, MathF.Sin(yaw)), 0.08f * (Rand(id, 7) - 0.5f));
-            var capBasis = tilt * new Basis(Vector3.Up, yaw) * Basis.FromScale(new Vector3(capRadius, capHeight, capRadius));
-            var capCustom = new Color(Rand(id, 8), glow ? 0.9f + 0.6f * Rand(id, 9) : 0f, 0f, 0f);
-            caps.Add(new Transform3D(capBasis, foot + Vector3.Up * (height - capHeight * 0.18f)), color, capCustom);
+            Mushroom(m, color.Lightened(0.08f * (Rand(id, 5) - 0.5f)), glow, 0.9f + 0.6f * Rand(id, 9));
         }
 
-        // A giant mushroom on every obstacle, its stem exactly the obstacle's circle.
-        foreach (var o in Obstacles.All)
+        // A giant mushroom on every forest trunk, its stem exactly the trunk's circle.
+        foreach (var m in ForestScenery.Giants)
+            Colored(m);
+
+        // A medium mushroom on every Map prop of the forest, exactly where and as large as the Map says.
+        foreach (var m in ForestScenery.MediumMushrooms)
+            Colored(m);
+
+        // The ring: dense giant mushrooms in a band just outside the square (off all walkable
+        // ground), open where the Map's roads and the Deep Forest path pass through, dark-capped by the west gap.
+        foreach (var r in ForestRing.Mushrooms)
         {
-            int id = seed;
-            float height = 6f + o.Radius * 2.6f + 4f * Rand(id, 20);
-            Mushroom(o.X, o.Z, o.Radius, height, o.Radius * (2.6f + 1.2f * Rand(id, 21)));
+            float capRadius = r.Radius * (2.4f + 1.4f * Rand(r.Id, 34));
+            float capHeight = capRadius * (0.5f + 0.3f * Rand(r.Id, 6));
+            Colored(new DrawnMushroom(DecorKind.Mushroom, r.X, r.Z, Rand(r.Id, 1) * MathF.Tau, r.Radius,
+                7f + 9f * Rand(r.Id, 33) + capHeight * 0.82f, capRadius, capHeight, r.Id), r.Dark);
         }
 
-        // The ring: dense giant mushrooms in a band just outside the square, open where the Map's
-        // roads and the Deep Forest path pass through, dark-capped by the west gap.
-        foreach (var m in ForestRing.Mushrooms)
-            Mushroom(m.X, m.Z, m.Radius, 7f + 9f * Rand(m.Id, 33), m.Radius * (2.4f + 1.4f * Rand(m.Id, 34)), m.Dark);
-
-        // A few small dark mushrooms by the trail at the gap's mouth hint at the Deep Forest.
-        foreach (var m in ForestProps.DarkMushrooms)
-            Mushroom(m.X, m.Z, m.Size * 0.35f, m.Size * 1.7f, m.Size, dark: true);
-
-        // Small mushroom clusters in the open (walkable: not obstacles).
-        for (int c = 0; c < 320; c++)
+        // Tiny walkable mushrooms (decoration under the height limit), a few dark ones by the west gap.
+        foreach (var d in ForestScenery.Decoration)
         {
-            float cx = (Rand(c, 40) * 2f - 1f) * ForestBounds.HalfSize, cz = (Rand(c, 41) * 2f - 1f) * ForestBounds.HalfSize;
-            if (!Open(cx, cz, 0.8f) && Rand(c, 47) > 0.2f)
+            if (d.Kind != DecorKind.Mushroom && d.Kind != DecorKind.DarkMushroom)
                 continue;
-            int count = 3 + (int)(Rand(c, 42) * 5f);
-            for (int k = 0; k < count; k++)
-            {
-                float a = k * 2.4f + Rand(c, 43) * 6f, d = 0.15f + 0.6f * Rand(c * 8 + k, 44);
-                float x = cx + MathF.Cos(a) * d, z = cz + MathF.Sin(a) * d;
-                if (!Open(x, z, 0.15f))
-                    continue;
-                float size = 0.12f + 0.3f * Rand(c * 8 + k, 45) * (k == 0 ? 1.6f : 1f);
-                Mushroom(x, z, size * 0.35f, size * (1.2f + Rand(c * 8 + k, 46)), size);
-            }
+            Colored(new DrawnMushroom(d.Kind, d.X, d.Z, d.Yaw, d.Radius * 0.35f, d.Height, d.Radius, d.CapHeight, d.Id + 7),
+                d.Kind == DecorKind.DarkMushroom);
         }
 
         AddChild(stems.Build("MushroomStems", ForestMeshes.Stem(), Material("toon_color.gdshader", outline: true)));
@@ -267,63 +259,41 @@ public partial class ForestView : Node3D, IModuleView
         AddChild(caps.Build("MushroomCaps", ForestMeshes.Cap(), _capMaterial));
     }
 
+    private static readonly Color[] FlowerColors =
+    {
+        new(1f, 0.96f, 0.9f), new(1f, 0.85f, 0.3f), new(0.95f, 0.55f, 0.75f), new(0.65f, 0.6f, 1f), new(1f, 0.6f, 0.45f),
+    };
+
     private void BuildFoliage()
     {
+        // Small ground decoration from ForestScenery, each scaled from its mesh to its height.
         var ferns = new Instances();
-        // Ferns gather at trunk feet and along the paths' edges.
-        int f = 0;
-        foreach (var o in Obstacles.All)
+        var flowers = new Instances();
+        var grass = new Instances();
+        foreach (var d in ForestScenery.Decoration)
         {
-            for (int k = 0; k < 3; k++, f++)
+            int id = d.Id;
+            switch (d.Kind)
             {
-                float a = Rand(f, 50) * MathF.Tau, d = o.Radius + 0.6f + 1.4f * Rand(f, 51);
-                float x = o.X + MathF.Cos(a) * d, z = o.Z + MathF.Sin(a) * d;
-                if (Open(x, z, 0.5f))
-                    ferns.Add(Placed(Ground(x, z), Rand(f, 52) * MathF.Tau, Vector3.One * (0.8f + 0.9f * Rand(f, 53))),
-                        new Color(0.36f, 0.66f, 0.3f).Lerp(new Color(0.5f, 0.72f, 0.28f), Rand(f, 54)));
+                case DecorKind.Fern:
+                    ferns.Add(Placed(Ground(d.X, d.Z), d.Yaw, Vector3.One * (d.Height / ForestScenery.FernMeshHeight)),
+                        new Color(0.34f, 0.64f, 0.3f).Lerp(new Color(0.5f, 0.72f, 0.28f), Rand(id, 59)));
+                    break;
+                case DecorKind.Flower:
+                    flowers.Add(Placed(Ground(d.X, d.Z), d.Yaw, Vector3.One * (d.Height / ForestScenery.FlowerMeshHeight)),
+                        FlowerColors[(int)(Rand(id, 70) * FlowerColors.Length)]);
+                    break;
+                case DecorKind.Grass:
+                    grass.Add(Placed(Ground(d.X, d.Z), d.Yaw, Vector3.One * (d.Height / ForestScenery.GrassMeshHeight)),
+                        GroundColor(d.X, d.Z).Lightened(0.08f));
+                    break;
             }
         }
-        for (int k = 0; k < 900; k++, f++)
-        {
-            float x = (Rand(f, 55) * 2f - 1f) * ForestBounds.HalfSize, z = (Rand(f, 56) * 2f - 1f) * ForestBounds.HalfSize;
-            if (Open(x, z, 0.5f) && ForestLayout.ClearingDepth(x, z) < 1f)
-                ferns.Add(Placed(Ground(x, z), Rand(f, 57) * MathF.Tau, Vector3.One * (0.7f + 0.8f * Rand(f, 58))),
-                    new Color(0.34f, 0.62f, 0.3f).Lerp(new Color(0.5f, 0.72f, 0.28f), Rand(f, 59)));
-        }
-        var fernMaterial = Material("foliage.gdshader");
-        AddChild(ferns.Build("Ferns", ForestMeshes.Fern(), fernMaterial));
-
-        var grass = new Instances();
-        for (int k = 0; k < 40000; k++)
-        {
-            float x = (Rand(k, 60) * 2f - 1f) * (ForestBounds.HalfSize + 6f), z = (Rand(k, 61) * 2f - 1f) * (ForestBounds.HalfSize + 6f);
-            if (ForestLayout.PathDistance(x, z) < ForestLayout.PathHalfWidth + 0.2f || Obstacles.Blocks(x, z, 0.1f))
-                continue;
-            if (!ForestBounds.Contains(x, z) && Areas.Walkable(x, z, -0.5f))
-                continue; // the Map's roads and the Deep Forest path run out through the gaps
-            grass.Add(Placed(Ground(x, z), Rand(k, 62) * MathF.Tau, Vector3.One * (0.8f + 0.8f * Rand(k, 63))),
-                GroundColor(x, z).Lightened(0.08f));
-        }
+        AddChild(ferns.Build("Ferns", ForestMeshes.Fern(), Material("foliage.gdshader")));
+        AddChild(flowers.Build("Flowers", ForestMeshes.Flower(), Material("flower.gdshader"), shadows: false));
         var grassMaterial = Material("foliage.gdshader");
         grassMaterial.SetShaderParameter("sway", 0.04f);
         AddChild(grass.Build("Grass", ForestMeshes.GrassTuft(), grassMaterial, shadows: false));
-    }
-
-    private void BuildLogs()
-    {
-        var logs = new Instances();
-        foreach (var log in ForestProps.Logs)
-        {
-            var along = new Vector3(MathF.Cos(log.Yaw), 0f, MathF.Sin(log.Yaw));
-            var a = new Vector3(log.X, 0f, log.Z) - along * (log.Length * 0.5f);
-            var b = new Vector3(log.X, 0f, log.Z) + along * (log.Length * 0.5f);
-            var center = Ground(log.X, log.Z) + Vector3.Up * (log.Radius * 0.75f);
-            center.Y = MathF.Max(MapGround.HeightAt(a.X, a.Z), MapGround.HeightAt(b.X, b.Z)) * 0.5f + center.Y * 0.5f;
-            // The log's local Y (its length) lies along the ground.
-            var basis = new Basis(new Quaternion(Vector3.Up, along)) * Basis.FromScale(new Vector3(log.Radius, log.Length, log.Radius));
-            logs.Add(new Transform3D(basis, center), Colors.White);
-        }
-        AddChild(logs.Build("Logs", ForestMeshes.Log(), Material("log.gdshader", outline: true)));
     }
 
     private void BuildFireflies()
