@@ -35,7 +35,9 @@ public partial class StartScreenView : CanvasLayer, IModuleView
     private MushroomLogo _logo = null!;
     private Control _content = null!;
     private Label _heading = null!;
-    private Label _hint = null!;
+    private RichTextLabel _hint = null!;
+    private int _hintSize = -1;
+    private (StartStep, Fungtopia.Input.DeviceKind, int) _hintFor = ((StartStep)(-1), default, 0);
     private Label _info = null!;
     private readonly CapButton[] _menu = new CapButton[3];
     private readonly SlotCard[] _slotCards = new SlotCard[SaveSlots.Count];
@@ -103,7 +105,7 @@ public partial class StartScreenView : CanvasLayer, IModuleView
 
         _heading = NewLabel(64, StartStyle.Cream, 18);
         _info = NewLabel(34, StartStyle.Cream, 12);
-        _hint = NewLabel(28, StartStyle.Cream, 10);
+        _hint = NewHint();
         for (int i = 0; i < 2; i++)
         {
             _cards[i] = new ChoiceCard();
@@ -146,6 +148,30 @@ public partial class StartScreenView : CanvasLayer, IModuleView
         };
         _content.AddChild(label);
         return label;
+    }
+
+    /// <summary>The control hint: BBCode with the active device's button icons (the Core's Hint).</summary>
+    private RichTextLabel NewHint()
+    {
+        var hint = new RichTextLabel
+        {
+            BbcodeEnabled = true,
+            FitContent = true,
+            ScrollActive = false,
+            AutowrapMode = TextServer.AutowrapMode.Off,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            ClipContents = false,
+        };
+        hint.AddThemeFontOverride("normal_font", StartStyle.Font);
+        hint.AddThemeColorOverride("default_color", StartStyle.Cream);
+        hint.AddThemeColorOverride("font_outline_color", StartStyle.Ink);
+        hint.AddThemeColorOverride("font_shadow_color", new Color(StartStyle.Ink, 0.35f));
+        hint.AddThemeConstantOverride("shadow_offset_y", 4);
+        hint.AddThemeConstantOverride("line_separation", 6);
+        _content.AddChild(hint);
+        return hint;
     }
 
     public override void _Process(double delta)
@@ -362,13 +388,6 @@ public partial class StartScreenView : CanvasLayer, IModuleView
             StartStep.Overwrite => $"Overwrite slot {_screen.GameSlot}?",
             _ => "Ready for adventure!",
         };
-        _hint.Text = step switch
-        {
-            StartStep.Title => "Arrows / stick / D-pad: choose     Enter / E / (A) or click: OK",
-            StartStep.Ready => "Enter / E / (A): Start!     Esc / (B): back",
-            StartStep.Look => "Drag / Q E / (LB)(RB) / right stick: turn\nUp/Down: row    Left/Right: change    Enter/(A): next    Esc/(B): back",
-            _ => "Arrows / stick / D-pad: choose     Enter / E / (A): OK     Esc / (B): back",
-        };
     }
 
     /// <summary>Places everything for the current window size.</summary>
@@ -418,14 +437,11 @@ public partial class StartScreenView : CanvasLayer, IModuleView
         Place(_yes, new Vector2(view.X * 0.5f - 170f * u, view.Y * 0.5f + 400f * u), new Vector2(260f, 124f) * u);
         Place(_no, new Vector2(view.X * 0.5f + 170f * u, view.Y * 0.5f + 400f * u), new Vector2(260f, 124f) * u);
         _yes.FontSize = _no.FontSize = Mathf.RoundToInt(42 * u);
-        Place(_hint, new Vector2(view.X * 0.5f, view.Y - 46f * u), new Vector2(1800f, 50f) * u);
-        SetFontSize(_hint, Mathf.RoundToInt(28 * u));
-        if (look)
-        {
-            // Left of the panel, under the character, on two lines.
-            Place(_hint, new Vector2((panelX - panel.X * 0.5f) * 0.5f, view.Y - 64f * u), new Vector2(1000f, 80f) * u);
-            SetFontSize(_hint, Mathf.RoundToInt(23 * u));
-        }
+        // The hint: centered at the bottom (on the look step left of the panel, under the
+        // character, on two lines); it grows upwards from the bottom margin however big the icons.
+        int hintFont = Mathf.Max(1, Mathf.RoundToInt((look ? 24 : 28) * u));
+        LayoutHint(hintFont, look ? (panelX - panel.X * 0.5f) * 0.5f : view.X * 0.5f,
+            view.Y - 22f * u, (look ? 1000f : 1800f) * u);
 
         var card = new Vector2(500f, 640f) * u;
         for (int i = 0; i < 2; i++)
@@ -438,6 +454,30 @@ public partial class StartScreenView : CanvasLayer, IModuleView
         _start.FontSize = Mathf.RoundToInt(72 * u);
         Place(_back, new Vector2(120f * u, 90f * u), new Vector2(170f, 100f) * u);
         _back.FontSize = Mathf.RoundToInt(30 * u);
+    }
+
+    /// <summary>
+    /// Shows the Core's hint for the current step and device (rebuilt only when the step, the
+    /// device or the size changes), icons a bit taller than the words, its bottom at <paramref name="bottom"/>.
+    /// </summary>
+    private void LayoutHint(int fontSize, float centerX, float bottom, float width)
+    {
+        int icon = Mathf.RoundToInt(fontSize * 1.45f);
+        if (fontSize != _hintSize)
+        {
+            _hintSize = fontSize;
+            _hint.AddThemeFontSizeOverride("normal_font_size", fontSize);
+            _hint.AddThemeConstantOverride("outline_size", Mathf.Max(1, fontSize * 10 / 28));
+        }
+        var hintFor = (_screen!.Step, _screen.Device, icon);
+        if (hintFor != _hintFor)
+        {
+            _hintFor = hintFor;
+            _hint.Text = _screen.Hint(icon);   // the device changed (or the step, or the size): live
+        }
+        float height = Mathf.Max(_hint.GetContentHeight(), icon);
+        _hint.Size = new Vector2(width, height);
+        _hint.Position = new Vector2(centerX - width * 0.5f, bottom - height);
     }
 
     private static void SetFontSize(Label label, int size)

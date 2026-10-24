@@ -13,10 +13,11 @@ publishes the character and pet once when Start is pressed.
 
 - `Contract/` — `Fungtopia.StartScreen.Contract` (namespace `Fungtopia.StartScreen`), see below.
 - `Core/` — `Fungtopia.StartScreen.Core`: `StartScreenModule`, the module's one `IModule`, and
-  the `StartStep`, `TitleItem`, `LookRow` and `StartButton` enums. It references the Wardrobe
+  the `StartStep`, `TitleItem`, `LookRow` and `StartButton` enums, and `StartPrompts` (the control
+  hints). It references the Wardrobe
   Contract (`Fungtopia.Wardrobe`: `Looks`, `Catalog`, `SetLook`, `Equip`, `PreviewYaw`), the Save
   Contract (`Fungtopia.Save`: `SaveSlots`, `LoadGame`, `NewGameInSlot`; it brings the Map and
-  Player Contracts) and the Input Contract (`Fungtopia.Input.UiFocus`).
+  Player Contracts) and the Input Contract (`Fungtopia.Input.UiFocus`, `ActiveDevice`, `Prompts`).
 - `Godot/` — `Main.tscn` with `StartScreenView` (a `CanvasLayer` on layer 50, over the HUD),
   built in code from `MushroomLogo`, `ChoiceCard`, `SlotCard`, `CapButton`, `LookPanel` and
   `PreviewStage`;
@@ -35,7 +36,8 @@ Test it with `./test.sh StartScreen` from the repository root.
 | `GameStart` | StartScreen, once, on the tick "Start!" is pressed, or a save is chosen (Continue, Load) | `Character` (`GameStart.Girl` = 0, `GameStart.Boy` = 1), `StarterPet` (`GameStart.Cat` = 0, `GameStart.Dog` = 1). For a loaded save: that save's character (from `SaveSlots`) and the Cat, so the modules that wait for `GameStart` start; the Save module's `RestorePart`s (on its next tick) then set the real state. |
 | `StartScreenState` | StartScreen, once every tick | `Open`: true from the first tick until "Start!" is pressed or a save is loaded, false after. |
 
-It reads the Save module's `Fungtopia.Save.SaveSlots` (kept, the latest one) and sends:
+It reads the Save module's `Fungtopia.Save.SaveSlots` and the Input module's
+`Fungtopia.Input.ActiveDevice` (each kept, the latest one) and sends:
 
 | Message | When | What |
 | --- | --- | --- |
@@ -126,6 +128,22 @@ nothing. Once started, presses are ignored and
 `Open`, `Row`, `Yaw`, `Highlight`, `GameSlot`, `Slots`, `CanContinue`, `Skin`, `HairStyle`, `HairColor`, `EyeColor`, `Outfit`, `LookValue(row)`,
 `LookCount(row)`, `OutfitFits(outfit)`, `Ticks` and `StepTicks` (ticks since the step began). No allocations per tick.
 
+**Prompts.** `Device` is the latest `ActiveDevice`'s `Kind` (keyboard and mouse until one comes).
+`StartPrompts.Hint(step, device, iconSize)` (and `Hint(iconSize)` for the current step and
+device) is the control hint under a step as RichTextLabel BBCode: the buttons of that device only,
+as `Prompts.Rich` icons, each group followed by what it does; no button is named in words.
+
+| Step | Hint |
+| --- | --- |
+| `Title` | [Left][Right] Choose, [Confirm] OK |
+| menus, `Character`, `Pet` | [Left][Right] Choose, [Confirm] OK, [Back] Back |
+| `Look` | [TurnLeft][TurnRight] or [Look] Turn ("Drag to turn" on keyboard and mouse); then [Up][Down] Row, [Left][Right] Change, [Confirm] Next, [Back] Back |
+| `Ready` | [Confirm] Start!, [Back] Back |
+
+So on keyboard it shows the arrow, Enter and Esc keys (Q, E and the mouse on the look step), on
+Xbox (and other pads) the D-pad, A and B (LB, RB, right stick), on PlayStation the D-pad, Cross
+and Circle (L1, R1, right stick), on Nintendo the D-pad, B and A (L, R, right stick).
+
 ## View
 
 | Action | Mouse | Keyboard | Gamepad |
@@ -137,6 +155,11 @@ nothing. Once started, presses are ignored and
 | Highlight a menu item (title button, slot, save, Yes / No) | Hover it | Arrows | Left stick or D-pad |
 | OK, next, "Start!" | Click (a card, a menu item, "Next", "Start!") | Enter, or E (not on the look step, where E turns) | A |
 | Back | The "Back" button | Esc or Backspace | B |
+
+The hint at the bottom (`StartPrompts`, in a `RichTextLabel`) shows only the active device's
+buttons as icons and changes as soon as the player switches device; it is rebuilt only when the
+step, the device or the size changes. Its icons are 1.45 times the text size, which scales with the
+window, and it grows upwards from the bottom margin, so it stays tidy at any icon size.
 
 The title shows the logo with a row of cap buttons under it: Continue (green, only when there is
 a save; the line under the row says what it loads: slot, character, day, area), Load (greyed when
@@ -160,7 +183,8 @@ colors, pills for hair styles and outfits; the outfits that do not fit are left 
 highlighted row in gold with little arrows, each row's value with a gold ring, and the value under
 the mouse a little bigger; the green "Next" button is below it. The left half stays free for
 the character: pressing the mouse there (off the Back button) and dragging turns it, as do Q / E,
-LB / RB and the right stick, polled every frame on the look step only; the hint under it says so.
+LB / RB and the right stick, polled every frame on the look step only; the hint under it shows
+how, with the active device's icons.
 
 `PreviewStage` is a `SubViewport` with its own world: a model on a turntable, or Mushroom Town
 seen from a slowly drifting camera (rendered at 480x270 and drawn over the screen through a
@@ -187,6 +211,9 @@ variable `START_PREVIEW` picks it: `title` (default, no saves), `menu` (the titl
 Continue), `load`, `loadsave` (slot 1's two saves), `newslot`, `overwrite` (these five with made-up
 saves: slot 1 both saves, slot 2 damaged, slot 3 empty), `character`, `boy` (the Boy
 highlighted), `look` (the Girl's look step), `boylook` (the Boy's, with skin tone and hair color
-changed), `pet`, `dog` (the Dog highlighted) or `ready` (the Boy with the Dog). The preview has no
+changed), `pet`, `dog` (the Dog highlighted) or `ready` (the Boy with the Dog). `START_DEVICE`
+picks the device the hint is shown for: `keyboard` (default), `xbox`, `playstation`, `nintendo`
+or `generic` (the preview makes the Input module's icons loadable itself, as its Input view does
+in the game). The preview has no
 game behind it, so the left of the look step is empty there. The main
 scene (`./screenshot.sh`) shows the title over the game.

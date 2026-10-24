@@ -18,9 +18,10 @@ namespace Fungtopia.StartScreen;
 /// view's drag, keys and stick, like the wardrobe's), <see cref="GameStart"/> once on the tick "Start!" is pressed, and
 /// <see cref="NewGameInSlot"/> on the tick a new game's slot is picked, <see cref="LoadGame"/>
 /// then <see cref="GameStart"/> on the tick a save is chosen, <see cref="UiFocus"/> and
-/// <see cref="StartScreenState"/> every tick.
+/// <see cref="StartScreenState"/> every tick. It keeps the latest <see cref="ActiveDevice"/> so the
+/// view shows the hints (<see cref="StartPrompts"/>) for that device only.
 /// </summary>
-public sealed class StartScreenModule : IModule, IMessageHandler<SaveSlots>
+public sealed class StartScreenModule : IModule, IMessageHandler<SaveSlots>, IMessageHandler<ActiveDevice>
 {
     /// <summary>The <see cref="UiFocus.Owner"/> of the start screen ("STRT").</summary>
     public const int FocusOwner = 0x5354_5254;
@@ -121,6 +122,12 @@ public sealed class StartScreenModule : IModule, IMessageHandler<SaveSlots>
     /// <summary>Whether any slot has a readable save: Continue shows, Load can be chosen.</summary>
     public bool CanContinue => _slots.TryGetNewest(out _, out _);
 
+    /// <summary>The device the player used last (the latest <see cref="ActiveDevice"/>; keyboard and mouse until one comes).</summary>
+    public DeviceKind Device { get; private set; } = DeviceKind.KeyboardMouse;
+
+    /// <summary>The hint of the current step for <see cref="Device"/>, BBCode with icons <paramref name="iconSize"/> wide (see <see cref="StartPrompts.Hint"/>).</summary>
+    public string Hint(int iconSize) => StartPrompts.Hint(Step, Device, iconSize);
+
     /// <summary>Ticks so far.</summary>
     public long Ticks { get; private set; }
 
@@ -132,9 +139,12 @@ public sealed class StartScreenModule : IModule, IMessageHandler<SaveSlots>
         ArgumentNullException.ThrowIfNull(bus);
         _bus = bus;
         bus.Subscribe<SaveSlots>(this);
+        bus.Subscribe<ActiveDevice>(this);
     }
 
     public void Handle(in SaveSlots message) => _slots = message;
+
+    public void Handle(in ActiveDevice message) => Device = message.Kind;
 
     /// <summary>How many items the menu of <paramref name="step"/> has (0 when it is not a menu).</summary>
     public static int ItemCount(StartStep step) => step switch

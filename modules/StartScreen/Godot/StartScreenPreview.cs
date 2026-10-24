@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using Fungtopia.Input;
 using Fungtopia.Map;
 using Fungtopia.Player;
 using Fungtopia.Save;
@@ -14,7 +16,8 @@ namespace Fungtopia.StartScreen.View;
 /// Girl's look step), "boylook" (the Boy's, with a few looks changed), "pet", "dog" or "ready"
 /// (the Boy with the Dog); with made-up saves (slot 1 both saves, slot 2 damaged, slot 3 empty):
 /// "menu" (the title with Continue), "load" (the slots), "loadsave" (slot 1's two saves),
-/// "newslot" (New Game's slots) or "overwrite" (New Game in slot 1).
+/// "newslot" (New Game's slots) or "overwrite" (New Game in slot 1). START_DEVICE picks the
+/// device the hints are shown for: "keyboard" (default), "xbox", "playstation", "nintendo" or "generic".
 /// </summary>
 public partial class StartScreenPreview : Node
 {
@@ -27,11 +30,23 @@ public partial class StartScreenPreview : Node
     }
 
     private readonly StartScreenModule _screen = new();
+    private readonly List<Texture2D> _icons = new();
+    private DeviceKind _device;
     private long _tick;
 
     public override void _Ready()
     {
         _screen.Start(new QuietBus());
+        _device = OS.GetEnvironment("START_DEVICE").ToLowerInvariant() switch
+        {
+            "xbox" => DeviceKind.Xbox,
+            "playstation" => DeviceKind.PlayStation,
+            "nintendo" => DeviceKind.Nintendo,
+            "generic" => DeviceKind.Generic,
+            _ => DeviceKind.KeyboardMouse,
+        };
+        _screen.Handle(new ActiveDevice(_device));
+        LoadIcons();
         string step = OS.GetEnvironment("START_PREVIEW").ToLowerInvariant();
         StartButton[] presses = step switch
         {
@@ -76,5 +91,29 @@ public partial class StartScreenPreview : Node
             new SlotInfo(3, SaveInfo.Missing, SaveInfo.Missing));
     }
 
-    public override void _PhysicsProcess(double delta) => _screen.Tick(new TickContext(_tick++, delta));
+    public override void _PhysicsProcess(double delta)
+    {
+        _screen.Handle(new ActiveDevice(_device));
+        _screen.Tick(new TickContext(_tick++, delta));
+    }
+
+    /// <summary>
+    /// In the game the Input view makes the prompt icons loadable (rasterizing the SVGs Godot has not
+    /// imported); the preview runs without it, so it does the same for itself.
+    /// </summary>
+    private void LoadIcons()
+    {
+        foreach (var file in DirAccess.GetFilesAt(Prompts.GlyphDirectory))
+        {
+            string path = Prompts.GlyphDirectory + file;
+            if (!file.EndsWith(".svg") || ResourceLoader.Exists(path))
+                continue;
+            var image = new Image();
+            if (image.LoadSvgFromString(FileAccess.GetFileAsString(path), 2f) != Error.Ok)
+                continue;
+            var texture = ImageTexture.CreateFromImage(image);
+            texture.TakeOverPath(path);
+            _icons.Add(texture);
+        }
+    }
 }

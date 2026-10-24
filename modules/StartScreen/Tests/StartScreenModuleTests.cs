@@ -1305,4 +1305,150 @@ public class StartScreenModuleTests
     {
         Assert.Throws<InvalidOperationException>(() => new StartScreenModule().Tick(new TickContext(0, 1.0 / 60)));
     }
+
+    // ---- Prompts: the hint under each step shows only the active device's buttons, as icons ----
+
+    private static readonly StartStep[] ShownSteps =
+    {
+        StartStep.Title, StartStep.Load, StartStep.LoadSave, StartStep.NewSlot, StartStep.Overwrite,
+        StartStep.Character, StartStep.Look, StartStep.Pet, StartStep.Ready,
+    };
+
+    private static readonly DeviceKind[] Devices =
+    {
+        DeviceKind.KeyboardMouse, DeviceKind.Xbox, DeviceKind.PlayStation, DeviceKind.Nintendo, DeviceKind.Generic,
+    };
+
+    /// <summary>The icon file name prefixes a device's prompts may use.</summary>
+    private static string[] OwnPrefixes(DeviceKind device) => device switch
+    {
+        DeviceKind.KeyboardMouse => new[] { "key_", "mouse_" },
+        DeviceKind.PlayStation => new[] { "ps_" },
+        DeviceKind.Nintendo => new[] { "ns_" },
+        _ => new[] { "xbox_" },
+    };
+
+    /// <summary>The glyph names of every [img] in a hint, and the hint with them removed.</summary>
+    private static (List<string> Glyphs, string Words) SplitHint(string hint)
+    {
+        var glyphs = new List<string>();
+        var matches = System.Text.RegularExpressions.Regex.Matches(hint, @"\[img=(\d+)\](.*?)\[/img\]");
+        foreach (System.Text.RegularExpressions.Match match in matches)
+        {
+            string path = match.Groups[2].Value;
+            Assert.StartsWith(Prompts.GlyphDirectory, path);
+            Assert.EndsWith(".svg", path);
+            glyphs.Add(path.Substring(Prompts.GlyphDirectory.Length, path.Length - Prompts.GlyphDirectory.Length - 4));
+        }
+        return (glyphs, System.Text.RegularExpressions.Regex.Replace(hint, @"\[img=\d+\].*?\[/img\]", "#"));
+    }
+
+    [Theory]
+    [InlineData(DeviceKind.KeyboardMouse)]
+    [InlineData(DeviceKind.Xbox)]
+    [InlineData(DeviceKind.PlayStation)]
+    [InlineData(DeviceKind.Nintendo)]
+    [InlineData(DeviceKind.Generic)]
+    public void EveryHintUsesOnlyTheDevicesOwnIcons(DeviceKind device)
+    {
+        var own = OwnPrefixes(device);
+        foreach (var step in ShownSteps)
+        {
+            var (glyphs, _) = SplitHint(StartPrompts.Hint(step, device, 28));
+            Assert.NotEmpty(glyphs);
+            foreach (var glyph in glyphs)
+                Assert.True(Array.Exists(own, p => glyph.StartsWith(p, StringComparison.Ordinal)),
+                    $"{step} on {device} shows {glyph}");
+            // Confirm is on every step; Back on all but the title.
+            Assert.Contains(Prompts.Glyph(PromptAction.Confirm, device), glyphs);
+            if (step == StartStep.Title)
+                Assert.DoesNotContain(Prompts.Glyph(PromptAction.Back, device), glyphs);
+            else
+                Assert.Contains(Prompts.Glyph(PromptAction.Back, device), glyphs);
+        }
+    }
+
+    [Fact]
+    public void HintsShowTheRightIconsForEachDevice()
+    {
+        string Hint(StartStep step, DeviceKind device) => StartPrompts.Hint(step, device, 28);
+
+        Assert.Contains("[img=28]res://modules/Input/Glyphs/key_enter.svg[/img] OK", Hint(StartStep.Title, DeviceKind.KeyboardMouse));
+        Assert.Contains("[img=28]res://modules/Input/Glyphs/xbox_a.svg[/img] OK", Hint(StartStep.Title, DeviceKind.Xbox));
+        Assert.Contains("[img=28]res://modules/Input/Glyphs/ps_cross.svg[/img] OK", Hint(StartStep.Title, DeviceKind.PlayStation));
+        Assert.Contains("[img=28]res://modules/Input/Glyphs/ns_b.svg[/img] OK", Hint(StartStep.Title, DeviceKind.Nintendo));
+        Assert.Contains("xbox_b.svg[/img] Back", Hint(StartStep.Character, DeviceKind.Xbox));
+        Assert.Contains("ps_circle.svg[/img] Back", Hint(StartStep.Pet, DeviceKind.PlayStation));
+        Assert.Contains("key_esc.svg[/img] Back", Hint(StartStep.Load, DeviceKind.KeyboardMouse));
+        Assert.Contains("xbox_a.svg[/img] Start!", Hint(StartStep.Ready, DeviceKind.Generic));
+
+        // The look step: turning on its own line, then rows, values, next and back.
+        string keys = Hint(StartStep.Look, DeviceKind.KeyboardMouse);
+        Assert.Equal(new[] { "key_q", "key_e", "mouse_move", "key_up", "key_down", "key_left", "key_right", "key_enter", "key_esc" },
+            SplitHint(keys).Glyphs.ToArray());
+        string pad = Hint(StartStep.Look, DeviceKind.PlayStation);
+        Assert.Equal(new[] { "ps_l1", "ps_r1", "ps_rs", "ps_dpad_up", "ps_dpad_down", "ps_dpad_left", "ps_dpad_right", "ps_cross", "ps_circle" },
+            SplitHint(pad).Glyphs.ToArray());
+        Assert.Single(pad.Split('\n'), line => line.EndsWith(" Turn", StringComparison.Ordinal));
+        Assert.Equal(2, pad.Split('\n').Length);
+
+        Assert.Equal("", Hint(StartStep.Started, DeviceKind.Xbox));
+    }
+
+    [Theory]
+    [InlineData(DeviceKind.KeyboardMouse)]
+    [InlineData(DeviceKind.Xbox)]
+    [InlineData(DeviceKind.PlayStation)]
+    [InlineData(DeviceKind.Nintendo)]
+    public void HintsNameNoButtonInWords(DeviceKind device)
+    {
+        // No "E / X: OK" or "Esc/(B)" text: every button is an icon, the words only say what it does.
+        string[] buttonWords = { "Enter", "Esc", "(A)", "(B)", "LB", "RB", "Arrows", "D-pad", "stick", "Cross", "Circle", "/", ":" };
+        foreach (var step in ShownSteps)
+        {
+            var (_, words) = SplitHint(StartPrompts.Hint(step, device, 28));
+            foreach (var word in buttonWords)
+                Assert.DoesNotContain(word, words);
+            Assert.DoesNotContain("[", words);
+        }
+    }
+
+    [Fact]
+    public void IconsTakeTheSizeAsked()
+    {
+        foreach (var size in new[] { 16, 28, 64 })
+        {
+            string hint = StartPrompts.Hint(StartStep.Look, DeviceKind.Xbox, size);
+            var sizes = System.Text.RegularExpressions.Regex.Matches(hint, @"\[img=(\d+)\]");
+            Assert.NotEmpty(sizes);
+            foreach (System.Text.RegularExpressions.Match match in sizes)
+                Assert.Equal(size.ToString(System.Globalization.CultureInfo.InvariantCulture), match.Groups[1].Value);
+        }
+    }
+
+    [Fact]
+    public void TheHintFollowsTheActiveDeviceAndTheStep()
+    {
+        var bus = new FakeBus();
+        var screen = Started(bus);
+        Assert.Contains(typeof(ActiveDevice), bus.Subscribed);
+        Assert.Equal(DeviceKind.KeyboardMouse, screen.Device);
+        Assert.Equal(StartPrompts.Hint(StartStep.Title, DeviceKind.KeyboardMouse, 30), screen.Hint(30));
+
+        screen.Handle(new ActiveDevice(DeviceKind.PlayStation));
+        Assert.Equal(DeviceKind.PlayStation, screen.Device);
+        Assert.Equal(StartPrompts.Hint(StartStep.Title, DeviceKind.PlayStation, 30), screen.Hint(30));
+        Assert.DoesNotContain("key_", screen.Hint(30));
+
+        screen.Handle(new ActiveDevice(DeviceKind.Xbox));
+        screen.Press(StartButton.Confirm);   // New Game
+        screen.Tick(new TickContext(1, 1.0 / 60));
+        Assert.Equal(StartStep.NewSlot, screen.Step);
+        Assert.Equal(StartPrompts.Hint(StartStep.NewSlot, DeviceKind.Xbox, 30), screen.Hint(30));
+        Assert.DoesNotContain("ps_", screen.Hint(30));
+
+        screen.Handle(new ActiveDevice(DeviceKind.KeyboardMouse));
+        Assert.Contains("key_esc", screen.Hint(30));
+        Assert.DoesNotContain("xbox_", screen.Hint(30));
+    }
 }
