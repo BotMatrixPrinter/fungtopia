@@ -34,7 +34,7 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
     IMessageHandler<DialogueState>, IMessageHandler<DialogueAdvanced>, IMessageHandler<DialogueClosed>,
     IMessageHandler<WokeUp>, IMessageHandler<MonsterKilled>, IMessageHandler<CoinsEarned>,
     IMessageHandler<SpendResult>, IMessageHandler<OwnedPets>, IMessageHandler<WardrobeState>,
-    IMessageHandler<CollectSave>, IMessageHandler<RestorePart>, IMessageHandler<UiFocus>
+    IMessageHandler<CollectSave>, IMessageHandler<RestorePart>, IMessageHandler<UiFocus>, IMessageHandler<ActiveDevice>
 {
     public const int Jeremy = 0;
     public const int Millie = 1;
@@ -55,9 +55,15 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
     /// <summary>How fast an NPC turns, radians per second.</summary>
     public const float TurnSpeed = 5f;
 
-    public const string TalkPrompt = "E / X: Talk";
-    public const string FoodPrompt = "E / X: Food";
-    public const string BuyPrompt = "E / X: Buy the Mushroom Crow (3,000 M¢)";
+    /// <summary>What the prompt offers; it shows the Interact button's icon of the device in use, then the word.</summary>
+    public enum PromptKind { Talk, Food, Buy }
+
+    public const string TalkWord = "Talk";
+    public const string FoodWord = "Food";
+    public const string BuyWord = "Buy the Mushroom Crow (3,000 M¢)";
+
+    /// <summary>The prompt's icon size in pixels, next to its 26-pixel text.</summary>
+    public const int PromptIconSize = 36;
 
     public const int CrowPrice = 3000;
 
@@ -67,7 +73,7 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
     public const string WakeGreeting = "Good morning! You fainted in the forest, but you're all patched up now.";
     public const string CrowCongrats = "Congrats. It bites.";
     public const string CrowTooPoor = "Come back with 3,000 M¢.";
-    public const string CrowAskAgain = "Press E / X again to buy.";
+    public const string CrowAskAgain = "Ask me again to buy it.";
     public const string AbbyGreeting = "Ooh, you'd look so cute in something new!";
 
     /// <summary>How far behind <see cref="Places.FoodSpot"/> Pip stands (just behind the stall's counter, meters).</summary>
@@ -119,6 +125,20 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
     };
 
     /// <summary>The clothes Millie gives with her quests, by quest number (the first round only); empty for none.</summary>
+    // Every prompt for every device, built once so the per-tick prompt choice allocates nothing.
+    private static readonly string[,] s_prompts = BuildPrompts();
+
+    private static string[,] BuildPrompts()
+    {
+        string[] words = { TalkWord, FoodWord, BuyWord };
+        var devices = Enum.GetValues<DeviceKind>();
+        var prompts = new string[words.Length, devices.Length];
+        for (int k = 0; k < words.Length; k++)
+            foreach (var device in devices)
+                prompts[k, (int)device] = $"{Prompts.Rich(PromptAction.Interact, device, PromptIconSize)} {words[k]}";
+        return prompts;
+    }
+
     private static readonly string[] s_questItems = { "", "flower_clip", "", "mushroom_backpack" };
 
     private static readonly string[] s_healthTips =
@@ -216,8 +236,18 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
     /// <summary>The NPC whose prompt shows, or -1.</summary>
     public int PromptNpc { get; private set; } = -1;
 
-    /// <summary>The prompt's text: <see cref="TalkPrompt"/>, <see cref="FoodPrompt"/> for Pip, or <see cref="BuyPrompt"/> while Lucy offers the crow.</summary>
-    public string PromptText { get; private set; } = TalkPrompt;
+    /// <summary>What the prompt offers: <see cref="PromptKind.Food"/> for Pip, <see cref="PromptKind.Buy"/> while Lucy offers the crow, else <see cref="PromptKind.Talk"/>.</summary>
+    public PromptKind Prompt { get; private set; }
+
+    /// <summary>The device used last (the latest <see cref="ActiveDevice"/>): the prompt shows its button only.</summary>
+    public DeviceKind Device { get; private set; }
+
+    /// <summary>The prompt as RichTextLabel BBCode for <see cref="Device"/> (built once, at startup): see <see cref="PromptBbcode"/>.</summary>
+    public string PromptText => PromptBbcode(Prompt, Device);
+
+    /// <summary>The prompt <paramref name="kind"/> as RichTextLabel BBCode: <paramref name="device"/>'s Interact icon and the word ("[E key icon] Talk").</summary>
+    public static string PromptBbcode(PromptKind kind, DeviceKind device) =>
+        s_prompts[(int)kind, (uint)device < (uint)s_prompts.GetLength(1) ? (int)device : 0];
 
     /// <summary>The NPC in a conversation, or -1.</summary>
     public int Talking { get; private set; } = -1;
@@ -292,7 +322,10 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
         bus.Subscribe<CollectSave>(this);
         bus.Subscribe<RestorePart>(this);
         bus.Subscribe<UiFocus>(this);
+        bus.Subscribe<ActiveDevice>(this);
     }
+
+    public void Handle(in ActiveDevice message) => Device = message.Kind;
 
     public void Handle(in PlayerInput message)
     {
@@ -509,7 +542,7 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
         free = !_dialogueOpen && !_closedThisTick && Talking < 0 && _pendingRequest < 0 && !_wardrobeOpen
             && _focusCount == 0;
         PromptNpc = free ? near : -1;
-        PromptText = PromptNpc == Lucy && OfferingCrow ? BuyPrompt : PromptNpc == Pip ? FoodPrompt : TalkPrompt;
+        Prompt = PromptNpc == Lucy && OfferingCrow ? PromptKind.Buy : PromptNpc == Pip ? PromptKind.Food : PromptKind.Talk;
 
         _bus.Publish(new QuestState(QuestActive, _questTitle, QuestProgress, QuestGoal, QuestComplete));
 
@@ -656,7 +689,7 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
 
     private void EndTalk(bool ended = true)
     {
-        // Lucy's offer stands once its last line ("Press E / X again to buy.") is dismissed.
+        // Lucy's offer stands once its last line ("Ask me again to buy it.") is dismissed.
         if (ended && Talking == Lucy && _offerOnClose && !_ownsCrow)
             OfferingCrow = true;
         // Abby opens her shop once her greeting is dismissed.

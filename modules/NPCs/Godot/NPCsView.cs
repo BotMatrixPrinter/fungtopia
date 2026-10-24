@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Fungtopia.Shell;
 using Godot;
 
@@ -7,8 +8,8 @@ namespace Fungtopia.NPCs.View;
 /// <summary>
 /// Draws the NPCs module: Dr. Jeremy, Millie, Lucy, Abby and Pip (behind the food stall's counter,
 /// on its floor) at their spots, turned smoothly to the Core's facing, with their idle and talking
-/// animation (<see cref="NpcFigure"/>), and the small "E / X: Talk" (Pip: "E / X: Food") prompt
-/// floating over the one the player is near.
+/// animation (<see cref="NpcFigure"/>), and the small "[Interact icon] Talk" (Pip: "Food") prompt
+/// floating over the one the player is near, with the button of the device in use.
 /// </summary>
 public partial class NPCsView : Node3D, IModuleView
 {
@@ -20,7 +21,11 @@ public partial class NPCsView : Node3D, IModuleView
     private NPCsModule? _npcs;
     private readonly NpcFigure[] _figures = new NpcFigure[NPCsModule.Count];
     private PanelContainer _prompt = null!;
-    private Label _promptLabel = null!;
+    private RichTextLabel _promptLabel = null!;
+    private string? _shownText;
+
+    // The resource cache holds textures weakly; this keeps the registered icons alive.
+    private static readonly List<Texture2D> s_kept = new();
 
     public void Bind(IModule module) => _npcs = (NPCsModule)module;
 
@@ -63,8 +68,12 @@ public partial class NPCsView : Node3D, IModuleView
         _prompt.Visible = false;
         if (npc < 0)
             return;
-        if (_promptLabel.Text != text)
-            _promptLabel.Text = text;
+        // Core builds each prompt once, so a changed prompt or device is a different string.
+        if (!ReferenceEquals(_shownText, text))
+        {
+            _shownText = text;
+            SetPrompt(_promptLabel, text);
+        }
         var camera = GetViewport().GetCamera3D();
         var size = _prompt.GetCombinedMinimumSize();
         var screen = GetViewport().GetVisibleRect().Size;
@@ -80,7 +89,7 @@ public partial class NPCsView : Node3D, IModuleView
     }
 
     /// <summary>A cream rounded pill with an ink border, like the signposts' prompt.</summary>
-    public static (PanelContainer Panel, Label Label) BuildPrompt()
+    public static (PanelContainer Panel, RichTextLabel Label) BuildPrompt()
     {
         var box = new StyleBoxFlat
         {
@@ -92,11 +101,47 @@ public partial class NPCsView : Node3D, IModuleView
         box.SetCornerRadiusAll(22);
         var panel = new PanelContainer { Visible = false, MouseFilter = Control.MouseFilterEnum.Ignore };
         panel.AddThemeStyleboxOverride("panel", box);
-        var label = new Label { Text = NPCsModule.TalkPrompt };
-        label.AddThemeFontSizeOverride("font_size", 26);
-        label.AddThemeColorOverride("font_color", Ink);
-        label.AddThemeFontOverride("font", new FontVariation { BaseFont = ThemeDB.FallbackFont, VariationEmbolden = 0.7f });
+        // One line sized to its text and icon: the pill grows with the icon, whatever its size.
+        var label = new RichTextLabel
+        {
+            BbcodeEnabled = true,
+            FitContent = true,
+            AutowrapMode = TextServer.AutowrapMode.Off,
+            ScrollActive = false,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
+        label.AddThemeFontSizeOverride("normal_font_size", 26);
+        label.AddThemeColorOverride("default_color", Ink);
+        label.AddThemeFontOverride("normal_font", new FontVariation { BaseFont = ThemeDB.FallbackFont, VariationEmbolden = 0.7f });
         panel.AddChild(label);
         return (panel, label);
+    }
+
+    /// <summary>Shows the prompt's BBCode, first making each icon in it loadable (also without the Input module's view, as in the preview).</summary>
+    public static void SetPrompt(RichTextLabel label, string bbcode)
+    {
+        for (int at = bbcode.IndexOf("[img=", StringComparison.Ordinal); at >= 0; at = bbcode.IndexOf("[img=", at + 1, StringComparison.Ordinal))
+        {
+            int start = bbcode.IndexOf(']', at) + 1, end = bbcode.IndexOf("[/img]", start, StringComparison.Ordinal);
+            if (start > 0 && end > start)
+                RegisterIcon(bbcode[start..end]);
+        }
+        label.Text = bbcode;
+    }
+
+    /// <summary>Makes an SVG icon loadable by its res:// path when Godot has not imported it (a fresh checkout).</summary>
+    private static void RegisterIcon(string path)
+    {
+        if (ResourceLoader.HasCached(path) || ResourceLoader.Exists(path))
+            return;
+        var image = new Image();
+        if (image.LoadSvgFromString(FileAccess.GetFileAsString(path), 2f) != Error.Ok)
+        {
+            GD.PushWarning($"Fungtopia: NPCs: cannot read the icon {path}.");
+            return;
+        }
+        var texture = ImageTexture.CreateFromImage(image);
+        texture.TakeOverPath(path);
+        s_kept.Add(texture);
     }
 }

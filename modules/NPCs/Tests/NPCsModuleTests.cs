@@ -199,7 +199,8 @@ public class NPCsModuleTests
         rig.Position = Near(npc, 2.4f);
         rig.Tick();
         Assert.Equal(npc, rig.Npcs.PromptNpc);
-        Assert.Equal(npc == Pip ? "E / X: Food" : "E / X: Talk", rig.Npcs.PromptText);
+        Assert.Equal(npc == Pip ? NPCsModule.PromptKind.Food : NPCsModule.PromptKind.Talk, rig.Npcs.Prompt);
+        Assert.Equal($"[img=36]res://modules/Input/Glyphs/key_e.svg[/img] {(npc == Pip ? "Food" : "Talk")}", rig.Npcs.PromptText);
 
         rig.Alive = false;
         rig.Tick();
@@ -434,7 +435,7 @@ public class NPCsModuleTests
         var rig = new Rig(Near(Abby));
         rig.Tick();
         Assert.Equal(Abby, rig.Npcs.PromptNpc);
-        Assert.Equal("E / X: Talk", rig.Npcs.PromptText);
+        Assert.Equal(NPCsModule.PromptKind.Talk, rig.Npcs.Prompt);
 
         rig.Tick(interact: true);
         var line = Assert.Single(rig.Lines);
@@ -488,7 +489,7 @@ public class NPCsModuleTests
         var rig = new Rig(Places.FoodSpot.Position);
         rig.Tick();
         Assert.Equal(Pip, rig.Npcs.PromptNpc);
-        Assert.Equal(NPCsModule.FoodPrompt, rig.Npcs.PromptText);
+        Assert.Equal(NPCsModule.PromptKind.Food, rig.Npcs.Prompt);
 
         // Off to the counter's side, 2.4 m from the spot in front of it: still showing; 2.6 m: gone.
         var side = new Vector3(Places.FoodSpot.Facing.Z, 0f, -Places.FoodSpot.Facing.X);
@@ -602,6 +603,86 @@ public class NPCsModuleTests
         Assert.Empty(rig.Bus.All<OpenFoodMenu>());
     }
 
+    // Every icon family's file name prefix; Generic pads use the Xbox icons.
+    private static readonly string[] IconFamilies = { "key_", "mouse_", "xbox_", "ps_", "ns_" };
+
+    private static string OwnIconFamily(DeviceKind device) => device switch
+    {
+        DeviceKind.KeyboardMouse => "key_",
+        DeviceKind.PlayStation => "ps_",
+        DeviceKind.Nintendo => "ns_",
+        _ => "xbox_",
+    };
+
+    [Theory]
+    [InlineData(DeviceKind.KeyboardMouse, "key_e")]
+    [InlineData(DeviceKind.Xbox, "xbox_x")]
+    [InlineData(DeviceKind.PlayStation, "ps_square")]
+    [InlineData(DeviceKind.Nintendo, "ns_y")]
+    [InlineData(DeviceKind.Generic, "xbox_x")]
+    public void EveryPromptShowsOnlyTheActiveDevicesInteractIcon(DeviceKind device, string glyph)
+    {
+        string icon = $"[img={NPCsModule.PromptIconSize}]res://modules/Input/Glyphs/{glyph}.svg[/img]";
+        Assert.Equal(icon, Prompts.Rich(PromptAction.Interact, device, NPCsModule.PromptIconSize));
+        foreach (var (kind, word) in new[]
+        {
+            (NPCsModule.PromptKind.Talk, "Talk"), (NPCsModule.PromptKind.Food, "Food"),
+            (NPCsModule.PromptKind.Buy, "Buy the Mushroom Crow (3,000 M¢)"),
+        })
+        {
+            string text = NPCsModule.PromptBbcode(kind, device);
+            Assert.Equal($"{icon} {word}", text);
+            // Exactly one icon, of this device's family; no other device's icons and no key names as text.
+            Assert.Single(text.Split("[img=")[1..]);
+            foreach (string family in IconFamilies)
+                if (family != OwnIconFamily(device))
+                    Assert.DoesNotContain("/" + family, text);
+            Assert.DoesNotContain(" / ", text);
+            Assert.DoesNotContain("E:", text);
+            Assert.DoesNotContain("X:", text);
+        }
+    }
+
+    [Fact]
+    public void ThePromptFollowsTheActiveDeviceLive()
+    {
+        var rig = new Rig(Near(Millie));
+        Assert.Contains(typeof(ActiveDevice), rig.Bus.Subscribed);
+        rig.Tick();
+        Assert.Equal(DeviceKind.KeyboardMouse, rig.Npcs.Device);
+        Assert.Contains("/key_e.svg", rig.Npcs.PromptText);
+
+        rig.Npcs.Handle(new ActiveDevice(DeviceKind.Xbox));
+        rig.Tick();
+        Assert.Equal("[img=36]res://modules/Input/Glyphs/xbox_x.svg[/img] Talk", rig.Npcs.PromptText);
+
+        rig.Npcs.Handle(new ActiveDevice(DeviceKind.PlayStation));
+        rig.Tick();
+        Assert.Equal("[img=36]res://modules/Input/Glyphs/ps_square.svg[/img] Talk", rig.Npcs.PromptText);
+
+        // At Pip's counter with the PlayStation pad: Square and "Food".
+        rig.Position = Places.FoodSpot.Position;
+        rig.Tick();
+        Assert.Equal("[img=36]res://modules/Input/Glyphs/ps_square.svg[/img] Food", rig.Npcs.PromptText);
+
+        rig.Npcs.Handle(new ActiveDevice(DeviceKind.KeyboardMouse));
+        rig.Tick();
+        Assert.Equal("[img=36]res://modules/Input/Glyphs/key_e.svg[/img] Food", rig.Npcs.PromptText);
+        // Built once per prompt and device: the view redraws only when the string changes.
+        Assert.Same(rig.Npcs.PromptText, NPCsModule.PromptBbcode(NPCsModule.PromptKind.Food, DeviceKind.KeyboardMouse));
+    }
+
+    [Fact]
+    public void NoLineNamesAButton()
+    {
+        // The speech bubbles are plain text: lines never name a device's buttons (the prompt shows the icon).
+        var rig = new Rig(Near(Lucy));
+        HearTheOffer(rig);
+        foreach (var line in rig.Lines)
+            foreach (string button in new[] { "E / X", "Press", "Square", "Cross" })
+                Assert.DoesNotContain(button, line.Text);
+    }
+
     [Fact]
     public void QuestTableRepeatsWithBiggerNumbers()
     {
@@ -631,11 +712,12 @@ public class NPCsModuleTests
         Assert.Equal(Voices.Deadpan, rig.Shown.Voice);
         var texts = rig.ReadAll();
         Assert.Contains(texts, t => t.Contains("Mushroom Crow") && t.Contains("3,000 M¢"));
-        Assert.Equal("Press E / X again to buy.", texts[^1]);
+        Assert.Equal("Ask me again to buy it.", texts[^1]);
         rig.Tick();
         Assert.True(rig.Npcs.OfferingCrow);
         Assert.Equal(Lucy, rig.Npcs.PromptNpc);
-        Assert.Equal(NPCsModule.BuyPrompt, rig.Npcs.PromptText);
+        Assert.Equal(NPCsModule.PromptKind.Buy, rig.Npcs.Prompt);
+        Assert.Equal("[img=36]res://modules/Input/Glyphs/key_e.svg[/img] Buy the Mushroom Crow (3,000 M¢)", rig.Npcs.PromptText);
         Assert.Equal(spends, rig.Bus.All<SpendCoins>().Count);
     }
 

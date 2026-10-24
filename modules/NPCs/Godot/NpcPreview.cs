@@ -1,4 +1,5 @@
 using System;
+using Fungtopia.Input;
 using Fungtopia.Map;
 using Fungtopia.Player;
 using Fungtopia.Shell;
@@ -8,11 +9,11 @@ namespace Fungtopia.NPCs.View;
 
 /// <summary>
 /// A stand-alone scene for screenshots: <c>./screenshot.sh modules/NPCs/Godot/Preview.tscn</c>.
-/// Dr. Jeremy, Millie, Lucy, Abby and Pip side by side on a patch of grass, Millie with her "E / X: Talk"
-/// prompt. <c>NPC_PREVIEW=jeremy</c>, <c>millie</c>, <c>lucy</c>, <c>abby</c> or <c>pip</c> shows only that
+/// Dr. Jeremy, Millie, Lucy, Abby and Pip side by side on a patch of grass, Millie with her "[Interact icon] Talk"
+/// prompt (<c>NPC_DEVICE=xbox</c>, <c>playstation</c>, <c>nintendo</c> or <c>generic</c> shows that pad's button, else the keyboard's). <c>NPC_PREVIEW=jeremy</c>, <c>millie</c>, <c>lucy</c>, <c>abby</c> or <c>pip</c> shows only that
 /// one, closer. <c>NPC_PREVIEW=stall</c> shows Pip behind the Mushroom Munchies counter in Mushroom Town
 /// (the Map and Town modules' scenes, loaded read-only), seen by a player standing at
-/// <see cref="Places.FoodSpot"/>, with the "E / X: Food" prompt.
+/// <see cref="Places.FoodSpot"/>, with the "[Interact icon] Food" prompt.
 /// </summary>
 public partial class NpcPreview : Node3D
 {
@@ -36,11 +37,17 @@ public partial class NpcPreview : Node3D
             "jeremy" => NPCsModule.Jeremy, "millie" => NPCsModule.Millie, "lucy" => NPCsModule.Lucy,
             "abby" => NPCsModule.Abby, "pip" => NPCsModule.Pip, _ => -1,
         };
+        var device = (OS.GetEnvironment("NPC_DEVICE") ?? "").ToLowerInvariant() switch
+        {
+            "xbox" => DeviceKind.Xbox, "playstation" or "ps" => DeviceKind.PlayStation,
+            "nintendo" => DeviceKind.Nintendo, "generic" => DeviceKind.Generic,
+            _ => DeviceKind.KeyboardMouse,
+        };
         _camera = new Camera3D { Fov = 40f };
         AddChild(_camera);
         if (only == "stall")
         {
-            BuildStall();
+            BuildStall(device);
             _camera.Current = true;
             return;
         }
@@ -68,14 +75,15 @@ public partial class NpcPreview : Node3D
             _camera.LookAtFromPosition(new Vector3(0f, 1.5f, 7.6f), new Vector3(0f, 0.85f, 0f));
             var layer = new CanvasLayer { Layer = 11 };
             AddChild(layer);
-            (_prompt, _) = NPCsView.BuildPrompt();
+            (_prompt, var label) = NPCsView.BuildPrompt();
+            NPCsView.SetPrompt(label, NPCsModule.PromptBbcode(NPCsModule.PromptKind.Talk, device));
             layer.AddChild(_prompt);
         }
         _camera.Current = true;
     }
 
     /// <summary>The town around the food stall, the NPCs' own view bound to a Core whose player stands at the counter.</summary>
-    private void BuildStall()
+    private void BuildStall(DeviceKind device)
     {
         BuildLight();
         foreach (var path in new[] { "res://modules/Map/Godot/Main.tscn", "res://modules/Town/Godot/Main.tscn" })
@@ -83,6 +91,7 @@ public partial class NpcPreview : Node3D
                 AddChild(scene.Instantiate());
         _npcs = new NPCsModule();
         _npcs.Start(new SilentBus());
+        _npcs.Handle(new ActiveDevice(device));
         var view = (NPCsView)GD.Load<PackedScene>("res://modules/NPCs/Godot/Main.tscn").Instantiate();
         view.Bind(_npcs);
         AddChild(view);

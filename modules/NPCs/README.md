@@ -4,7 +4,8 @@ The townsfolk from Tony's drawing: **Dr. Jeremy** at his clinic, your best frien
 door, **Lucy**, the Pet Store cashier, **Abby**, the clothing shopkeeper, and **Pip**, the cook at
 the Mushroom Munchies food stall. Each stands at their spot, turns to face you when you come near
 (Pip keeps stirring the soup pot and waves instead), and idles a little. Within 2.5 m a small
-"E / X: Talk" prompt ("E / X: Food" at Pip's counter) floats over them, and Interact starts a
+"[Interact icon] Talk" prompt ("[Interact icon] Food" at Pip's counter) floats over them, showing only
+the button of the device in use (the E key, Xbox X, PlayStation Square...), and Interact starts a
 conversation in speech bubbles (the Dialogue module shows them).
 
 - `Contract/` — `Fungtopia.NPCs.Contract` (namespace `Fungtopia.NPCs`):
@@ -18,7 +19,8 @@ conversation in speech bubbles (the Dialogue module shows them).
 - `Models/` — `npcs.py`, the Blender script that builds and exports `jeremy.glb`, `millie.glb`,
   `lucy.glb`, `abby.glb` and `pip.glb` next to it.
 - `Tests/` — `NPCsModuleTests.cs`: xUnit tests of `NPCsModule` with a fake `IMessageBus`, a fake
-  Dialogue, player and wallet: the prompt, facing, conversation flow, Jeremy's wake-up greeting,
+  Dialogue, player and wallet: the prompt (each device kind's prompts show only its own Interact
+  icon, and follow `ActiveDevice` live; no line names a button), facing, conversation flow, Jeremy's wake-up greeting,
   Millie's quests (progress, completion, payment, clothing rewards, the next ones), buying the
   crow (success, not enough coins, walking away, already owned), Abby opening her shop, Pip (where
   they stand, the prompt's range at the counter, greeting then the food menu, the greetings taking
@@ -33,7 +35,7 @@ Test it with `./test.sh NPCs` from the repository root.
 (`Position`, `Alive`), `Fungtopia.Dialogue` (`DialogueState`, `DialogueAdvanced`,
 `DialogueClosed`), `Fungtopia.DayNight.WokeUp`, `Fungtopia.Monsters.MonsterKilled`,
 `Fungtopia.Wallet` (`CoinsEarned`, `SpendResult`), `Fungtopia.Pet.OwnedPets` and
-`Fungtopia.Wardrobe.WardrobeState`, `Fungtopia.Input.UiFocus`, `Fungtopia.Save` `CollectSave` and
+`Fungtopia.Wardrobe.WardrobeState`, `Fungtopia.Input.UiFocus` and `ActiveDevice`, `Fungtopia.Save` `CollectSave` and
 `RestorePart`, and the spots from `Fungtopia.Map.Places`. It publishes `SayLine`, `QuestState`
 (every tick), `GrantCoins`, `SpendCoins`, `AdoptPet`, `Fungtopia.Wardrobe` `GrantItem` and
 `OpenShop`, `Fungtopia.Food.OpenFoodMenu`, and `Fungtopia.Save.SavePart`.
@@ -55,8 +57,11 @@ Each tick:
 - **Prompt.** `PromptNpc` is the NPC whose talk spot (`TalkSpots`: its own spot, but
   `Places.FoodSpot` for Pip) is nearest within `PromptRadius` (2.5 m, horizontal) while the
   player is alive and no speech bubble, wardrobe or shop screen (`WardrobeState.Open`) or menu
-  holding `UiFocus` (the food menu, the start screen...) is open, else -1; `PromptText` is
-  "E / X: Talk", "E / X: Food" for Pip (`FoodPrompt`), or the buy prompt while Lucy offers the crow.
+  holding `UiFocus` (the food menu, the start screen...) is open, else -1; `Prompt` is
+  `PromptKind.Talk`, `Food` for Pip, or `Buy` while Lucy offers the crow. `Device` is the latest
+  `ActiveDevice`'s `Kind`, and `PromptText` the prompt as RichTextLabel BBCode for it:
+  `Prompts.Rich(Interact, Device, PromptIconSize)` (36 px) and "Talk", "Food" or "Buy the Mushroom Crow
+  (3,000 M¢)" (`PromptBbcode(kind, device)`; every prompt for every device is built once at startup).
 - **Talking.** `Interact` with the prompt showing starts that NPC's conversation: its lines go out
   one `SayLine` at a time, the next on its `DialogueAdvanced`, the last one with `Last` set. The
   press that dismisses a last line (`DialogueClosed` that tick) never starts a new talk. `Talking`
@@ -76,7 +81,8 @@ Each tick:
   quest also gives the Flower Clip and the fourth the Mushroom Backpack (`GrantItem`, "Millie's
   quest"; `QuestItem(n)`, first round only), and she says so.
 - **Lucy.** If the player does not own the Mushroom Crow (from `OwnedPets`), talking to her
-  offers it for 3,000 M¢, ending with "Press E / X again to buy." Once that line is dismissed she
+  offers it for 3,000 M¢, ending with "Ask me again to buy it." (the speech bubbles are plain text, so lines name no
+  buttons; the buy prompt then shows the icon). Once that line is dismissed she
   is `OfferingCrow`: Interact near her says yes and publishes `SpendCoins` (request ids from
   71000 up, "Mushroom Crow"); walking out of the prompt radius says no. On its `SpendResult`:
   `Ok` publishes `AdoptPet(Crow)` and she says "Congrats. It bites."; otherwise "Come back with
@@ -106,7 +112,10 @@ No allocations per tick (only the occasional dialogue lines are built when a tal
 `NPCsView` puts an `NpcFigure` at each spot (Pip on the stall's floor, `StallFloor` above the
 ground), eases each one's yaw toward the Core's `Yaw`, and
 shows the prompt (a cream rounded pill with an ink border, like the signposts', canvas layer 11)
-over `PromptNpc`'s head. `NpcFigure` loads its `.glb` at run time from the file's bytes (so a fresh
+over `PromptNpc`'s head: a one-line `RichTextLabel` sized to its content (`FitContent`), so the pill
+grows with the icon, redrawn when `PromptText` changes (another prompt or device). `SetPrompt` makes
+the icons loadable when Godot has not imported them (as the Input module's view does), so the preview
+shows them too. `NpcFigure` loads its `.glb` at run time from the file's bytes (so a fresh
 checkout runs without an editor import), replaces each material with the toon shader plus an ink
 outline, and animates the parts: breathing, a gentle sway and head tilt, arm swing, and while
 talking a little bounce, nodding and a waving right arm. Jeremy is drawn 1.12 times as big (a
@@ -115,9 +124,10 @@ pot on the counter (the right arm up over its rim, circling, the spoon tipped in
 the player comes near (`Noticing`) waves with the left hand for 2.5 s, and while talking.
 
 Screenshots: `./screenshot.sh modules/NPCs/Godot/Preview.tscn` shows the five with Millie's
-prompt; `NPC_PREVIEW=jeremy`, `millie`, `lucy`, `abby` or `pip` shows only that one, closer.
+prompt (`NPC_DEVICE=xbox`, `playstation`, `nintendo` or `generic` for that pad's button, else the
+keyboard's); `NPC_PREVIEW=jeremy`, `millie`, `lucy`, `abby` or `pip` shows only that one, closer.
 `NPC_PREVIEW=stall` (best with `SCREENSHOT_FRAMES=70`, mid-wave) shows Pip behind the Mushroom
-Munchies counter (the Map and Town modules' scenes, loaded read-only) with the "E / X: Food" prompt,
+Munchies counter (the Map and Town modules' scenes, loaded read-only) with the "[Interact icon] Food" prompt,
 as a player walking up to `Places.FoodSpot` sees it.
 
 ## Models
