@@ -89,7 +89,7 @@ public partial class MonstersView : Node3D, IModuleView
             var v = m.Velocity;
             float speed = MathF.Sqrt(v.X * v.X + v.Z * v.Z);
             model.Animate((float)delta, speed, m.HurtSeconds, m.Poisoned, m.SinceBite, m.Alive, m.DeadSeconds,
-                m.MaxHealth > 0 ? (float)m.Health / m.MaxHealth : 1f);
+                m.MaxHealth > 0 ? (float)m.Health / m.MaxHealth : 1f, m.Action, m.ActionSeconds);
         }
     }
 

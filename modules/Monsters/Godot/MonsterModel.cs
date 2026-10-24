@@ -5,11 +5,12 @@ using Godot;
 namespace Fungtopia.Monsters.View;
 
 /// <summary>
-/// One monster (caterpillar.glb or ant.glb from modules/Monsters/Models), drawn toon-shaded with
-/// ink outlines and animated procedurally: the caterpillar crawls in a wave down its segments,
-/// the ant scurries on six legs; both lunge when they bite, flash white when hit, turn green with
-/// rising bubbles while poisoned, pop into a puff of spores when defeated, and show a small health
-/// bar above them while hurt. Faces -Z at zero rotation.
+/// One monster (caterpillar.glb, ant.glb, tarantula.glb or ladybug.glb from modules/Monsters/Models),
+/// drawn toon-shaded with ink outlines and animated procedurally: the caterpillar crawls in a wave
+/// down its segments, the ant scurries on six legs, the tarantula skitters on eight, crouches and
+/// leaps, the ladybug waddles, tucks in its head and legs and rolls; all lunge when they bite,
+/// flash white when hit, turn green with rising bubbles while poisoned, pop into a puff of spores
+/// when defeated, and show a small health bar above them while hurt. Faces -Z at zero rotation.
 /// </summary>
 public partial class MonsterModel : Node3D
 {
@@ -27,9 +28,9 @@ public partial class MonsterModel : Node3D
 
     private readonly Node3D _rig = new() { Name = "Rig" };
     private readonly List<GeometryInstance3D> _meshes = new();
-    private Part _head, _thorax, _abdomen;
+    private Part _head, _thorax, _abdomen, _body, _shell;
     private readonly Part[] _segments = new Part[4];
-    private readonly Part[] _legs = new Part[6]; // L1 R1 L2 R2 L3 R3
+    private readonly Part[] _legs = new Part[8]; // L1 R1 L2 R2 L3 R3 (L4 R4)
 
     private CpuParticles3D _bubbles = null!;
     private CpuParticles3D _spores = null!;
@@ -46,11 +47,21 @@ public partial class MonsterModel : Node3D
     private float _shownFlash = -1f;
     private float _shownPoison = -1f;
     private bool _poofed;
+    private float _roll;
 
     public MonsterKind Kind { get; private set; }
 
     /// <summary>Height of the health bar above the feet, meters.</summary>
-    private float BarHeight => Kind == MonsterKind.Ant ? 1.2f : 1.15f;
+    private float BarHeight => Kind switch
+    {
+        MonsterKind.Ant => 1.2f,
+        MonsterKind.Caterpillar => 1.15f,
+        MonsterKind.Tarantula => 1.45f,
+        _ => 1.35f,
+    };
+
+    /// <summary>The kind's chase speed, where its walk cycle is at full stride.</summary>
+    private float FullStride => MonstersModule.StatsOf(Kind).ChaseSpeed;
 
     /// <summary>A part of the model and its rest transform, so animation always starts from rest.</summary>
     private struct Part
@@ -91,9 +102,11 @@ public partial class MonsterModel : Node3D
             _head = new Part(Find(scene, "Head"));
             _thorax = new Part(Find(scene, "Thorax"));
             _abdomen = new Part(Find(scene, "Abdomen"));
+            _body = new Part(Find(scene, "Body"));
+            _shell = new Part(Find(scene, "Shell"));
             for (int i = 0; i < _segments.Length; i++)
                 _segments[i] = new Part(Find(scene, $"Seg{i + 1}"));
-            for (int i = 0; i < 3; i++)
+            for (int i = 0; i < 4; i++)
             {
                 _legs[2 * i] = new Part(Find(scene, $"LegL{i + 1}"));
                 _legs[2 * i + 1] = new Part(Find(scene, $"LegR{i + 1}"));
@@ -112,7 +125,7 @@ public partial class MonsterModel : Node3D
     {
         if (!s_models.TryGetValue(kind, out var parsed))
         {
-            string path = Models + (kind == MonsterKind.Ant ? "ant.glb" : "caterpillar.glb");
+            string path = Models + kind.ToString().ToLowerInvariant() + ".glb";
             byte[] bytes = FileAccess.GetFileAsBytes(path);
             var document = new GltfDocument();
             var state = new GltfState();
@@ -283,6 +296,7 @@ public partial class MonsterModel : Node3D
         _puff.Visible = false;
         _spores.Emitting = false;
         _rig.Visible = true;
+        _rig.Transform = Transform3D.Identity;
     }
 
     /// <summary>Advances the animation by <paramref name="delta"/> seconds of frame time.</summary>
@@ -293,23 +307,39 @@ public partial class MonsterModel : Node3D
     /// <param name="alive">False: the poof, then nothing.</param>
     /// <param name="deadSeconds">Seconds since the defeat.</param>
     /// <param name="health">Health left, 0..1; the bar shows below 1.</param>
+    /// <param name="action">A hard monster's attack under way (crouch, leap, curl, charge).</param>
+    /// <param name="actionSeconds">Seconds since <paramref name="action"/> began.</param>
     public void Animate(float delta, float speed, float hurtSeconds, bool poisoned, float sinceBite, bool alive,
-        float deadSeconds, float health)
+        float deadSeconds, float health, MonsterAction action = MonsterAction.None, float actionSeconds = 0f)
     {
         _time += delta;
         bool ant = Kind == MonsterKind.Ant;
-        float moveTarget = alive ? Math.Clamp(speed / (ant ? 2.8f : 1.8f), 0f, 1f) : 0f;
+        bool rolling = action == MonsterAction.Charge;
+        float moveTarget = alive && !rolling ? Math.Clamp(speed / FullStride, 0f, 1f) : 0f;
         _moveAmount = Mathf.MoveToward(_moveAmount, moveTarget, delta * 5f);
         // Crawling and scurrying keep pace with the ground; a slow idle wiggle while standing.
-        _phase = (_phase + delta * (speed * (ant ? 9f : 5.5f) + 1.5f)) % Mathf.Tau;
+        float stride = Kind switch { MonsterKind.Ant => 9f, MonsterKind.Tarantula => 7f, MonsterKind.Ladybug => 10f, _ => 5.5f };
+        _phase = (_phase + delta * (speed * stride + 1.5f)) % Mathf.Tau;
         _poison = Mathf.MoveToward(_poison, poisoned && alive ? 1f : 0f, delta * 3f);
         float flash = alive ? Math.Clamp(1f - hurtSeconds / 0.25f, 0f, 1f) : 0f;
         float bite = sinceBite < 0.35f ? MathF.Sin(sinceBite / 0.35f * Mathf.Pi) : 0f;
 
-        if (ant)
-            Scurry(bite);
-        else
-            Crawl(bite);
+        _rig.Transform = Transform3D.Identity;
+        switch (Kind)
+        {
+            case MonsterKind.Ant:
+                Scurry(bite);
+                break;
+            case MonsterKind.Tarantula:
+                Skitter(bite, alive ? action : MonsterAction.None, actionSeconds);
+                break;
+            case MonsterKind.Ladybug:
+                Waddle(bite, alive ? action : MonsterAction.None, actionSeconds, speed, delta);
+                break;
+            default:
+                Crawl(bite);
+                break;
+        }
 
         // Defeat: a little hop and squash, then gone in a puff of spores.
         if (!alive)
@@ -331,7 +361,6 @@ public partial class MonsterModel : Node3D
         }
         else
         {
-            _rig.Scale = Vector3.One;
             _rig.Visible = true;
             _puff.Visible = false;
         }
@@ -404,5 +433,93 @@ public partial class MonsterModel : Node3D
         float nod = MathF.Sin(_phase * 2f) * 0.05f * amount + MathF.Sin(_time * 2.1f) * 0.04f;
         _head.Pose(new Vector3(nod - 0.3f * bite, 0f, MathF.Sin(_time * 1.3f) * 0.05f),
             new Vector3(0f, bob, -0.15f * bite));
+    }
+
+    /// <summary>
+    /// The tarantula: two alternating sets of four legs, a bouncing furry body; it sinks down and
+    /// draws its legs in while it crouches, then flies up in an arc with its legs reaching forward.
+    /// </summary>
+    private void Skitter(float bite, MonsterAction action, float actionSeconds)
+    {
+        float amount = 0.15f + 0.85f * _moveAmount;
+        float crouch = action == MonsterAction.Crouch ? Math.Clamp(actionSeconds / (MonstersModule.PounceWindup * 0.6f), 0f, 1f) : 0f;
+        float leap = action == MonsterAction.Leap ? Math.Clamp(actionSeconds / MonstersModule.PounceSeconds, 0f, 1f) : -1f;
+        for (int i = 0; i < 8; i++)
+        {
+            bool left = i % 2 == 0;
+            int pair = i / 2;
+            // L1, R2, L3, R4 step together, then R1, L2, R3, L4.
+            bool groupA = left == (pair % 2 == 0);
+            float s = MathF.Sin(_phase + (groupA ? 0f : Mathf.Pi));
+            float swing = s * 0.35f * amount;
+            float lift = MathF.Max(0f, MathF.Cos(_phase + (groupA ? 0f : Mathf.Pi))) * 0.3f * amount;
+            if (leap >= 0f)
+            {
+                // Front legs reach forward, back legs trail.
+                swing = (pair < 2 ? 0.5f : -0.5f) * (left ? 1f : -1f);
+                lift = 0.35f;
+            }
+            // A crouch splays the knees out and up.
+            lift += 0.25f * crouch;
+            _legs[i].Pose(new Vector3(0f, swing, left ? -lift : lift));
+        }
+        float bob = MathF.Abs(MathF.Sin(_phase)) * 0.04f * amount;
+        float breathe = MathF.Sin(_time * 2.4f) * 0.015f;
+        _body.Pose(new Vector3(-0.25f * bite - 0.12f * crouch + (leap >= 0f ? 0.15f : 0f), 0f, MathF.Sin(_time * 1.5f) * 0.04f),
+            new Vector3(0f, bob + breathe - 0.16f * crouch, -0.15f * bite), squash: 0.12f * crouch);
+        if (leap >= 0f)
+        {
+            // Up and down in an arc (the Core moves it along the ground).
+            float height = 4f * MonstersModule.PounceHeight * leap * (1f - leap);
+            _rig.Transform = new Transform3D(Basis.Identity, new Vector3(0f, height, 0f));
+        }
+        else if (crouch > 0f)
+        {
+            // A little wiggle just before the leap.
+            _rig.Transform = new Transform3D(new Basis(Vector3.Up, MathF.Sin(_time * 40f) * 0.04f * crouch), Vector3.Zero);
+        }
+    }
+
+    /// <summary>
+    /// The ladybug: little steps of six stubby legs, the shell rocking side to side; it tucks its
+    /// head and legs in while it curls up, then rolls over and over along the ground.
+    /// </summary>
+    private void Waddle(float bite, MonsterAction action, float actionSeconds, float speed, float delta)
+    {
+        float amount = 0.15f + 0.85f * _moveAmount;
+        float tuck = action switch
+        {
+            MonsterAction.Curl => Math.Clamp(actionSeconds / (MonstersModule.ChargeWindup * 0.5f), 0f, 1f),
+            MonsterAction.Charge => 1f,
+            _ => 0f,
+        };
+        for (int i = 0; i < 6; i++)
+        {
+            bool left = i % 2 == 0;
+            int pair = i / 2;
+            bool groupA = left == (pair % 2 == 0);
+            float s = MathF.Sin(_phase + (groupA ? 0f : Mathf.Pi));
+            float lift = MathF.Max(0f, MathF.Cos(_phase + (groupA ? 0f : Mathf.Pi))) * 0.3f * amount;
+            _legs[i].Pose(new Vector3(0f, s * 0.4f * amount, left ? -lift - 0.9f * tuck : lift + 0.9f * tuck),
+                new Vector3(left ? 0.12f * tuck : -0.12f * tuck, 0.1f * tuck, 0f));
+        }
+        float rock = MathF.Sin(_phase) * 0.06f * amount;
+        _shell.Pose(new Vector3(0f, 0f, rock), new Vector3(0f, MathF.Abs(MathF.Sin(_phase)) * 0.02f * amount, 0f));
+        _head.Pose(new Vector3(-0.25f * bite + MathF.Sin(_time * 1.9f) * 0.05f, 0f, rock * 0.5f),
+            new Vector3(0f, -0.08f * tuck, -0.15f * bite + 0.3f * tuck));
+        if (action == MonsterAction.Charge)
+        {
+            // Rolling forward like a ball: turn about the shell's middle as it covers the ground.
+            _roll = (_roll + delta * speed / 0.42f) % Mathf.Tau;
+            var pivot = new Vector3(0f, 0.42f, 0f);
+            var basis = new Basis(Vector3.Right, -_roll);
+            _rig.Transform = new Transform3D(basis, pivot - basis * pivot);
+        }
+        else
+        {
+            _roll = 0f;
+            if (tuck > 0f)
+                _rig.Transform = new Transform3D(new Basis(Vector3.Forward, MathF.Sin(_time * 30f) * 0.05f * tuck), Vector3.Zero);
+        }
     }
 }

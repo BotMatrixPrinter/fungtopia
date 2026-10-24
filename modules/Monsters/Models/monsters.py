@@ -1,17 +1,22 @@
-# Builds the Mushroom Forest's monsters and exports them next to this script:
-#   caterpillar.glb  and  ant.glb
+# Builds the monsters and exports them next to this script:
+#   caterpillar.glb, ant.glb (Mushroom Forest), tarantula.glb, ladybug.glb (the Deep Forest)
 # Run from the repository root:
 #   blender -b --factory-startup --python modules/Monsters/Models/monsters.py
 #
 # From the drawings: the Mushroom Caterpillar (a round segmented body, big eyes, a spotted
 # mushroom cap on its head) and the Mushroom Ant (a big round head with mushroom-tipped
-# antennae, a worried face, a striped abdomen and six legs).
+# antennae, a worried face, a striped abdomen and six legs); the hard monsters of the Deep
+# Forest: the Mushroom Tarantula (a furry round body, big dark eyes, three mushroom caps on its
+# back, eight legs) and the Mushroom Ladybug (a round spotted shell covered in little mushrooms,
+# a cute face).
 #
 # Meters, feet at the origin, facing Blender +Y (Godot's -Z, forward, after the glTF export).
 # Separate objects, each with its pivot where it moves, so the game can animate them:
 #   caterpillar: Head (pivot under its middle), Seg1..Seg4 (body segments from the head back)
 #   ant: Head (pivot at the neck), Thorax, Abdomen (pivot at the waist), LegL1..3 / LegR1..3
 #   (pivot at the hip, front to back).
+#   tarantula: Body (pivot at its middle), LegL1..4 / LegR1..4 (pivot at the hip, front to back)
+#   ladybug: Shell (pivot at its middle), Head (pivot at the neck), LegL1..3 / LegR1..3
 # Materials carry plain colors only; the game draws them toon-shaded with ink outlines.
 import math
 import os
@@ -39,6 +44,18 @@ COLORS = {
     "Stripe": (0.4, 0.2, 0.14),
     "Leg": (0.42, 0.22, 0.15),
     "Brow": (0.25, 0.12, 0.1),
+    # The tarantula.
+    "Fur": (0.4, 0.27, 0.4),
+    "FurLight": (0.58, 0.42, 0.56),
+    "FurDark": (0.24, 0.16, 0.26),
+    "Fang": (1.0, 0.97, 0.9),
+    # The ladybug.
+    "LadyShell": (0.9, 0.16, 0.14),
+    "LadySpot": (0.1, 0.07, 0.09),
+    "Face": (0.99, 0.86, 0.72),
+    "CapTan": (0.86, 0.6, 0.32),
+    "CapPink": (0.95, 0.55, 0.7),
+    "CapCream": (0.98, 0.9, 0.62),
 }
 
 
@@ -307,5 +324,143 @@ def ant():
     export("ant")
 
 
+def surface(center, size, theta, phi):
+    """A point on an ellipsoid (radii size) at polar angle theta from +Z and azimuth phi, and its normal."""
+    d = Vector((math.sin(theta) * math.cos(phi), math.sin(theta) * math.sin(phi), math.cos(theta)))
+    p = Vector(center) + Vector((d.x * size[0], d.y * size[1], d.z * size[2]))
+    n = Vector((d.x / size[0], d.y / size[1], d.z / size[2])).normalized()
+    return p, n
+
+
+def little_mushroom(part, mats, base, normal, height, cap_radius, cap_mat):
+    """A small mushroom growing out of a surface along normal: a pale stem and a spotted cap."""
+    base, normal = Vector(base), Vector(normal).normalized()
+    top = base + normal * height
+    part.capsule(mats["Stem"], base - normal * 0.02, top, cap_radius * 0.32, segments=10)
+    tilt = normal.to_track_quat("Z", "Y").to_matrix().to_4x4()
+    caps = dict(mats)
+    caps["Cap"] = mats[cap_mat]
+    mushroom_cap(part, caps, top - normal * 0.01, cap_radius, cap_radius * 0.7, tilt=tilt, spots=5)
+
+
+def tarantula():
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    mats = {name: material(name, color) for name, color in COLORS.items()}
+
+    # The body: one big furry ball, its face at the front.
+    bc = Vector((0, 0, 0.58))
+    size = (0.46, 0.5, 0.42)
+    body = Part("Body", bc)
+    body.sphere(mats["Fur"], bc, size, segments=40, rings=24)
+    # Fur: soft tufts all over (fewer on the face).
+    for i in range(150):
+        theta = math.acos(1 - 2 * ((i + 0.5) / 150))
+        phi = i * 2.39996
+        p, n = surface(bc, size, theta, phi)
+        if n.y > 0.55 and n.z > -0.35 or n.z < -0.6:
+            continue
+        rot = n.to_track_quat("Z", "Y").to_matrix().to_4x4()
+        mat = mats["FurLight"] if i % 3 == 0 else mats["Fur"]
+        body.sphere(mat, p + n * 0.015, (0.05, 0.05, 0.07), rotation=rot, segments=8, rings=5)
+    # The face: big dark eyes with sparkles, two little eyes above, blush, a smile and two fangs.
+    face = bc + Vector((0, 0, 0.02))
+    eyes(body, mats, face, size[1] * 0.86, 0.16, 0.12, tilt_deg=14)
+    for side in (-1, 1):
+        body.sphere(mats["Eye"], face + Vector((side * 0.07, size[1] * 0.82, 0.2)), (0.04, 0.03, 0.04), segments=12, rings=6)
+        body.sphere(mats["EyeShine"], face + Vector((side * 0.07 - 0.012, size[1] * 0.85, 0.215)), (0.013, 0.01, 0.013), segments=8, rings=4)
+        body.sphere(mats["Blush"], face + Vector((side * 0.27, size[1] * 0.7, -0.1)), (0.065, 0.025, 0.035),
+                    rotation=Matrix.Rotation(math.radians(side * -38), 4, "Z"), segments=16, rings=8)
+        body.cone(mats["Fang"], face + Vector((side * 0.045, size[1] * 0.93, -0.25)), 0.012, 0.028, 0.06, segments=10)
+    body.torus(mats["Mouth"], face + Vector((0, size[1] * 0.95, -0.16)), 0.05, 0.011,
+               rotation=Matrix.Rotation(math.radians(90), 4, "X") @ Matrix.Rotation(math.radians(-90), 4, "Z"), arc=0.42)
+    # Three spotted mushroom caps on its back, the middle one biggest.
+    for (theta, phi, height, radius) in ((0.55, -math.pi / 2, 0.16, 0.2), (0.75, -math.pi / 2 - 0.9, 0.12, 0.15),
+                                         (0.75, -math.pi / 2 + 0.9, 0.12, 0.15)):
+        p, n = surface(bc, size, theta, phi)
+        little_mushroom(body, mats, p, n, height, radius, "Cap")
+    body.build()
+
+    # Eight hairy legs, bent high at the knee; pivot at the hip.
+    for i, y in enumerate((0.24, 0.08, -0.08, -0.24)):
+        spread = (1.5, 0.5, -0.5, -1.5)[i]
+        for side, prefix in ((-1, "LegL"), (1, "LegR")):
+            hip = Vector((side * 0.36, y, 0.5))
+            knee = Vector((side * 0.72, y + spread * 0.14, 0.78))
+            foot = Vector((side * 0.98, y + spread * 0.3, 0.04))
+            leg = Part(f"{prefix}{i + 1}", hip)
+            leg.capsule(mats["Fur"], hip, knee, 0.055, segments=10)
+            leg.capsule(mats["Fur"], knee, foot, 0.045, segments=10)
+            # A light band at the knee and a dark furry foot.
+            leg.sphere(mats["FurLight"], knee, (0.07, 0.07, 0.07), segments=12, rings=6)
+            leg.sphere(mats["FurDark"], foot + Vector((0, 0, 0.02)), (0.06, 0.07, 0.05), segments=12, rings=6)
+            leg.build()
+    export("tarantula")
+
+
+def ladybug():
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    mats = {name: material(name, color) for name, color in COLORS.items()}
+
+    # The shell: a round red dome with black spots, a dark seam, and little mushrooms growing on it.
+    sc = Vector((0, -0.08, 0.3))
+    size = (0.62, 0.66, 0.56)
+    shell = Part("Shell", sc + Vector((0, 0, 0.12)))
+    shell.sphere(mats["LadySpot"], sc + Vector((0, 0, 0.02)), (0.56, 0.6, 0.22), segments=32, rings=12)
+    shell.sphere(mats["LadyShell"], sc, size, segments=48, rings=24, cut=(sc + Vector((0, 0, 0.02)), (0, 0, -1)))
+    # The seam between the wing cases, from the front of the shell over the top to the back.
+    shell.torus(mats["LadySpot"], sc, size[1] * 0.995, 0.018,
+                rotation=Matrix.Rotation(math.radians(90), 4, "Y") @ Matrix.Diagonal((size[2] / size[1], 1, 1, 1)),
+                arc=0.5)
+    spots = ((0.45, 0.6), (0.45, -0.9), (0.85, 0.2), (0.95, 1.0), (0.9, -1.6), (1.05, -0.5), (0.4, 2.3), (0.95, 2.6))
+    for theta, phi in spots:
+        for side in (-1, 1):
+            p, n = surface(sc, size, theta, phi if side > 0 else math.pi - phi)
+            if p.y > sc.y + size[1] * 0.55 and p.z < sc.z + 0.35:
+                continue
+            rot = n.to_track_quat("Z", "Y").to_matrix().to_4x4()
+            shell.sphere(mats["LadySpot"], p, (0.085, 0.085, 0.03), rotation=rot, segments=16, rings=6)
+    little = ((0.25, -1.4, 0.14, 0.12, "CapTan"), (0.6, 0.1, 0.1, 0.09, "CapPink"), (0.62, 3.0, 0.1, 0.09, "CapCream"),
+              (0.75, -2.3, 0.09, 0.08, "Cap"), (0.72, -0.9, 0.09, 0.08, "CapCream"), (0.95, 1.7, 0.08, 0.07, "CapTan"),
+              (0.95, -1.95, 0.08, 0.07, "CapPink"), (0.15, 1.6, 0.11, 0.1, "CapCream"),
+              (0.45, 2.2, 0.11, 0.1, "CapPink"), (0.5, -0.4, 0.12, 0.1, "CapTan"), (0.85, 0.75, 0.09, 0.08, "Cap"),
+              (0.8, 2.45, 0.09, 0.08, "CapTan"), (1.05, -1.2, 0.07, 0.07, "CapCream"), (1.0, -2.75, 0.07, 0.07, "CapPink"),
+              (0.4, -2.6, 0.12, 0.1, "CapCream"), (0.38, 0.55, 0.1, 0.09, "CapTan"))
+    for theta, phi, height, radius, cap in little:
+        p, n = surface(sc, size, theta, phi)
+        little_mushroom(shell, mats, p, n, height, radius, cap)
+    shell.build()
+
+    # The head: a round peachy face peeking out the front, big eyes, blush, a smile, antennae.
+    neck = Vector((0, 0.5, 0.3))
+    head = Part("Head", neck)
+    hc = Vector((0, 0.66, 0.34))
+    hr = 0.26
+    head.sphere(mats["Face"], hc, (hr * 1.05, hr * 0.9, hr * 0.95), segments=40, rings=24)
+    eyes(head, mats, hc + Vector((0, 0, 0.03)), hr * 0.78, 0.1, 0.085, tilt_deg=12)
+    for side in (-1, 1):
+        head.sphere(mats["Blush"], hc + Vector((side * 0.17, hr * 0.72, -0.08)), (0.05, 0.02, 0.03),
+                    rotation=Matrix.Rotation(math.radians(side * -40), 4, "Z"), segments=16, rings=8)
+        root = hc + Vector((side * 0.08, 0.0, hr * 0.85))
+        tip = root + Vector((side * 0.1, 0.1, 0.18))
+        head.capsule(mats["LadySpot"], root, tip, 0.014, segments=8)
+        head.sphere(mats["LadySpot"], tip, (0.035, 0.035, 0.035), segments=12, rings=6)
+    head.torus(mats["Mouth"], hc + Vector((0, hr * 0.88, -0.1)), 0.035, 0.009,
+               rotation=Matrix.Rotation(math.radians(90), 4, "X") @ Matrix.Rotation(math.radians(-90), 4, "Z"), arc=0.42)
+    head.build()
+
+    # Six short stubby black legs under the shell.
+    for i, y in enumerate((0.22, -0.05, -0.32)):
+        for side, prefix in ((-1, "LegL"), (1, "LegR")):
+            hip = Vector((side * 0.32, y, 0.22))
+            foot = Vector((side * 0.5, y + (0.08 if i == 0 else -0.08 if i == 2 else 0.0), 0.04))
+            leg = Part(f"{prefix}{i + 1}", hip)
+            leg.capsule(mats["LadySpot"], hip, foot, 0.04, segments=10)
+            leg.sphere(mats["LadySpot"], foot, (0.06, 0.07, 0.04), segments=12, rings=6)
+            leg.build()
+    export("ladybug")
+
+
 caterpillar()
 ant()
+tarantula()
+ladybug()

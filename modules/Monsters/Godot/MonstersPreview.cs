@@ -8,17 +8,23 @@ namespace Fungtopia.Monsters.View;
 /// <c>./screenshot.sh modules/Monsters/Godot/Preview.tscn</c>. From left to right: a caterpillar
 /// crawling, an ant scurrying, a hurt and poisoned caterpillar (green, bubbles, health bar), a
 /// hurt ant, and an ant popping into its defeat poof. The environment variable MONSTERS_PREVIEW
-/// picks the view: "all" (default) or "close" (a caterpillar and an ant up close).
+/// picks the view: "all" (default), "close" (a caterpillar and an ant up close), "hard" (the Deep
+/// Forest's monsters in the gloom: a tarantula skittering, a tarantula mid-pounce, a ladybug
+/// waddling, a ladybug rolling in a charge, a hurt and poisoned ladybug) or "hardclose" (a
+/// tarantula and a ladybug up close).
 /// </summary>
 public partial class MonstersPreview : Node3D
 {
     private MonsterModel[] _models = Array.Empty<MonsterModel>();
     private float _time;
     private bool _close;
+    private bool _hard;
 
     public override void _Ready()
     {
-        _close = OS.GetEnvironment("MONSTERS_PREVIEW").Equals("close", StringComparison.OrdinalIgnoreCase);
+        string mode = OS.GetEnvironment("MONSTERS_PREVIEW").ToLowerInvariant();
+        _close = mode is "close" or "hardclose";
+        _hard = mode is "hard" or "hardclose";
         var environment = new Godot.Environment
         {
             BackgroundMode = Godot.Environment.BGMode.Sky,
@@ -40,11 +46,22 @@ public partial class MonstersPreview : Node3D
             AdjustmentEnabled = true,
             AdjustmentSaturation = 1.15f,
         };
+        if (_hard)
+        {
+            // The Deep Forest: darker and slightly foggy.
+            environment.AmbientLightColor = new Color(0.42f, 0.4f, 0.6f);
+            environment.AmbientLightEnergy = 0.75f;
+            environment.FogEnabled = true;
+            environment.FogLightColor = new Color(0.45f, 0.47f, 0.6f);
+            environment.FogDensity = 0.03f;
+            ((ProceduralSkyMaterial)environment.Sky.SkyMaterial).SkyTopColor = new Color(0.2f, 0.24f, 0.38f);
+            ((ProceduralSkyMaterial)environment.Sky.SkyMaterial).SkyHorizonColor = new Color(0.42f, 0.42f, 0.55f);
+        }
         AddChild(new WorldEnvironment { Environment = environment });
         AddChild(new DirectionalLight3D
         {
             LightColor = new Color(1.0f, 0.88f, 0.7f),
-            LightEnergy = 1.3f,
+            LightEnergy = _hard ? 0.85f : 1.3f,
             ShadowEnabled = true,
             RotationDegrees = new Vector3(-40f, -30f, 0f),
         });
@@ -52,14 +69,18 @@ public partial class MonstersPreview : Node3D
         {
             Mesh = new CylinderMesh { TopRadius = 7f, BottomRadius = 7f, Height = 0.1f },
             Position = new Vector3(0f, -0.05f, 0f),
-            MaterialOverride = new StandardMaterial3D { AlbedoColor = new Color(0.5f, 0.74f, 0.33f) },
+            MaterialOverride = new StandardMaterial3D { AlbedoColor = _hard ? new Color(0.25f, 0.36f, 0.24f) : new Color(0.5f, 0.74f, 0.33f) },
         });
 
-        var kinds = _close
-            ? new[] { MonsterKind.Caterpillar, MonsterKind.Ant }
-            : new[] { MonsterKind.Caterpillar, MonsterKind.Ant, MonsterKind.Caterpillar, MonsterKind.Ant, MonsterKind.Ant };
+        var kinds = (_hard, _close) switch
+        {
+            (false, true) => new[] { MonsterKind.Caterpillar, MonsterKind.Ant },
+            (false, false) => new[] { MonsterKind.Caterpillar, MonsterKind.Ant, MonsterKind.Caterpillar, MonsterKind.Ant, MonsterKind.Ant },
+            (true, true) => new[] { MonsterKind.Tarantula, MonsterKind.Ladybug },
+            _ => new[] { MonsterKind.Tarantula, MonsterKind.Tarantula, MonsterKind.Ladybug, MonsterKind.Ladybug, MonsterKind.Ladybug },
+        };
         _models = new MonsterModel[kinds.Length];
-        float spacing = _close ? 1.6f : 1.7f;
+        float spacing = _hard ? (_close ? 2.4f : 2.5f) : _close ? 1.6f : 1.7f;
         for (int i = 0; i < kinds.Length; i++)
         {
             _models[i] = MonsterModel.Create(kinds[i]);
@@ -72,7 +93,11 @@ public partial class MonstersPreview : Node3D
 
         var camera = new Camera3D { Fov = 40f, Current = true };
         AddChild(camera);
-        if (_close)
+        if (_hard && _close)
+            camera.LookAtFromPosition(new Vector3(0f, 1.8f, 5.0f), new Vector3(0f, 0.55f, 0f), Vector3.Up);
+        else if (_hard)
+            camera.LookAtFromPosition(new Vector3(0f, 2.8f, 10.5f), new Vector3(0f, 0.6f, 0f), Vector3.Up);
+        else if (_close)
             camera.LookAtFromPosition(new Vector3(0f, 1.3f, 3.6f), new Vector3(0f, 0.45f, 0f), Vector3.Up);
         else
             camera.LookAtFromPosition(new Vector3(0f, 2.0f, 7.4f), new Vector3(0f, 0.5f, 0f), Vector3.Up);
@@ -85,6 +110,11 @@ public partial class MonstersPreview : Node3D
         for (int i = 0; i < _models.Length; i++)
         {
             var model = _models[i];
+            if (_hard)
+            {
+                AnimateHard(model, i, dt);
+                continue;
+            }
             switch (i)
             {
                 case 0:
@@ -107,6 +137,41 @@ public partial class MonstersPreview : Node3D
                         dead < 0f ? 1f / 5f : 0f);
                     break;
             }
+        }
+    }
+
+    private void AnimateHard(MonsterModel model, int i, float dt)
+    {
+        if (_close)
+        {
+            model.Animate(dt, i == 0 ? 1.2f : 0.4f, 100f, false, 100f, true, 0f, 1f);
+            return;
+        }
+        switch (i)
+        {
+            case 0:
+                model.Animate(dt, 1.2f, 100f, false, 100f, true, 0f, 1f);
+                break;
+            case 1:
+                // Crouch, then pounce, over and over; the screenshot frame (1.5 s) is mid-leap.
+                float t = (_time + 0.6f) % 1.4f;
+                if (t < MonstersModule.PounceWindup)
+                    model.Animate(dt, 0f, 100f, false, 100f, true, 0f, 12f / 18f, MonsterAction.Crouch, t);
+                else if (t < MonstersModule.PounceWindup + MonstersModule.PounceSeconds)
+                    model.Animate(dt, 6f, 100f, false, 100f, true, 0f, 12f / 18f, MonsterAction.Leap, t - MonstersModule.PounceWindup);
+                else
+                    model.Animate(dt, 0f, 100f, false, 100f, true, 0f, 12f / 18f);
+                break;
+            case 2:
+                model.Animate(dt, 0.4f, 100f, false, 100f, true, 0f, 1f);
+                break;
+            case 3:
+                // Rolling (a little slower than a real charge, so the screenshot frame catches it mid-roll).
+                model.Animate(dt, 5.9f, 100f, false, 100f, true, 0f, 1f, MonsterAction.Charge, _time % 1f);
+                break;
+            default:
+                model.Animate(dt, 0.2f, 100f, true, 100f, true, 0f, 14f / 25f);
+                break;
         }
     }
 }

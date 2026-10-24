@@ -2,14 +2,17 @@ using System.Numerics;
 
 namespace Fungtopia.Monsters;
 
-/// <summary>The cute mushroom monsters. Only Caterpillar and Ant spawn in the first build.</summary>
+/// <summary>
+/// The cute mushroom monsters: the normal ones (Caterpillar, Ant) live in Mushroom Forest, the hard
+/// ones (Tarantula, Ladybug) in the Deep Forest.
+/// </summary>
 public enum MonsterKind
 {
     Caterpillar,
     Ant,
-    /// <summary>A hard monster (later).</summary>
+    /// <summary>A hard monster of the Deep Forest: stalks, then pounces.</summary>
     Tarantula,
-    /// <summary>A hard monster (later).</summary>
+    /// <summary>A hard monster of the Deep Forest: rolls into a charge that knocks the player back.</summary>
     Ladybug,
 }
 
@@ -118,5 +121,28 @@ public readonly struct MonsterKilled
         Reward = reward;
         Position = position;
         Source = source;
+    }
+}
+
+/// <summary>
+/// Published by the Monsters module when a monster's hit shoves the player away (the ladybug's
+/// charge), right after its <c>Fungtopia.Player.DamagePlayer</c>. For the player to apply.
+/// </summary>
+public readonly struct KnockBackPlayer
+{
+    /// <summary>Unit horizontal direction (Y 0) to push the player, away from the monster.</summary>
+    public readonly Vector3 Direction;
+
+    /// <summary>How far to push the player, meters.</summary>
+    public readonly float Distance;
+
+    /// <summary>Where the push came from (the monster's feet).</summary>
+    public readonly Vector3 From;
+
+    public KnockBackPlayer(Vector3 direction, float distance, Vector3 from)
+    {
+        Direction = direction;
+        Distance = distance;
+        From = from;
     }
 }
