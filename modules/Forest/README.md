@@ -10,11 +10,15 @@ whether it is night, for the glowing mushrooms.
 
 - `Contract/` — `Fungtopia.Forest.Contract` (namespace `Fungtopia.Forest`), see below.
 - `Core/` — `Fungtopia.Forest.Core`: `ForestModule`, the module's one `IModule` (no work per tick;
-  reads `Fungtopia.DayNight.TimeOfDay` into `IsNight`), and `ForestRing`, where the view's ring of
-  giant mushrooms may stand.
+  reads `Fungtopia.DayNight.TimeOfDay` into `IsNight`), `ForestRing`, where the view's ring of
+  giant mushrooms may stand and where it stands (`Mushrooms`), `ForestProps`, where props may
+  stand, the logs, the west gap's overgrown trail and dark mushrooms, and `ForestRandom`, the fixed
+  hash the layout uses.
 - `Godot/` — `Main.tscn` with `ForestView`, which draws the forest from the Contract.
 - `Tests/` — `ForestTests.cs`: xUnit tests of the Contract (its forwarding values equal the Map's),
-  of `ForestRing` and of `ForestModule` with a fake `IMessageBus`.
+  of `ForestRing` (it matches the Map's obstacles and walkable ground; it opens at the west gap just
+  as wide as the Map's path and is closed along the rest of the strip), of `ForestProps` (no prop
+  blocks the west gap or the trail) and of `ForestModule` with a fake `IMessageBus`.
 
 Test it with `./test.sh Forest` from the repository root.
 
@@ -44,18 +48,30 @@ headless): the forest square's floor from `Map.Ground.HeightAt` on a 1 m grid fr
 (the Map draws the ground around it on the same grid, so the seam matches; vertex-colored grass,
 moss, meadow clearings and dirt paths), a giant mushroom on every `Obstacles` circle (stem radius
 = the circle's radius; fat stems, big spotted caps in reds, browns and purples, about one in six
-glowing softly, many with big round eyes looking at the nearest path), the ring of dense giant
-mushrooms outside the square (`ForestRing`: open in the Map's road gaps, `Areas.ForestGapSouth`
-and `ForestGapNorth`, `ForestGapHalfWidth` 5 m to each side, and in its west gap to the Deep
-Forest; off every road and walkable ground; not beside the roads where the Map draws its own cliff
-mushrooms), small mushroom clusters, ferns, grass tufts, mossy logs and fireflies. Small props
+glowing softly; plain caps, no eyes or faces: only creatures have eyes), the ring of dense giant
+mushrooms outside the square (`ForestRing.Mushrooms`: open in the Map's road gaps,
+`Areas.ForestGapSouth` and `ForestGapNorth`, `ForestGapHalfWidth` 5 m to each side, and in its
+west gap to the Deep Forest, `Areas.ForestGapWest` and `DeepForestPath`; off every road and
+walkable ground by `WalkableClearance` 1.5 m and clear of all `Map.Ground.Obstacles`; not beside
+the roads where the Map draws its own cliff mushrooms; a row of stems closes the narrow strip
+between the square and the Deep Forest, its first stems right at the west gap's edges; within
+`DarkReach` 16 m of the west gap their caps are dark Deep Forest purples and blues), small mushroom
+clusters, ferns, grass tufts, mossy logs and fireflies.
+
+The west gap: the Map's 8 m Deep Forest path (x -112..-96, z -4..4) runs through the ring
+unblocked, and inside the square an overgrown little trail (`ForestProps.TrailPoints`, 1.1 m
+half-width, patchy dark soil under moss) winds from the gap between the trunks to the forest's west
+path at (-80, 26). A few small dark mushrooms (`ForestProps.DarkMushrooms`) stand beside it at the
+gap's mouth. Small props
 and all mushrooms are MultiMesh instances (one draw per kind). Shaders in `Godot/Shaders/`: soft
 two-band toon light with ink outlines. The glowing caps shine 2.4 times as bright at night
 (`ForestModule.IsNight`, fading over about two seconds). The forest has no light, sky or
 environment of its own: DayNight's global sun and `WorldEnvironment` light it.
 
-Props (clusters, ferns, logs, grass) are not obstacles: they never stand on trunks or paths and
-walkers may cross them.
+Props (clusters, ferns, logs, grass) are not obstacles: walkers may cross them. Clusters, ferns
+and logs stand only where `ForestProps.Open` allows: inside the square, off trunks, paths, the
+trail and the Deep Forest path. Only ankle-high grass tufts grow on the trail and in the gap (the
+overgrowth); off the square they keep off the Map's walkable ground.
 
 A `PreviewCamera` stands at `PlayerStart` at eye height (1.6 m) looking north up the path; it is
 current only until another module makes its own camera current.

@@ -265,8 +265,149 @@ public class ForestTests
         Assert.True(ForestRing.Keeps(Areas.ForestGapHalfWidth + 2.6f, 102.2f, 1.5f));
         Assert.False(ForestRing.Keeps(50f, 99f, 1.5f)); // inside the square
         Assert.False(ForestRing.Keeps(50f, 100f + ForestRing.Depth + 1f, 1.5f)); // past the ring
-        // The west gap (the Deep Forest path) is the Map's too.
-        Assert.False(ForestRing.Keeps(Areas.ForestGapWest.X - 3f, Areas.ForestGapWest.Y, 1f));
+    }
+
+    [Fact]
+    public void RingMushroomsMatchTheMapObstaclesAndGround()
+    {
+        var ring = ForestRing.Mushrooms;
+        Assert.InRange(ring.Length, 300, 900);
+        foreach (var m in ring)
+        {
+            Assert.True(ForestRing.Keeps(m.X, m.Z, m.Radius), $"ring mushroom at ({m.X}, {m.Z}) where the ring may not stand");
+            // Off all walkable ground (stem and all), so it never stands on the Map's roads, towns or paths...
+            Assert.False(Areas.Walkable(m.X, m.Z, -m.Radius), $"ring mushroom at ({m.X}, {m.Z}) reaches walkable ground");
+            // ...and overlaps none of the Map's obstacle circles (trunks, buildings, the Deep Forest's mushrooms).
+            Assert.False(Ground.Blocks(m.X, m.Z, m.Radius), $"ring mushroom at ({m.X}, {m.Z}) overlaps a Map obstacle");
+        }
+        Assert.Equal(ring.ToArray(), ForestRing.Mushrooms.ToArray());
+    }
+
+    [Fact]
+    public void NoForestPropBlocksTheWestGap()
+    {
+        var path = Areas.DeepForestPath;
+        Assert.Equal(-Areas.ForestHalfSize, Areas.ForestGapWest.X);
+        // Every ring mushroom, small dark mushroom and log keeps off the Map's Deep Forest path.
+        foreach (var m in ForestRing.Mushrooms)
+            Assert.True(path.Depth(m.X, m.Z) < -m.Radius, $"ring mushroom at ({m.X}, {m.Z}) in the west gap");
+        foreach (var m in ForestProps.DarkMushrooms)
+            Assert.True(path.Depth(m.X, m.Z) < -m.Size, $"dark mushroom at ({m.X}, {m.Z}) in the west gap");
+        foreach (var log in ForestProps.Logs)
+            Assert.True(path.Depth(log.X, log.Z) < -(log.Length * 0.5f + log.Radius), $"log at ({log.X}, {log.Z}) in the west gap");
+        // The whole gap, from inside the square out to the Deep Forest: walkable, no prop may stand
+        // there, and no ring mushroom is there.
+        for (float x = path.MinX; x <= path.MaxX; x += 0.5f)
+        for (float z = path.MinZ + 0.05f; z < path.MaxZ; z += 0.5f)
+        {
+            Assert.True(Areas.Walkable(x, z), $"the Map's gap is not walkable at ({x}, {z})");
+            Assert.True(ForestProps.InWestGap(x, z, 0f));
+            for (float r = 0.1f; r <= 3f; r += 0.7f)
+            {
+                Assert.False(ForestProps.Open(x, z, r), $"a prop may stand in the west gap at ({x}, {z})");
+                Assert.False(ForestRing.Keeps(x, z, r), $"a ring mushroom may stand in the west gap at ({x}, {z})");
+            }
+            foreach (var m in ForestRing.Mushrooms)
+                Assert.True(Vector2.Distance(new Vector2(x, z), new Vector2(m.X, m.Z)) > m.Radius + 1f);
+        }
+    }
+
+    [Fact]
+    public void RingOpensAtTheWestGapJustAsWideAsTheMapPath()
+    {
+        // On each side of the gap the ring's first stem stands right past the path's edge (its
+        // clearance from walkable ground), and the ring stays closed along the strip beyond it,
+        // so the gap is the only way through.
+        float half = Areas.DeepForestGapHalfWidth;
+        for (int side = -1; side <= 1; side += 2)
+        {
+            float nearest = float.MaxValue;
+            var reached = new List<(float From, float To)>();
+            foreach (var m in ForestRing.Mushrooms)
+            {
+                if (m.X > -Areas.ForestHalfSize || m.X < -Areas.ForestHalfSize - 12f || MathF.Sign(m.Z) != side)
+                    continue;
+                float edge = MathF.Abs(m.Z) - m.Radius;
+                Assert.True(edge >= half + ForestRing.WalkableClearance - 0.01f, $"stem at ({m.X}, {m.Z}) narrows the gap");
+                nearest = MathF.Min(nearest, edge);
+                reached.Add((edge, MathF.Abs(m.Z) + m.Radius));
+            }
+            Assert.InRange(nearest, half + ForestRing.WalkableClearance, half + ForestRing.WalkableClearance + 0.5f);
+            // Along the whole strip to the Deep Forest's corners, no hole between stems wider than
+            // 2 m (the caps close it above).
+            float reach = Areas.DeepForest.MaxZ;
+            reached.Sort();
+            float covered = nearest;
+            foreach (var (from, to) in reached)
+            {
+                if (from > reach)
+                    break;
+                Assert.True(from - covered < 2f, $"a {from - covered} m hole in the ring at z = {side * covered} west of the forest");
+                covered = MathF.Max(covered, to);
+            }
+            Assert.True(covered > reach - 2f, $"the ring west of the forest stops at z = {side * covered}");
+        }
+    }
+
+    [Fact]
+    public void AFewDarkMushroomsHintAtTheDeepForest()
+    {
+        var gap = Areas.ForestGapWest;
+        int dark = 0;
+        foreach (var m in ForestRing.Mushrooms)
+        {
+            float toGap = Vector2.Distance(new Vector2(m.X, m.Z), gap);
+            Assert.Equal(toGap <= ForestRing.DarkReach, m.Dark);
+            if (m.Dark)
+                dark++;
+        }
+        Assert.InRange(dark, 4, 12);
+        Assert.InRange(ForestProps.DarkMushrooms.Length, 3, 8);
+        foreach (var m in ForestProps.DarkMushrooms)
+        {
+            Assert.True(ForestProps.Open(m.X, m.Z, m.Size), $"dark mushroom at ({m.X}, {m.Z}) on a path or trunk");
+            Assert.True(Vector2.Distance(new Vector2(m.X, m.Z), gap) < 14f, $"dark mushroom at ({m.X}, {m.Z}) far from the gap");
+        }
+    }
+
+    [Fact]
+    public void OvergrownTrailLeadsFromTheGapToTheForestPaths()
+    {
+        var trail = ForestProps.TrailPoints;
+        Assert.Equal(Areas.ForestGapWest, trail[0]);
+        var end = trail[^1];
+        Assert.True(ForestLayout.PathDistance(end.X, end.Y) <= ForestLayout.PathHalfWidth);
+        for (int i = 0; i + 1 < trail.Length; i++)
+        for (float t = 0f; t <= 1f; t += 0.05f)
+        {
+            var p = Vector2.Lerp(trail[i], trail[i + 1], t);
+            Assert.True(Areas.Walkable(p.X, p.Y), $"trail off walkable ground at {p}");
+            Assert.False(Obstacles.Blocks(p.X, p.Y, ForestProps.TrailHalfWidth), $"a trunk on the trail at {p}");
+            Assert.Equal(0f, ForestProps.TrailDistance(p.X, p.Y), 3);
+            Assert.False(ForestProps.Open(p.X, p.Y, 0.1f), $"a prop may stand on the trail at {p}");
+        }
+    }
+
+    [Fact]
+    public void LogsLieInTheOpen()
+    {
+        var logs = ForestProps.Logs;
+        Assert.Equal(30, logs.Length);
+        foreach (var log in logs)
+        {
+            Assert.True(ForestProps.Open(log.X, log.Z, log.Length * 0.5f + log.Radius), $"log at ({log.X}, {log.Z}) on a path, trunk or the gap");
+            Assert.True(ForestLayout.ClearingDepth(log.X, log.Z) <= -1f);
+        }
+    }
+
+    [Fact]
+    public void PropsKeepOffPathsAndTrunks()
+    {
+        Assert.False(ForestProps.Open(5f, 70f, 0.2f)); // on the path near the start
+        var o = Obstacles.All[0];
+        Assert.False(ForestProps.Open(o.X, o.Z + o.Radius + 0.2f, 0.2f));
+        Assert.False(ForestProps.Open(ForestBounds.HalfSize + 1f, 0f, 0.2f)); // outside the square
+        Assert.True(ForestProps.Open(-80f, -80f, 0.2f) || ForestProps.Open(-78f, -80f, 0.2f) || ForestProps.Open(-80f, -78f, 0.2f));
     }
 
     // Core

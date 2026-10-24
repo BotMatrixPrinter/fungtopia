@@ -5,7 +5,7 @@ using Godot;
 namespace Fungtopia.Forest.View;
 
 /// <summary>
-/// Builds the forest's chunky meshes in code: lathed mushroom stems, caps, eyes and logs, and
+/// Builds the forest's chunky meshes in code: lathed mushroom stems, caps and logs, and
 /// fern and grass tufts. Every mesh carries UV.y as a part mask or root-to-tip ramp for its shader.
 /// </summary>
 internal static class ForestMeshes
@@ -43,21 +43,6 @@ internal static class ForestMeshes
         var b = new Builder();
         b.Lathe(top.ToArray(), (_, _) => 1f);
         b.Lathe(under, (_, _) => 0f);
-        return b.Commit();
-    }
-
-    /// <summary>A shallow eye dome of radius 1 around +Y.</summary>
-    public static ArrayMesh Eye()
-    {
-        var profile = new List<Vector2>();
-        for (int i = 0; i <= 6; i++)
-        {
-            float a = i / 6f * MathF.PI * 0.5f;
-            profile.Add(new Vector2(MathF.Sin(a), 0.35f * MathF.Cos(a)));
-        }
-        profile.Insert(0, new Vector2(0f, 0.35f));
-        var b = new Builder();
-        b.Lathe(profile.ToArray(), (_, _) => 1f);
         return b.Commit();
     }
 
