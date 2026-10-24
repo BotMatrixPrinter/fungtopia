@@ -3,7 +3,8 @@
 The player character: a chibi Girl or Boy who walks the whole world (Mushroom Town, the roads,
 Mushroom Forest, Pet City, the home interior) in third person, relative to the camera, turns
 smoothly, jumps, follows the ground, slides along giant mushroom trunks, buildings and the edge
-of the walkable ground, stands still while talking, takes damage from monsters and stays down
+of the walkable ground, stands still while talking, stands idle and turns for viewing while the
+wardrobe or Abby's shop is open, takes damage from monsters and stays down
 after defeat until it is teleported (to the clinic the next morning).
 
 - `Contract/` — `Fungtopia.Player.Contract` (namespace `Fungtopia.Player`), see below.
@@ -16,7 +17,7 @@ after defeat until it is teleported (to the clinic the next morning).
 - `Models/` — `characters.py`, the Blender script that builds and exports `girl.glb` and
   `boy.glb` next to it.
 - `Tests/` — `PlayerModuleTests.cs`: xUnit tests of `PlayerModule` (with a fake `IMessageBus`),
-  `ArcheryPose` and `CharacterLook`.
+  `ArcheryPose` and `CharacterLook` (also standing idle and turning while the wardrobe is open).
 
 Test it with `./test.sh Player` from the repository root.
 
@@ -36,7 +37,7 @@ positive turns left; the direction of yaw `a` is `(-sin a, 0, -cos a)`.
 
 `PlayerModule` reads `Fungtopia.Input.PlayerInput`, `Fungtopia.Dialogue.DialogueState`,
 `Fungtopia.Bow.BowState`, `Fungtopia.StartScreen.GameStart` and `StartScreenState`,
-`Fungtopia.Wardrobe.AppearanceState` (and the Wardrobe's `Catalog` and `Looks`),
+`Fungtopia.Wardrobe.AppearanceState`, `WardrobeState` and `PreviewYaw` (and the Wardrobe's `Catalog` and `Looks`),
 `TeleportPlayer` and `DamagePlayer`, and the world from the Map Contract (`Ground`, `Areas`,
 `Places`). The Player Contract references the Map Contract (for `Area`). The game starts at
 `Places.HomeDoor`, facing out.
@@ -53,11 +54,23 @@ positive turns left; the direction of yaw `a` is `(-sin a, 0, -cos a)`.
   `Character` from its `Character` (`GameStart.Girl` 0 or `Boy` 1, replacing the setting) and
   puts the player at `Places.HomeDoor` in play; later `GameStart`s are ignored. It still
   publishes `PlayerState` every tick. Without the StartScreen module the player never appears.
+- **Wardrobe and shop.** While `WardrobeState.Open` (the wardrobe or Abby's shop), as on the
+  start screen, `Move`, `Jump`, `Fire`, `Look` and the aim are ignored completely (from the tick
+  the screen opens, whichever message comes first) and `BowState` counts as no draw: the player
+  stands where it is, on the ground, with zero velocity and the idle pose (`Archery` relaxed, also
+  when it opened mid-draw or mid-jump). `Facing` does not change, so the Camera's front view (yaw
+  `Facing` + π) keeps facing the character.
+- **Preview turn.** While the start screen or a wardrobe screen is open (`OnScreen`),
+  `PreviewTurn` eases (`PreviewTurnSharpness`, 12 per second, the short way round) toward the
+  latest `PreviewYaw.Yaw`: 0 faces the camera, positive turns the front to the screen's right
+  (yaw left). `ShownFacing` = `Facing` + `PreviewTurn` is what the view turns the model to. Once
+  closed the turn eases back to 0 (the facing as before opening), the latest `PreviewYaw` is
+  forgotten (the next screen starts facing the camera) and control comes back as before.
 
 Each tick:
 
 - **Camera yaw.** When the input has an aim (`HasAim`), the camera's yaw is the aim direction's
-  horizontal part; otherwise `Look.X` (yaw right) is added up.
+  horizontal part; otherwise `Look.X` (yaw right) is added up (on the tick, only in play).
 - **Walking.** `Move` (x right, y forward, clamped to length 1) is turned by the camera yaw:
   5 m/s at full deflection. While `DialogueState.Open` is true, `Move` and `Jump` are ignored.
 - **Facing.** Turns at up to 10 rad/s the short way round: toward the aim while `Fire` is held,
@@ -104,7 +117,7 @@ the built-in colors.
 Settings and helpers: `Character` (the character setting, Girl by default, until `GameStart`
 picks it), `PlaceAt(feet,
 facing)` puts the player on the ground somewhere. The view also reads `CameraYaw`,
-`Visible`, `InvulnerableSeconds`, `DefeatedSeconds`, `Ticks`, `Archery`, `AimDirection` and `HasAim` (the
+`Visible`, `ShownFacing`, `InvulnerableSeconds`, `DefeatedSeconds`, `Ticks`, `Archery`, `AimDirection` and `HasAim` (the
 latest input's aim). No allocations per tick.
 
 ## View
@@ -116,7 +129,8 @@ hidden while `Visible` is false (before the start screen opens); on the start sc
 idle (no motion, no aim, no bow drawn), so the look step shows it. The frame `AppearanceVersion` changes
 (or the character does) it redresses the model with the look (`CharacterModel.Apply`), so the
 wardrobe screen and character creation show each pick at once. It places the model between the last two ticks
-(`Engine.GetPhysicsInterpolationFraction`), turned to `Facing`; a teleport jumps instead of
+(`Engine.GetPhysicsInterpolationFraction`), turned to `ShownFacing` (`Facing`, turned by the
+wardrobe's preview while a screen is open), so the wardrobe screen shows it idle and turning; a teleport jumps instead of
 gliding. The view has no camera: the camera module follows `PlayerState`.
 
 `CharacterModel` loads `girl.glb` or `boy.glb` at run time with `GltfDocument` from the file's

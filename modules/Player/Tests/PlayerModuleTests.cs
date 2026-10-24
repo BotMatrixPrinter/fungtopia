@@ -720,6 +720,171 @@ public class PlayerModuleTests
         Assert.False(_bus.States[^1].Grounded);
     }
 
+    // ---- The wardrobe and the shop ----
+
+    /// <summary>One tick with a wardrobe screen open, as published in some order, then the player ticks.</summary>
+    private void TickWardrobe(in PlayerInput input, bool shop = false, float? previewYaw = null, bool stateFirst = true)
+    {
+        if (stateFirst)
+            _bus.Publish(new WardrobeState(true, shop));
+        if (previewYaw.HasValue)
+            _bus.Publish(new PreviewYaw(previewYaw.Value));
+        _bus.Publish(new BowState(1f, 0));
+        _bus.Publish(input);
+        if (!stateFirst)
+            _bus.Publish(new WardrobeState(true, shop));
+        _player.Tick(new TickContext(_tick++, Step));
+    }
+
+    private void CloseWardrobe() => _bus.Publish(new WardrobeState(false, false));
+
+    /// <summary>Every kind of input at once: move, look, jump, fire with an aim.</summary>
+    private static PlayerInput Everything(float x, float y) =>
+        new(new Vector2(x, y), new Vector2(0.3f, 0.1f), true, true, true, Vector3.Normalize(new Vector3(1f, -0.2f, -1f)));
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public void StandsIdleWhateverTheInputWhileTheWardrobeOrTheShopIsOpen(bool shop, bool stateFirst)
+    {
+        _player.PlaceAt(Middle, 0.5f);
+        // Walking, drawing the bow and in the air when the screen opens.
+        Run(0.3, Moving(1f, 0f));
+        _bus.Publish(new BowState(1f, 0));
+        TickWith(Moving(0f, 1f, fire: true, aim: new Vector3(0f, 0f, -1f), jump: true));
+        Assert.False(_bus.States[^1].Grounded);
+        Assert.True(_player.Archery.Weight > 0f);
+        var at = _player.Position;
+        float facing = _player.Facing;
+        float cameraYaw = _player.CameraYaw;
+        int states = _bus.States.Count;
+
+        float[] directions = { 0f, 0.5f, 1f, 1.5f, 2f, 2.5f, 3f, 3.5f, 4f, 4.5f, 5f, 5.5f };
+        foreach (float a in directions)
+        {
+            for (int i = 0; i < 20; i++)
+            {
+                TickWardrobe(Everything(MathF.Cos(a), MathF.Sin(a)), shop, stateFirst: stateFirst);
+                var state = _bus.States[^1];
+                // No walking, no jump: on the ground below where it was, standing still.
+                Assert.Equal(at.X, state.Position.X);
+                Assert.Equal(at.Z, state.Position.Z);
+                Assert.Equal(Ground.HeightAt(at.X, at.Z), state.Position.Y);
+                Assert.Equal(Vector3.Zero, state.Velocity);
+                Assert.True(state.Grounded);
+                // No turning toward the move or the aim, no camera turn from Look.
+                Assert.Equal(facing, state.Facing);
+                Assert.Equal(cameraYaw, _player.CameraYaw);
+                // No drawing the bow, no aim: the idle pose only.
+                Assert.False(_player.HasAim);
+                Assert.Equal(ArcheryState.Relaxed, _player.Archery);
+                Assert.False(ArcheryPose.ArrowVisible(_player.Archery));
+            }
+        }
+        Assert.Equal(states + directions.Length * 20, _bus.States.Count);
+        Assert.True(_player.Visible);
+    }
+
+    [Fact]
+    public void TurnsTheCharacterSmoothlyByThePreviewYawWhileTheWardrobeIsOpen()
+    {
+        _player.PlaceAt(Middle, 1f);
+        float facing = _player.Facing;
+        // Opening faces the camera: the front view looks back along Facing.
+        TickWardrobe(Idle, previewYaw: 0f);
+        Assert.Equal(0f, _player.PreviewTurn);
+        Assert.Equal(facing, _player.ShownFacing, 5);
+
+        // Turned to the screen's right by 1 rad: the character eases there, no pop, no overshoot.
+        float last = 0f;
+        for (int i = 0; i < 60; i++)
+        {
+            TickWardrobe(Idle, previewYaw: 1f);
+            float turn = _player.PreviewTurn;
+            Assert.True(turn > last || turn == 1f, $"tick {i}: {turn} after {last}");
+            Assert.True(turn <= 1f + 1e-5f);
+            Assert.True(turn - last < 0.25f, $"tick {i} jumped {turn - last}");
+            if (i == 0)
+                Assert.True(turn < 0.5f, "eases, does not snap");
+            last = turn;
+        }
+        Assert.Equal(1f, _player.PreviewTurn, 3);
+        // Positive yaw turns left (counterclockwise from above): the front goes to the right of
+        // the camera looking back at the character (camera yaw Facing + π).
+        Assert.Equal(PlayerModule.WrapAngle(facing + 1f), _player.ShownFacing, 3);
+        var cameraRight = new Vector2(MathF.Cos(facing + MathF.PI), -MathF.Sin(facing + MathF.PI));
+        Assert.True(Vector2.Dot(FacingDirection(_player.ShownFacing), cameraRight) > 0.8f);
+        // The facing itself (what the camera frames) does not turn, and the player stays put.
+        Assert.Equal(facing, _player.Facing);
+        Assert.Equal(facing, _bus.States[^1].Facing);
+
+        // The latest PreviewYaw counts; it follows the short way round across ±π.
+        Run(1.0, Idle); // no PreviewYaw this second: the latest one (1) still holds
+        Assert.Equal(1f, _player.PreviewTurn, 3);
+        for (int i = 0; i < 60; i++)
+            TickWardrobe(Idle, previewYaw: 3f);
+        for (int i = 0; i < 60; i++)
+        {
+            float before = _player.PreviewTurn;
+            TickWardrobe(Idle, previewYaw: -3f);
+            Assert.True(MathF.Abs(PlayerModule.WrapAngle(_player.PreviewTurn - before)) < 0.15f);
+        }
+        Assert.Equal(-3f, _player.PreviewTurn, 3);
+        Assert.Equal(PlayerModule.WrapAngle(facing - 3f), _player.ShownFacing, 3);
+        Assert.Equal(facing, _player.Facing);
+    }
+
+    [Fact]
+    public void TurnsByThePreviewYawOnTheStartScreenToo()
+    {
+        var (bus, player) = BehindTheStartScreen();
+        for (int i = 0; i < 60; i++)
+        {
+            bus.Publish(new PreviewYaw(-1.5f));
+            TickOpen(bus, player, i, Everything(0f, 1f));
+        }
+        Assert.Equal(-1.5f, player.PreviewTurn, 3);
+        Assert.Equal(PlayerModule.WrapAngle(Places.HomeDoor.Yaw - 1.5f), player.ShownFacing, 3);
+        Assert.Equal(Places.HomeDoor.Yaw, player.Facing);
+        Assert.Equal(Places.HomeDoor.Position, player.Position);
+    }
+
+    [Fact]
+    public void ControlComesBackAsBeforeOnceTheWardrobeCloses()
+    {
+        _player.PlaceAt(Middle, -0.7f);
+        var at = _player.Position;
+        float facing = _player.Facing;
+        for (int i = 0; i < 60; i++)
+            TickWardrobe(Everything(0f, 1f), previewYaw: 2f);
+        Assert.Equal(2f, _player.PreviewTurn, 3);
+        CloseWardrobe();
+        // Closed: facing as before opening, the turn eases back to it.
+        TickWith(Idle);
+        Assert.Equal(facing, _player.Facing);
+        Assert.True(_player.PreviewTurn < 2f && _player.PreviewTurn > 1f, "eases back, no pop");
+        Run(1.0, Idle);
+        Assert.Equal(0f, _player.PreviewTurn, 3);
+        Assert.Equal(facing, _player.ShownFacing, 3);
+        Assert.Equal(at, _player.Position);
+        // Walks, turns toward the move, jumps and draws the bow again.
+        Run(0.5, Moving(1f, 0f));
+        Assert.True(Flat(_bus.States[^1].Velocity).Length() > 4f);
+        AssertDirection(new Vector2(1f, 0f), FacingDirection(_player.Facing));
+        TickWith(Moving(0f, 1f, jump: true));
+        Assert.False(_bus.States[^1].Grounded);
+        _bus.Publish(new BowState(1f, 0));
+        TickWith(Moving(0f, 0f, fire: true, aim: new Vector3(0f, 0f, -1f)));
+        Assert.True(_player.Archery.Weight > 0f);
+        Assert.True(_player.HasAim);
+
+        // The next screen starts facing the camera again, whatever the last one's turn was.
+        Run(1.0, Idle);
+        TickWardrobe(Idle);
+        Assert.Equal(0f, _player.PreviewTurn, 3);
+    }
+
     // ---- Damage, defeat and coming back ----
 
     [Fact]

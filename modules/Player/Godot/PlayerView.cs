@@ -6,7 +6,8 @@ namespace Fungtopia.Player.View;
 
 /// <summary>
 /// Draws the player: the chosen character's model placed between the last two fixed ticks,
-/// turned to face <see cref="PlayerState.Facing"/>, and animated from the player's motion and its
+/// turned to face <see cref="PlayerModule.ShownFacing"/> (the facing, turned for viewing while the
+/// wardrobe or the shop is open), and animated from the player's motion and its
 /// archery pose (<see cref="PlayerModule.Archery"/>, aimed along the input's aim).
 /// The character setting is <see cref="Character"/> ("Girl" or "Boy"), which the command-line
 /// user argument <c>--character=boy</c> (after <c>--</c>) overrides, and the start screen's
@@ -27,6 +28,8 @@ public partial class PlayerView : Node3D, IModuleView
     private PlayerState _current;
     private ArcheryState _previousArchery = ArcheryState.Relaxed;
     private ArcheryState _currentArchery = ArcheryState.Relaxed;
+    private float _previousFacing;
+    private float _currentFacing;
     private long _seenTicks = -1;
     private int _dressedVersion = -1;
 
@@ -39,6 +42,7 @@ public partial class PlayerView : Node3D, IModuleView
         _player.Character = ChosenCharacter();
         _current = _previous = _player.State;
         _currentArchery = _previousArchery = _player.Archery;
+        _currentFacing = _previousFacing = _player.ShownFacing;
         _seenTicks = _player.Ticks;
         ShowModel(_player.Character);
     }
@@ -71,6 +75,8 @@ public partial class PlayerView : Node3D, IModuleView
             _current = _player.State;
             _previousArchery = _player.Ticks == _seenTicks + 1 ? _currentArchery : _player.Archery;
             _currentArchery = _player.Archery;
+            _previousFacing = _player.Ticks == _seenTicks + 1 ? _currentFacing : _player.ShownFacing;
+            _currentFacing = _player.ShownFacing;
             _seenTicks = _player.Ticks;
         }
         if (_current.Character != _model.Kind)
@@ -93,7 +99,7 @@ public partial class PlayerView : Node3D, IModuleView
         var to = ToGodot(_current.Position);
         // A teleport (fast travel, the clinic, the house) is a jump, not a glide across the world.
         var position = from.DistanceTo(to) > 2f ? to : from.Lerp(to, alpha);
-        float facing = Mathf.LerpAngle(_previous.Facing, _current.Facing, alpha);
+        float facing = Mathf.LerpAngle(_previousFacing, _currentFacing, alpha);
         _model.Transform = new Transform3D(new Basis(Vector3.Up, facing), position);
 
         var velocity = _current.Velocity;

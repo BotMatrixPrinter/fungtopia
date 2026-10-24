@@ -17,11 +17,14 @@ namespace Fungtopia.Player;
 /// takes damage, stays down after defeat until the next <see cref="TeleportPlayer"/>.
 /// Hidden until the start screen opens; shown standing idle at the home door, facing the camera's
 /// front view, while it is open; in play from its <see cref="GameStart"/>, which picks the character.
+/// While the wardrobe or the shop is open (<see cref="WardrobeState.Open"/>) it stands idle too,
+/// turned for viewing by the Wardrobe's <see cref="PreviewYaw"/> (<see cref="ShownFacing"/>).
 /// Publishes <see cref="PlayerState"/> every tick and <see cref="PlayerDefeated"/> once per defeat.
 /// </summary>
 public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessageHandler<DamagePlayer>,
     IMessageHandler<TeleportPlayer>, IMessageHandler<DialogueState>, IMessageHandler<BowState>,
-    IMessageHandler<GameStart>, IMessageHandler<StartScreenState>, IMessageHandler<AppearanceState>
+    IMessageHandler<GameStart>, IMessageHandler<StartScreenState>, IMessageHandler<AppearanceState>,
+    IMessageHandler<WardrobeState>, IMessageHandler<PreviewYaw>
 {
     public const float WalkSpeed = 5f;
     public const float JumpHeight = 1.2f;
@@ -32,14 +35,20 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
     public const float Radius = 0.4f;
     public const int MaxHealth = 10;
     public const float InvulnerableAfterHit = 0.7f;
+    /// <summary>How fast <see cref="PreviewTurn"/> eases toward the latest <see cref="PreviewYaw"/>, per second.</summary>
+    public const float PreviewTurnSharpness = 12f;
 
     private IMessageBus? _bus;
     private PlayerInput _input;
     private bool _jumpQueued;
+    /// <summary>Look.X (yaw right) added up since the last tick.</summary>
+    private float _lookX;
     private bool _defeatPending;
     private bool _talking;
     private float _bowDraw;
     private bool _screenOpen;
+    private bool _wardrobeOpen;
+    private float _previewYaw;
     private bool _started;
 
     /// <summary>The setting that picks the character (Girl by default) until <see cref="GameStart"/> picks it.</summary>
@@ -62,8 +71,21 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
     /// <summary>Whether <see cref="GameStart"/> has come: until then damage is ignored.</summary>
     public bool Started => _started;
 
-    /// <summary>Whether the player takes input (and draws the bow): started and the start screen closed.</summary>
-    private bool InPlay => _started && !_screenOpen;
+    /// <summary>Whether the player takes input (and draws the bow): started, the start screen and the wardrobe closed.</summary>
+    private bool InPlay => _started && !_screenOpen && !_wardrobeOpen;
+
+    /// <summary>Whether a screen that shows the character (start screen, wardrobe, shop) is open: it stands idle.</summary>
+    public bool OnScreen => _screenOpen || _wardrobeOpen;
+
+    /// <summary>
+    /// How far the character is turned for viewing from <see cref="Facing"/>, radians (positive turns
+    /// left, like yaw): eased toward the latest <see cref="PreviewYaw"/> while <see cref="OnScreen"/>,
+    /// back toward 0 once closed. <see cref="Facing"/> itself (the camera's front view) does not turn.
+    /// </summary>
+    public float PreviewTurn { get; private set; }
+
+    /// <summary>The yaw the view turns the model to: <see cref="Facing"/> + <see cref="PreviewTurn"/>.</summary>
+    public float ShownFacing => WrapAngle(Facing + PreviewTurn);
 
     /// <summary>The camera's yaw as the player knows it (Godot's convention, like <see cref="Facing"/>).</summary>
     public float CameraYaw { get; private set; }
@@ -113,6 +135,8 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
         bus.Subscribe<GameStart>(this);
         bus.Subscribe<StartScreenState>(this);
         bus.Subscribe<AppearanceState>(this);
+        bus.Subscribe<WardrobeState>(this);
+        bus.Subscribe<PreviewYaw>(this);
         State = MakeState();
     }
 
@@ -130,18 +154,25 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
     {
         if (!InPlay)
         {
-            _input = default;
-            _jumpQueued = false;
+            StopInput();
             return;
         }
         _input = message;
         if (message.Jump)
             _jumpQueued = true;
-        Vector3 aim = message.AimDirection;
-        if (message.HasAim && aim.X * aim.X + aim.Z * aim.Z > 0.0001f)
+        if (float.IsFinite(message.Look.X))
+            _lookX += message.Look.X;
+    }
+
+    /// <summary>The camera's yaw from the tick's input (on the tick, so a screen opened meanwhile stops it).</summary>
+    private void FollowCamera()
+    {
+        Vector3 aim = _input.AimDirection;
+        if (_input.HasAim && aim.X * aim.X + aim.Z * aim.Z > 0.0001f)
             CameraYaw = MathF.Atan2(-aim.X, -aim.Z);
-        else if (float.IsFinite(message.Look.X))
-            CameraYaw = WrapAngle(CameraYaw - message.Look.X);
+        else
+            CameraYaw = WrapAngle(CameraYaw - _lookX);
+        _lookX = 0f;
     }
 
     /// <summary>Moves there at once; after a defeat also brings the player back with full health.</summary>
@@ -166,7 +197,35 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
     /// <summary>Out of play (behind the start screen) the bow stays on the back: idle only.</summary>
     public void Handle(in BowState message) => _bowDraw = InPlay ? message.Draw : 0f;
 
-    public void Handle(in StartScreenState message) => _screenOpen = message.Open;
+    public void Handle(in StartScreenState message)
+    {
+        _screenOpen = message.Open;
+        if (_screenOpen)
+            StopInput();
+    }
+
+    /// <summary>The wardrobe or the shop: while open the character stands idle, input ignored.</summary>
+    public void Handle(in WardrobeState message)
+    {
+        _wardrobeOpen = message.Open;
+        if (_wardrobeOpen)
+            StopInput();
+    }
+
+    /// <summary>Keeps the latest turn (0 faces the camera, positive turns the front to the screen's right).</summary>
+    public void Handle(in PreviewYaw message)
+    {
+        if (float.IsFinite(message.Yaw))
+            _previewYaw = WrapAngle(message.Yaw);
+    }
+
+    private void StopInput()
+    {
+        _input = default;
+        _jumpQueued = false;
+        _lookX = 0f;
+        _bowDraw = 0f;
+    }
 
     /// <summary>Keeps the latest look (it arrives every tick; only a change counts).</summary>
     public void Handle(in AppearanceState message)
@@ -228,9 +287,30 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
         if (!Alive)
             DefeatedSeconds += dt;
 
-        Move(dt);
-        _jumpQueued = false;
-        Archery = ArcheryPose.Advance(Archery, _bowDraw, dt);
+        if (OnScreen)
+        {
+            // Standing idle for viewing: no walking, jump or bow, on the ground.
+            StopInput();
+            Archery = ArcheryState.Relaxed;
+            Position = new Vector3(Position.X, Ground.HeightAt(Position.X, Position.Z), Position.Z);
+            Velocity = Vector3.Zero;
+            Grounded = true;
+        }
+        else
+        {
+            FollowCamera();
+            Move(dt);
+            _jumpQueued = false;
+            Archery = ArcheryPose.Advance(Archery, _bowDraw, dt);
+            // The next screen starts facing the camera.
+            _previewYaw = 0f;
+        }
+        // The camera faces the character at yaw Facing + π, so turning its front to the screen's
+        // right is turning it left (positive yaw) by PreviewYaw; eased the short way round.
+        float diff = WrapAngle(_previewYaw - PreviewTurn);
+        PreviewTurn = MathF.Abs(diff) < 1e-4f
+            ? _previewYaw
+            : WrapAngle(PreviewTurn + diff * (1f - MathF.Exp(-PreviewTurnSharpness * dt)));
 
         State = MakeState();
         _bus.Publish(State);
