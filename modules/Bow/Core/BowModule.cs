@@ -70,7 +70,7 @@ public sealed class BowModule : IModule, IMessageHandler<PlayerInput>, IMessageH
 
     /// <summary>
     /// The direction the bow points while drawing (the latest shot direction): from the hold point
-    /// toward <see cref="Target"/>, raised a little against gravity.
+    /// toward <see cref="Target"/>, raised a little against gravity; without an aim, level along the facing.
     /// </summary>
     public Vector3 AimDirection { get; private set; } = -Vector3.UnitZ;
 
@@ -149,18 +149,18 @@ public sealed class BowModule : IModule, IMessageHandler<PlayerInput>, IMessageH
         }
         // The crosshair's point, every tick (the pose and HUD read it while drawing).
         Vector3 hold = HoldPoint();
-        AimRay(hold, out Vector3 origin, out Vector3 ray);
+        bool hasAim = AimRay(hold, out Vector3 origin, out Vector3 ray);
         Target = FindTarget(origin, ray, hold);
         if (_input.Fire)
         {
             _drawing = true;
             Draw = MathF.Min(1f, Draw + dt / FullDrawSeconds);
-            AimDirection = Vector3.Normalize(LaunchVelocity(hold, Target, SpeedFor(Draw), _dt));
+            AimDirection = Vector3.Normalize(Launch(hasAim, hold, ray));
         }
         else if (_drawing)
         {
             _drawing = false;
-            Vector3 velocity = LaunchVelocity(hold, Target, SpeedFor(Draw), _dt);
+            Vector3 velocity = Launch(hasAim, hold, ray);
             AimDirection = Vector3.Normalize(velocity);
             Shoot(hold, velocity, Draw);
             Draw = 0f;
@@ -174,8 +174,18 @@ public sealed class BowModule : IModule, IMessageHandler<PlayerInput>, IMessageH
         return BowGeometry.HoldPoint(Player.Position, facing);
     }
 
-    /// <summary>The camera's ray through the crosshair when the input has a valid one, else the player's facing from the hold point.</summary>
-    private void AimRay(Vector3 hold, out Vector3 origin, out Vector3 direction)
+    /// <summary>
+    /// The launch velocity for the current draw: toward <see cref="Target"/> with an aim; without
+    /// one, level along the facing (<paramref name="ray"/>), with no lift.
+    /// </summary>
+    private Vector3 Launch(bool hasAim, Vector3 hold, Vector3 ray) =>
+        hasAim ? LaunchVelocity(hold, Target, SpeedFor(Draw), _dt) : ray * SpeedFor(Draw);
+
+    /// <summary>
+    /// The camera's ray through the crosshair when the input has a valid one (true), else the
+    /// player's level facing from the hold point (false).
+    /// </summary>
+    private bool AimRay(Vector3 hold, out Vector3 origin, out Vector3 direction)
     {
         Vector3 aim = _input.AimDirection, from = _input.AimOrigin;
         if (_input.HasAim && float.IsFinite(aim.X) && float.IsFinite(aim.Y) && float.IsFinite(aim.Z)
@@ -183,11 +193,12 @@ public sealed class BowModule : IModule, IMessageHandler<PlayerInput>, IMessageH
         {
             origin = from;
             direction = Vector3.Normalize(aim);
-            return;
+            return true;
         }
         float facing = float.IsFinite(Player.Facing) ? Player.Facing : 0f;
         origin = hold;
         direction = new Vector3(-MathF.Sin(facing), 0f, -MathF.Cos(facing));
+        return false;
     }
 
     /// <summary>

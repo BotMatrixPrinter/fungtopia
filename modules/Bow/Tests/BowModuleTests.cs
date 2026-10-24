@@ -223,7 +223,7 @@ public class BowModuleTests
         var aim = Vector3.Normalize(new Vector3(0.3f, 0.1f, -1f));
         Shoot(36, aim);
         var a = OnlyArrow();
-        // Facing 0 (-Z): Right is +X, Forward is -Z.
+        // Facing 0 (-Z): Right is +X (the hold point is left of it, HoldRight < 0), Forward is -Z.
         var start = Spot + new Vector3(BowGeometry.HoldRight, BowGeometry.HoldUp, -BowGeometry.HoldForward);
         // It was launched at the start and has flown one tick since.
         Assert.True(Vector3.Distance(start, a.PreviousPosition) < 1e-4f, $"{a.PreviousPosition} vs {start}");
@@ -244,20 +244,35 @@ public class BowModuleTests
     }
 
     [Fact]
-    public void TheHoldPointSitsAtTheChibisChestInFrontOfItsRightSide()
+    public void TheHoldPointIsOutInTheExtendedLeftHandClearOfTheHead()
     {
         Assert.Equal(new Vector3(BowGeometry.HoldRight, BowGeometry.HoldUp, BowGeometry.HoldForward), BowGeometry.HoldOffset);
-        Assert.InRange(BowGeometry.HoldRight, 0.05f, 0.3f);
-        Assert.InRange(BowGeometry.HoldUp, 1f, 1.3f);
-        Assert.InRange(BowGeometry.HoldForward, 0.3f, 0.6f);
+        Assert.Equal(-0.45f, BowGeometry.HoldRight, 3); // 0.45 m to the left
+        Assert.Equal(0.80f, BowGeometry.HoldUp, 3);
+        Assert.Equal(0.45f, BowGeometry.HoldForward, 3);
         Assert.InRange(BowGeometry.FullDrawPull, 0.15f, 0.4f);
+        // Clear of the chibi head (about 0.86 m wide, centered about 1.09 m above the feet).
+        var head = new Vector3(0f, BowGeometry.HeadUp, 0f);
+        Assert.Equal(1.09f, BowGeometry.HeadUp, 2);
+        Assert.Equal(0.6f, BowGeometry.MinHeadClearance, 3);
+        Assert.True(Vector3.Distance(BowGeometry.HoldOffset, head) >= BowGeometry.MinHeadClearance);
+        // Seen from straight behind, the hand is outside the head's outline (half width 0.43 m).
+        Assert.True(MathF.Abs(BowGeometry.HoldRight) > 0.43f || BowGeometry.HoldUp < BowGeometry.HeadUp - 0.43f);
+        // In the world, for any facing, it is left of the facing.
+        foreach (float facing in new[] { 0f, 1f, MathF.PI / 2, -2.5f })
+        {
+            var feet = new Vector3(3f, 2f, -7f);
+            var left = new Vector3(-MathF.Cos(facing), 0f, MathF.Sin(facing));
+            Assert.Equal(0.45f, Vector3.Dot(BowGeometry.HoldPoint(feet, facing) - feet, left), 4);
+            Assert.True(Vector3.Distance(BowGeometry.HoldPoint(feet, facing), feet + head) >= BowGeometry.MinHeadClearance);
+        }
     }
 
     [Theory]
-    [InlineData(0f, 0.15f, -0.45f)]          // facing -Z: right +X
-    [InlineData(MathF.PI / 2, -0.45f, -0.15f)] // facing -X: right -Z
-    [InlineData(MathF.PI, -0.15f, 0.45f)]    // facing +Z: right -X
-    [InlineData(-MathF.PI / 2, 0.45f, 0.15f)] // facing +X: right +Z
+    [InlineData(0f, -0.45f, -0.45f)]          // facing -Z: left -X
+    [InlineData(MathF.PI / 2, -0.45f, 0.45f)]  // facing -X: left +Z
+    [InlineData(MathF.PI, 0.45f, 0.45f)]       // facing +Z: left +X
+    [InlineData(-MathF.PI / 2, 0.45f, -0.45f)] // facing +X: left -Z
     public void TheHoldPointTurnsWithTheFacing(float facing, float dx, float dz)
     {
         var feet = new Vector3(3f, 2f, -7f);
@@ -292,8 +307,13 @@ public class BowModuleTests
         _bus.Publish(new PlayerInput(Vector2.Zero, Vector2.Zero, false, false, false, Vector3.Zero));
         _bus.Publish(_player);
         _bow.Tick(new TickContext(_tick++, Step));
-        var v = OnlyArrow().Velocity;
-        AssertAlongAimRaisedALittle(-Vector3.UnitX, v);
+        var a = OnlyArrow();
+        Assert.Equal(BowGeometry.HoldPoint(Spot, MathF.PI / 2), a.PreviousPosition);
+        // Shot level along the facing, from the hold point: no lift (one tick of gravity since).
+        var launch = Vector3.Normalize(a.Velocity + new Vector3(0f, BowModule.Gravity * Dt, 0f));
+        Assert.True(Vector3.Distance(-Vector3.UnitX, launch) < 1e-4f, $"{launch}");
+        Assert.True(MathF.Abs(MathF.Asin(Vector3.Normalize(a.Velocity).Y)) < 0.07f, $"{a.Velocity}");
+        Assert.True(Vector3.Distance(-Vector3.UnitX, _bow.AimDirection) < 1e-4f, $"{_bow.AimDirection}");
         // Its target is on the facing's line from the hold point.
         var target = _bus.States[^1].Target;
         var hold = BowGeometry.HoldPoint(Spot, MathF.PI / 2);

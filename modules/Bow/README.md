@@ -30,10 +30,13 @@ Test it with `./test.sh Bow` from the repository root.
 `BowGeometry` (a static class, not a message) is where the character holds the bow, for the Player
 module to put the bow hand there and for the Bow module to shoot from:
 
-- `HoldRight` 0.15, `HoldUp` 1.15, `HoldForward` 0.45 (`HoldOffset` as a `Vector3`, X Right, Y Up,
-  Z Forward): the hold point, an offset in meters from the player's feet in the player's facing
-  frame (the chibi character's chest and hands). Forward is the facing (-sin Facing, 0,
-  -cos Facing), Right is (cos Facing, 0, -sin Facing).
+- `HoldRight` -0.45 (0.45 m to the left), `HoldUp` 0.80, `HoldForward` 0.45 (`HoldOffset` as a
+  `Vector3`, X Right, Y Up, Z Forward): the hold point, an offset in meters from the player's feet
+  in the player's facing frame: the bow held out in the extended left hand, like an archer's arm.
+  Forward is the facing (-sin Facing, 0, -cos Facing), Right is (cos Facing, 0, -sin Facing).
+- `HeadUp` 1.09: the chibi head's center (about 0.86 m wide) above the feet. The hold point is
+  about 0.70 m from it, at least `MinHeadClearance` 0.6 m, and outside the head's outline seen from
+  behind, so an over-the-shoulder camera (left of the head) sees the bow.
 - `HoldPoint(feet, facing)`: that point in the world.
 - `FullDrawPull` 0.26: how far the string (and the nocked arrow) comes back toward the character
   at a full draw, meters; a draw of `Draw` pulls `Draw` × this.
@@ -47,7 +50,7 @@ module to put the bow hand there and for the Bow module to shoot from:
 Each tick:
 
 - **Target.** While the player is `Alive`, the crosshair's point (`Target`): the camera's ray from
-  `AimOrigin` along `AimDirection` (without an aim: from the hold point along the player's facing)
+  `AimOrigin` along `AimDirection` (without an aim: from the hold point level along the player's facing)
   is searched up to 60 m (`MaxAimDistance`) for the first hit among living monsters' spheres, solid
   obstacles (`Ground.Blocks`, up to 6 m above the ground) and the ground (`Ground.HeightAt`),
   marched in 0.25 m steps and refined by bisection; with no hit, the point 60 m along the ray. The
@@ -61,7 +64,8 @@ Each tick:
   toward `Target`, aimed higher by the fall over its flight time (`LaunchVelocity`) so it passes
   through the target: the camera can sit over the shoulder and the arrow still lands where the
   crosshair is. With the camera straight behind the hold point this is the camera's own line
-  (raised only by that small lift). No drawing or shooting while the player is not `Alive`:
+  (raised only by that small lift). Without an aim (`HasAim` false) the arrow is shot level along
+  the facing from the hold point, with no lift. No drawing or shooting while the player is not `Alive`:
   the draw is lost.
 - **Flight.** Gravity of 4 m/s² (light); each tick the arrow moves by its new velocity and points
   along it. Collisions are swept along the whole step, so fast arrows never tunnel.
