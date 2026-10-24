@@ -34,7 +34,7 @@ public partial class CharacterModel : Node3D
     private static ShaderMaterial? s_outline;
     private static CylinderMesh? s_stringMesh;
 
-    /// <summary>The held bow leans a little (radians about its forward axis), like a cute archer's.</summary>
+    /// <summary>The held bow leans a little (radians about its forward axis, mirrored by <see cref="ArcheryPose.HoldSide"/>), like a cute archer's.</summary>
     private const float BowCant = 0.22f;
 
     private readonly Node3D _rig = new() { Name = "Rig" };
@@ -358,9 +358,9 @@ public partial class CharacterModel : Node3D
         // pitch with the aim; the legs keep walking.
         _body.Pose(new Vector3(-0.08f * _walkAmount + aim * aimPitch * 0.3f,
             MathF.Sin(_walkPhase) * 0.08f * _walkAmount * (1f - aim) + aim * (aimYaw * 0.5f - 0.25f), 0f));
-        // The head also tilts away to the left, making room for the string hand at the cheek.
+        // The head also tilts away from the hold point's side, making room for the string hand at the cheek.
         _head.Pose(new Vector3(0.05f * _walkAmount - 0.06f * s + aim * aimPitch * 0.7f, aim * aimYaw,
-            MathF.Sin(_walkPhase) * 0.05f * _walkAmount * (1f - aim) + aim * 0.45f));
+            MathF.Sin(_walkPhase) * 0.05f * _walkAmount * (1f - aim) + aim * ArcheryPose.HeadRoll));
         var backRotation = new Vector3(-0.08f * _walkAmount, MathF.Sin(_walkPhase) * 0.08f * _walkAmount, 0f);
         var backOffset = new Vector3(0f, bob * 0.3f, 0f) + _bowPush;
         _backBow.Pose(backRotation, backOffset);
@@ -394,7 +394,7 @@ public partial class CharacterModel : Node3D
         var forwardLocal = ArcheryPose.BowForward(ArcheryPose.AimLocal(aimYaw, aimPitch));
         var z = -new Vector3(forwardLocal.X, forwardLocal.Y, forwardLocal.Z);
         var x = Vector3.Up.Cross(z).Normalized();
-        var holdBasis = new Basis(x, z.Cross(x), z) * new Basis(Vector3.Back, BowCant);
+        var holdBasis = new Basis(x, z.Cross(x), z) * new Basis(Vector3.Back, ArcheryPose.HoldSide * BowCant);
         var backModel = fromParts * back.Origin;
         var gripLocal = ArcheryPose.BowGrip(weight, new System.Numerics.Vector3(backModel.X, backModel.Y, backModel.Z));
         var grip = new Vector3(gripLocal.X, gripLocal.Y, gripLocal.Z);

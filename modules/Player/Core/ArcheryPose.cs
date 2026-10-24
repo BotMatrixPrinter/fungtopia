@@ -74,11 +74,17 @@ public static class ArcheryPose
     public const float TipHalfSpan = 0.368f;
 
     /// <summary>
-    /// The held bow points this much left of the aim (radians about the up axis), so the string
-    /// hand comes back beside the big chibi head instead of into it (the hold point is at face
-    /// height). The Bow module's arrows still fly along the aim.
+    /// The held bow points this much off the aim (radians about the up axis), away from the head's
+    /// side (<see cref="HoldSide"/>), so the string hand comes back beside the big chibi head on
+    /// the hold point's side instead of into it. The Bow module's arrows still fly along the aim.
     /// </summary>
     public const float BowSkew = 0.35f;
+
+    /// <summary>
+    /// While drawing, the head tilts this much (roll, radians) away from the hold point's side,
+    /// making room for the string hand at the cheek.
+    /// </summary>
+    public const float HeadTilt = 0.45f;
 
     /// <summary>The nocked arrow from nock to tip, meters (NockArrow in characters.py).</summary>
     public const float ArrowLength = 0.66f;
@@ -88,6 +94,15 @@ public static class ArcheryPose
 
     /// <summary>The bow hand's place in the full pose: <see cref="BowGeometry.HoldOffset"/> in the model frame.</summary>
     public static Vector3 HoldLocal => new(BowGeometry.HoldRight, BowGeometry.HoldUp, -BowGeometry.HoldForward);
+
+    /// <summary>
+    /// Which side of the head's middle the hold point is on: 1 right (or in the middle), -1 left.
+    /// The bow, the string hand and the follow-through keep to that side; the head tilts away from it.
+    /// </summary>
+    public static float HoldSide => BowGeometry.HoldRight < 0f ? -1f : 1f;
+
+    /// <summary>The head's tilt in the full pose, positive to the left: <see cref="HeadTilt"/> away from <see cref="HoldSide"/>.</summary>
+    public static float HeadRoll => HoldSide * HeadTilt;
 
     /// <summary>
     /// The state one tick of <paramref name="dt"/> seconds later, with the bow drawn
@@ -201,10 +216,15 @@ public static class ArcheryPose
         return Vector3.Lerp(backGrip, HoldLocal, Eased(w)) + new Vector3(-0.25f, 0.2f, 0f) * arc;
     }
 
-    /// <summary>The held bow's forward (where its nocked arrow points): the aim turned <see cref="BowSkew"/> to the left.</summary>
+    /// <summary>
+    /// The held bow's forward (where its nocked arrow points): the aim turned <see cref="BowSkew"/>
+    /// away from <see cref="HoldSide"/> (to the left for a hold point right of the head), so the
+    /// string comes back outward, on the hold point's side.
+    /// </summary>
     public static Vector3 BowForward(Vector3 aimLocal)
     {
-        float s = MathF.Sin(BowSkew), c = MathF.Cos(BowSkew);
+        float skew = HoldSide * BowSkew;
+        float s = MathF.Sin(skew), c = MathF.Cos(skew);
         return Vector3.Normalize(new Vector3(aimLocal.X * c + aimLocal.Z * s, aimLocal.Y, -aimLocal.X * s + aimLocal.Z * c));
     }
 
@@ -216,13 +236,13 @@ public static class ArcheryPose
 
     /// <summary>
     /// Where the right hand is in the full pose: on the string at the nock while drawing; after a
-    /// release it follows through, back and out to the right.
+    /// release it follows through, back and outward, away from the head (<see cref="HoldSide"/>).
     /// </summary>
     public static Vector3 RightHand(in ArcheryState s, Vector3 grip, Vector3 bowForward)
     {
         float follow = FollowThrough(s);
         float pull = s.Draw > 0f ? StringPull(s) : s.ReleasedDraw * BowGeometry.FullDrawPull;
-        var side = Vector3.Normalize(Vector3.Cross(bowForward, Vector3.UnitY)); // aim pitch is clamped, never vertical
+        var side = HoldSide * Vector3.Normalize(Vector3.Cross(bowForward, Vector3.UnitY)); // aim pitch is clamped, never vertical
         return Nock(grip, bowForward, pull) - bowForward * (0.12f * follow) + side * (0.08f * follow);
     }
 

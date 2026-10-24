@@ -141,13 +141,16 @@ facing) says what `CharacterModel` draws:
   grip and the left hand exactly at `BowGeometry`'s hold point (`HoldLocal`, where the Bow
   module's arrows start). The right hand is on the string, pulled back `Draw` ×
   `BowGeometry.FullDrawPull` behind its rest, with the nocked arrow (`NockArrow`, a poison
-  mushroom tip) on it. The bow points along the aim turned `BowSkew` (0.35 rad) to the left, so
-  the string hand comes back beside the big head, which tilts away to the left. The upper body and
+  mushroom tip) on it. Everything follows the side of the head the hold point is on, wherever
+  `BowGeometry` puts it (`HoldSide`: 1 for `HoldRight` ≥ 0, -1 left of the head): the bow points
+  along the aim turned `BowSkew` (0.35 rad) away from that side (to the left for a hold point on
+  the right) and leans (`BowCant`) the same way, so the string hand comes back outward beside the
+  big head, which tilts the other way (`HeadRoll`, `HeadTilt` 0.45 rad). The upper body and
   head turn and pitch toward `AimDirection` (`AimAngles`: yaw within ±0.7 rad of the facing,
   pitch within -0.6..0.7 rad); the feet keep the facing logic and the legs keep walking. The arms
   stretch (rubbery chibi arms) to reach. A slight squash pulses as the draw reaches full.
 - On release (`Draw` back to 0): the arrow is gone, the string snaps forward with a little
-  overshoot, the right hand follows through back and out; after 0.6 s without drawing the bow
+  overshoot, the right hand follows through back and outward (away from the head); after 0.6 s without drawing the bow
   swings back onto the back (0.15 s). Drawing again meanwhile keeps the bow in hand.
 - `PlayerView` blends `Weight` between ticks, so the pose glides at any frame rate.
 
