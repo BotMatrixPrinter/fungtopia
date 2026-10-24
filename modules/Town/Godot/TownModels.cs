@@ -13,7 +13,7 @@ public static class TownModels
     private const string Shaders = "res://modules/Town/Godot/Shaders/";
 
     /// <summary>Surfaces drawn without an ink outline (small soft details).</summary>
-    private static readonly HashSet<string> NoOutline = new() { "Spots", "SpotsPale", "MatStripe", "Water", "Soot", "Glow", "SignText" };
+    private static readonly HashSet<string> NoOutline = new() { "Spots", "SpotsPale", "MatStripe", "Water", "Soot", "Glow", "SignText", "Steam" };
 
     private static Shader? s_toon;
     private static ShaderMaterial? s_outline;
@@ -113,7 +113,7 @@ public static class TownModels
             return cached;
         // glTF stores linear colors; the shader's albedo is an sRGB color like Blender's swatch.
         var color = source is BaseMaterial3D standard ? standard.AlbedoColor : Colors.White;
-        float glow = name is "Water" ? 0.25f : name is "Glow" or "Window" ? TownView.DayGlow : 0f;
+        float glow = name is "Water" or "Steam" ? 0.25f : name is "Glow" or "Window" ? TownView.DayGlow : 0f;
         var material = Toon(color.SrgbToLinear(), !NoOutline.Contains(name), glow);
         s_materials[name] = material;
         return material;

@@ -74,7 +74,7 @@ public class TownTests
             if (drawable)
                 town++;
         }
-        Assert.Equal(10, town);
+        Assert.Equal(11, town);
     }
 
     [Fact]
@@ -94,6 +94,7 @@ public class TownTests
         Assert.Equal(1, Count(TownPiece.FurnitureShop));
         Assert.Equal(1, Count(TownPiece.Fountain));
         Assert.Equal(1, Count(TownPiece.ClothingShop));
+        Assert.Equal(1, Count(TownPiece.FoodStall));
         Assert.Equal(4, Count(TownPiece.House));
         var looks = new HashSet<int>();
         foreach (var p in TownLayout.All)
@@ -108,15 +109,17 @@ public class TownTests
                 Assert.True(b.Width * b.Depth * b.Height < home.Width * home.Depth * home.Height, b.Kind.ToString());
     }
 
-    [Fact]
-    public void AbbysClothingShopIsDrawnOnceAtTheMapsSpot()
+    [Theory]
+    [InlineData(BuildingKind.ClothingShop, TownPiece.ClothingShop)]
+    [InlineData(BuildingKind.FoodStall, TownPiece.FoodStall)]
+    public void AbbysShopAndTheFoodStallAreDrawnOnceAtTheMapsSpot(BuildingKind kind, TownPiece expected)
     {
-        Assert.True(TownLayout.TryPieceFor(BuildingKind.ClothingShop, out var piece));
-        Assert.Equal(TownPiece.ClothingShop, piece);
+        Assert.True(TownLayout.TryPieceFor(kind, out var piece));
+        Assert.Equal(expected, piece);
         var buildings = Buildings.All;
         int index = -1;
         for (int i = 0; i < buildings.Length; i++)
-            if (buildings[i].Kind == BuildingKind.ClothingShop)
+            if (buildings[i].Kind == kind)
                 index = i;
         Assert.True(index >= 0);
         var shop = buildings[index];
@@ -124,7 +127,7 @@ public class TownTests
         int drawn = 0;
         foreach (var p in TownLayout.All)
         {
-            if (p.Piece != TownPiece.ClothingShop)
+            if (p.Piece != expected)
                 continue;
             drawn++;
             Assert.Equal(index, p.BuildingIndex);
@@ -139,8 +142,8 @@ public class TownTests
         Assert.Equal(1, drawn);
     }
 
-    /// <summary>The names of the objects in Models/town.glb (read from its JSON chunk).</summary>
-    private static HashSet<string> ModelObjects()
+    /// <summary>The JSON chunk of Models/town.glb.</summary>
+    private static JsonDocument ModelJson()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir != null && !File.Exists(Path.Combine(dir.FullName, "modules", "Town", "Models", "town.glb")))
@@ -149,7 +152,13 @@ public class TownTests
         byte[] glb = File.ReadAllBytes(Path.Combine(dir!.FullName, "modules", "Town", "Models", "town.glb"));
         Assert.Equal("glTF", Encoding.ASCII.GetString(glb, 0, 4));
         int length = BitConverter.ToInt32(glb, 12);
-        using var json = JsonDocument.Parse(Encoding.UTF8.GetString(glb, 20, length));
+        return JsonDocument.Parse(Encoding.UTF8.GetString(glb, 20, length));
+    }
+
+    /// <summary>The names of the objects in Models/town.glb.</summary>
+    private static HashSet<string> ModelObjects()
+    {
+        using var json = ModelJson();
         var names = new HashSet<string>();
         foreach (var node in json.RootElement.GetProperty("nodes").EnumerateArray())
             if (node.TryGetProperty("name", out var name))
@@ -162,12 +171,41 @@ public class TownTests
     {
         var names = ModelObjects();
         Assert.Contains("ClothingShop", names);
+        Assert.Contains("FoodStall", names);
         foreach (var p in TownLayout.All)
         {
             // TownView.ModelName: a House by its look, anything else by its piece.
             string name = p.Piece == TownPiece.House ? $"House{p.Variant}" : p.Piece.ToString();
             Assert.Contains(name, names);
         }
+    }
+
+    /// <summary>The materials object <paramref name="name"/> of Models/town.glb is drawn with.</summary>
+    private static HashSet<string> ModelMaterials(string name)
+    {
+        using var json = ModelJson();
+        var root = json.RootElement;
+        var materials = root.GetProperty("materials");
+        var used = new HashSet<string>();
+        foreach (var node in root.GetProperty("nodes").EnumerateArray())
+        {
+            if (!node.TryGetProperty("name", out var n) || n.GetString() != name)
+                continue;
+            var mesh = root.GetProperty("meshes")[node.GetProperty("mesh").GetInt32()];
+            foreach (var primitive in mesh.GetProperty("primitives").EnumerateArray())
+                used.Add(materials[primitive.GetProperty("material").GetInt32()].GetProperty("name").GetString()!);
+        }
+        return used;
+    }
+
+    [Fact]
+    public void TheFoodStallIsAWoodenStallUnderASpottedCapWithLanternsThatLightAtNight()
+    {
+        var used = ModelMaterials("FoodStall");
+        // Wood, a red cap with white spots, the "Mushroom Munchies" sign, the food on the counter,
+        // and Glow (the lanterns), which TownView lights at night with the street lamps.
+        foreach (var mat in new[] { "Wood", "WoodDark", "Cap", "Spots", "SignText", "Muffin", "Soup", "Pie", "Steam", "Glow" })
+            Assert.Contains(mat, used);
     }
 
     [Fact]
@@ -201,7 +239,7 @@ public class TownTests
             Assert.True(s >= stage);
             stage = s;
         }
-        Assert.Equal(10, CountWhere(p => p.BuildingIndex >= 0));
+        Assert.Equal(11, CountWhere(p => p.BuildingIndex >= 0));
     }
 
     private static int CountWhere(Func<TownPlacement, bool> match)
@@ -308,7 +346,7 @@ public class TownTests
     public void FlowerClumpsStayOffObstaclesPathsAndSpots()
     {
         var all = TownLayout.All;
-        var spots = new[] { Places.HomeDoor, Places.ClinicDoor, Places.MillieSpot, Places.FurnitureShopSpot, Places.AbbySpot, Places.SignpostTown };
+        var spots = new[] { Places.HomeDoor, Places.ClinicDoor, Places.MillieSpot, Places.FurnitureShopSpot, Places.AbbySpot, Places.FoodSpot, Places.SignpostTown };
         for (int i = 0; i < all.Length; i++)
         {
             var p = all[i];
@@ -476,8 +514,11 @@ public class TownTests
     {
         foreach (var piece in new[] { TownPiece.PlayerHouse, TownPiece.MillieHouse, TownPiece.Clinic, TownPiece.House, TownPiece.ClothingShop, TownPiece.Fountain, TownPiece.StreetLamp, TownPiece.Planter })
             Assert.True(TownGround.HasRootFlare(piece), piece.ToString());
-        foreach (var piece in new[] { TownPiece.Flowers, TownPiece.Fence, TownPiece.Bench, TownPiece.Crate })
+        foreach (var piece in new[] { TownPiece.Flowers, TownPiece.Fence, TownPiece.Bench, TownPiece.Crate, TownPiece.FoodStall })
             Assert.False(TownGround.HasRootFlare(piece), piece.ToString());
+        // The stalls stand on a rectangular wooden base instead, sampled to its corners.
+        Assert.True(TownGround.IsBoxy(TownPiece.FoodStall));
+        Assert.True(TownGround.IsBoxy(TownPiece.FurnitureShop));
     }
 
     // ---- The module: lamps follow night ----

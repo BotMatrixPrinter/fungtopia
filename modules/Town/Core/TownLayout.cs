@@ -25,6 +25,8 @@ public enum TownPiece
     Planter,
     /// <summary>A wooden crate (the Map's <see cref="PropKind.Crate"/>).</summary>
     Crate,
+    /// <summary>The "Mushroom Munchies" food stall on the square (the Map's <see cref="BuildingKind.FoodStall"/>).</summary>
+    FoodStall,
 }
 
 /// <summary>
@@ -102,7 +104,8 @@ public static class TownLayout
     public static readonly Vector2[] Spots =
     {
         Flat(Places.HomeDoor), Flat(Places.ClinicDoor), Flat(Places.MillieSpot),
-        Flat(Places.FurnitureShopSpot), Flat(Places.AbbySpot), Flat(Places.SignpostTown),
+        Flat(Places.FurnitureShopSpot), Flat(Places.AbbySpot), Flat(Places.FoodSpot),
+        Flat(Places.SignpostTown),
     };
 
     private static readonly float[] Sides = { -1f, 1f };
@@ -131,6 +134,7 @@ public static class TownLayout
             case BuildingKind.Fountain: piece = TownPiece.Fountain; return true;
             case BuildingKind.House: piece = TownPiece.House; return true;
             case BuildingKind.ClothingShop: piece = TownPiece.ClothingShop; return true;
+            case BuildingKind.FoodStall: piece = TownPiece.FoodStall; return true;
             default: piece = default; return false;
         }
     }

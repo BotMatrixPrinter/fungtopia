@@ -11,7 +11,7 @@ namespace Fungtopia.Town.View;
 /// the Map puts it, the Map's street lamps, benches, fences, planters and crates exactly where and as
 /// large as the Map says, and small flower clumps, all from town.glb. The
 /// street lamps' bulbs and every window light up while <see cref="TownModule.LampsLit"/> (night),
-/// fading over a second or two, each lamp with a warm light of its own. Nothing else moves.
+/// fading over a second or two, each lamp (and the food stall's lanterns) with a warm light of its own. Nothing else moves.
 /// </summary>
 public partial class TownView : Node3D, IModuleView
 {
@@ -22,6 +22,8 @@ public partial class TownView : Node3D, IModuleView
     private const float FadeSeconds = 1.5f;
     /// <summary>Where the bulb hangs, as a share of the lamp's height (2.62 m of the 3.2 m model).</summary>
     private const float LampLightHeight = 0.8f;
+    /// <summary>The food stall's light: among its lanterns, under its cap (1.9 m of the 3 m model).</summary>
+    private const float StallLightHeight = 0.63f;
 
     private TownModule? _town;
     private readonly List<OmniLight3D> _lights = new();
@@ -45,12 +47,13 @@ public partial class TownView : Node3D, IModuleView
             AddChild(node);
             if (TownGround.HasRootFlare(p.Piece))
                 AddChild(RootFlare(p, fit));
-            if (p.Piece == TownPiece.StreetLamp)
+            if (p.Piece is TownPiece.StreetLamp or TownPiece.FoodStall)
             {
+                float share = p.Piece == TownPiece.StreetLamp ? LampLightHeight : StallLightHeight;
                 var light = new OmniLight3D
                 {
                     Name = $"LampLight_{_lights.Count}",
-                    Position = node.Position + new Vector3(0f, fit.DrawnHeight * LampLightHeight, 0f),
+                    Position = node.Position + new Vector3(0f, fit.DrawnHeight * share, 0f),
                     LightColor = new Color(1f, 0.78f, 0.45f),
                     OmniRange = 10f,
                     OmniAttenuation = 1.2f,
@@ -100,6 +103,7 @@ public partial class TownView : Node3D, IModuleView
         TownPiece.Fountain => new(7f, 2.2f, 7f),
         TownPiece.House => new(9f, 7f, 9f),
         TownPiece.ClothingShop => new(10f, 8f, 9f),
+        TownPiece.FoodStall => new(4.2f, 3f, 2.4f),
         TownPiece.StreetLamp => new(0.8f, 3.2f, 0.8f),
         TownPiece.Bench => new(1.8f, 0.9f, 0.7f),
         TownPiece.Fence => new(3.5f, 0.8f, 0.2f),

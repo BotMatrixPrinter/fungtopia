@@ -57,7 +57,7 @@ public static class TownGround
 
     /// <summary>Whether a piece stands on a rectangular footprint (otherwise a round or oval stem or basin).</summary>
     public static bool IsBoxy(TownPiece piece) =>
-        piece is TownPiece.FurnitureShop or TownPiece.Bench or TownPiece.Fence or TownPiece.Crate;
+        piece is TownPiece.FurnitureShop or TownPiece.FoodStall or TownPiece.Bench or TownPiece.Fence or TownPiece.Crate;
 
     /// <summary>Whether a piece gets a flared skirt where it meets the ground (big stems, foundations, basins).</summary>
     public static bool HasRootFlare(TownPiece piece) =>

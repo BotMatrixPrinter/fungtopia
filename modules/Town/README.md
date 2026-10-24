@@ -2,7 +2,7 @@
 
 Draws Mushroom Town, exactly where the Map module lays it out (`Fungtopia.Map.Buildings`, the
 ones in `Area.Town`): your house, Millie's house next door, Dr. Jeremy's clinic, the furniture
-shop's stall, Abby's clothing shop, the fountain in the square and four more houses, plus the
+shop's stall, Abby's clothing shop, the "Mushroom Munchies" food stall, the fountain in the square and four more houses, plus the
 Map's Town props (`Fungtopia.Map.Props`, the ones in `Area.Town`: street lamps, benches, garden
 fences, planters, crates), and small flower clumps. The street lamps (and every window) light up
 at night. Nothing in the town moves or is walked into here: the Map's `Ground.Obstacles` already
@@ -20,7 +20,7 @@ tall), which are walked over.
   (loads `town.glb` at run time, toon materials); `Preview.tscn` with `TownPreview` (for
   screenshots); `Shaders/` (toon surface, ink outline).
 - `Models/` — `town.py`, the Blender script that builds and exports `town.glb` next to it.
-- `Tests/` — `TownTests.cs`: xUnit tests of `TownLayout` (its props are exactly the Map's Town props), of `town.glb` having an object for every placement, of `TownGround` (bases never float over the ground nor sink deep, at many spots over the town, roads and the rough Deep Forest), and of `TownModule` with a fake `IMessageBus`.
+- `Tests/` — `TownTests.cs`: xUnit tests of `TownLayout` (its props are exactly the Map's Town props), of `town.glb` having an object for every placement (and the food stall's materials: wood, spotted cap, sign, food, steam, lanterns), of `TownGround` (bases never float over the ground nor sink deep, at many spots over the town, roads and the rough Deep Forest), and of `TownModule` with a fake `IMessageBus`.
 
 Test it with `./test.sh Town` from the repository root.
 
@@ -41,7 +41,7 @@ allocations per tick.
 
 - first each Town building of `Buildings.All`, once, in order, at its exact position, rotation
   and size, with its index in `Buildings.All` (`TryPieceFor(BuildingKind)`: PlayerHouse,
-  MillieHouse, Clinic, FurnitureShop, Fountain, House, ClothingShop; the four plain houses get
+  MillieHouse, Clinic, FurnitureShop, Fountain, House, ClothingShop, FoodStall; the four plain houses get
   looks 0..3). A kind Town does not draw (PetCity's, or one the Map adds later) is skipped, never
   thrown;
 - then each Town prop of `Props.All`, once, in order, with its index in `Props.All`
@@ -54,7 +54,7 @@ allocations per tick.
   side of the door and round the square. Each passes `FlowersFit`: walkable town ground, off every
   obstacle (`Ground.Blocks`), `PathClearance` (1.8 m) from the middle of the town's dirt paths
   (`PathDistance`: the street from the entrance to the square and the path from the square to each
-  front, as the Map draws them), 1.2 m from the doors, NPC spots and the signpost, and not on
+  front, as the Map draws them), 1.2 m from the doors, NPC spots (`FoodSpot` included) and the signpost, and not on
   another clump.
 
 ## View
@@ -63,12 +63,13 @@ allocations per tick.
 placement's size, standing where `TownGround.Fit` says (below). Big stems, foundations and basins
 (houses, the clinic, Abby's shop, the fountain, street lamps, planters: `HasRootFlare`) get a
 stone skirt from just above their highest ground widening down into the ground, so they look rooted. While `LampsLit` the lamp bulbs and windows glow (fading over 1.5 s) and each
-street lamp has a warm `OmniLight3D` at its bulb (0.8 of its height); by day they are off. The sky and sun are DayNight's.
+street lamp has a warm `OmniLight3D` at its bulb (0.8 of its height), the food stall one among
+its lanterns (0.63 of its height); by day they are off. The sky and sun are DayNight's.
 
 ## Ground
 
 `TownGround.Fit(placement)` samples `Ground.HeightAt` at the footprint's center, 16 points on its
-edge (an ellipse, or a rectangle for the stall, benches, fences and crates, corners included) and
+edge (an ellipse, or a rectangle for the two stalls, benches, fences and crates, corners included) and
 8 halfway in (`FootprintPoint`). The base (`Base`) goes at the lowest of them minus `Sink` (0.15 m;
 flower clumps 0.05 m), and the top (`Top`) stays the placement's `Height` above the highest, so the
 stem reaches down by the difference (`DrawnHeight` = `Top` - `Base`; the view stretches the model
@@ -95,6 +96,11 @@ toon-shaded with ink outlines, and no eyes or faces on anything:
   with three little outfits on stands (a dress, a shirt with shorts, a sun hat and scarf), a round
   window, flower boxes, two little lanterns by the door, and a big clothes-hanger sign on the cap
   reading "Abby's". Its windows and lanterns light up at night with the rest of the town.
+- **FoodStall** — "Mushroom Munchies" (4.2 x 2.4 m, 3 m tall): a cozy wooden stall on a sunk stone
+  footing, under a red mushroom cap with white spots; a cream sign board reading "Mushroom Munchies"
+  under the cap's front; on the planked counter two baskets of berry muffins, a steaming pot of
+  soup (static steam puffs) and two pies, more pies and berry jars on the back shelf; four little
+  lanterns (Glow) that light up at night with the street lamps.
 - **House0..House3** — orange, lilac, blue and yellow caps, round or arched doors, flower boxes,
   two with chimneys.
 - **StreetLamp** (modelled 3.2 m, a glowing bulb under a spotted cap), **Bench** (on
@@ -106,4 +112,4 @@ toon-shaded with ink outlines, and no eyes or faces on anything:
 
 `./screenshot.sh modules/Town/Godot/Preview.tscn` shows the town by day;
 `TOWN_PREVIEW=night` at 22:00 with the lamps lit. `TOWN_VIEW` = `home`, `clinic`, `fountain`,
-`houses` or `shop` (Abby's) frames a closer view (default `square`, over the town from its entrance).
+`houses`, `shop` (Abby's) or `food` (the food stall) frames a closer view (default `square`, over the town from its entrance).

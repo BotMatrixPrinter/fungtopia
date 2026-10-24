@@ -4,7 +4,7 @@
 #
 # One object per Fungtopia.Town TownPiece: PlayerHouse (12 x 12 m, 10 m tall), MillieHouse
 # (10 x 10 x 8), Clinic (12 x 10 x 8.5), FurnitureShop (7 x 4 x 3.5), Fountain (7 x 7 x 2.2),
-# House0..House3 (9 x 9 x 7, four looks), ClothingShop (10 x 9 x 8), StreetLamp, Bench, Fence (one 3.5 m segment),
+# House0..House3 (9 x 9 x 7, four looks), ClothingShop (10 x 9 x 8), FoodStall (4.2 x 2.4 x 3), StreetLamp, Bench, Fence (one 3.5 m segment),
 # Planter, Crate and Flowers (a small clump): each the size of its footprint in the Map Contract, standing on the ground at the
 # origin (a little foundation below it, for uneven ground), its front (door, counter, seat)
 # toward Blender +Y (Godot -Z, a building's front at rotation 0). Chunky and cute; no eyes or
@@ -65,6 +65,12 @@ COLORS = {
     "Display": (1.0, 0.95, 0.97),
     "SignText": (0.62, 0.24, 0.46),
     "Hanger": (0.86, 0.68, 0.36),
+    "Basket": (0.84, 0.64, 0.38),
+    "Muffin": (0.74, 0.47, 0.26),
+    "Berry": (0.56, 0.2, 0.52),
+    "Soup": (0.96, 0.62, 0.26),
+    "Pie": (0.92, 0.72, 0.42),
+    "Steam": (0.97, 0.97, 1.0),
 }
 ORDER = list(COLORS)
 
@@ -588,6 +594,95 @@ def clothing_shop():
     p.finish()
 
 
+def muffin(piece, matrix):
+    piece.add(cylinder(0.075, 0.08, matrix @ T(0, 0, 0.04), segments=12, radius2=0.09), "Muffin")
+    piece.add(dome(0.1, 0.07, matrix @ T(0, 0, 0.08), segments=12, rings=5), "Muffin")
+    for k in range(3):
+        a = 2 * math.pi * k / 3
+        piece.add(sphere(0.022, matrix @ T(math.cos(a) * 0.045, math.sin(a) * 0.045, 0.13), segments=8, rings=4), "Berry")
+
+
+def pie(piece, matrix):
+    piece.add(cylinder(0.2, 0.07, matrix @ T(0, 0, 0.035), segments=20, radius2=0.22), "Pie")
+    piece.add(cylinder(0.17, 0.02, matrix @ T(0, 0, 0.075), segments=20), "Berry")
+    piece.add(torus(0.19, 0.035, matrix @ T(0, 0, 0.075), segments=20, sides=6), "Pie")
+    for k in (-1, 0, 1):
+        piece.add(box((0.32, 0.03, 0.02), matrix @ T(0, k * 0.08, 0.09), bevel=0.0), "Pie")
+        piece.add(box((0.03, 0.32, 0.02), matrix @ T(k * 0.08, 0, 0.095), bevel=0.0), "Pie")
+
+
+def lantern(piece, matrix):
+    """A little lantern hanging from a hook: a glowing bulb under a tiny spotted cap."""
+    piece.add(cylinder(0.015, 0.22, matrix @ T(0, 0, -0.11), segments=6), "Metal")
+    piece.add(sphere(0.11, matrix @ T(0, 0, -0.32), scale=(1, 1, 1.15), segments=14, rings=7), "Glow")
+    piece.add(dome(0.14, 0.09, matrix @ T(0, 0, -0.22), segments=14), "Cap")
+    piece.add(cylinder(0.05, 0.03, matrix @ T(0, 0, -0.45), segments=10), "Metal")
+
+
+def food_stall():
+    # "Mushroom Munchies", the food stall on the square: a cozy wooden stall under a red mushroom
+    # cap with white spots, a sign board, baskets of berry muffins, a steaming pot of soup and pies
+    # on the counter, more on the back shelf, and little lanterns that light up at night.
+    p = Piece("FoodStall")
+    w, d = 4.2, 2.4
+    # A stone footing sunk into the ground, a plank floor on it.
+    p.add(box((w, d, 0.4), T(0, 0, -0.12), bevel=0.06), "Stone")
+    p.add(box((w - 0.2, d - 0.2, 0.14), T(0, 0, 0.12), bevel=0.04), "Wood")
+    for x in (-1, 1):
+        for y in (-1, 1):
+            p.add(cylinder(0.09, 2.15, T(x * (w / 2 - 0.22), y * (d / 2 - 0.22), 1.2), segments=12), "WoodDark")
+    # The back wall with a shelf of pies and muffin baskets.
+    p.add(box((w - 0.5, 0.14, 1.95), T(0, -d / 2 + 0.25, 1.15), bevel=0.04), "Wood")
+    for k in range(5):
+        p.add(box((0.05, 0.02, 1.9), T(-1.4 + k * 0.7, -d / 2 + 0.33, 1.15), bevel=0.0), "WoodDark")
+    p.add(box((w - 0.8, 0.4, 0.07), T(0, -d / 2 + 0.5, 1.5), bevel=0.02), "WoodDark")
+    for x in (-1.2, 0.0, 1.2):
+        pie(p, T(x, -d / 2 + 0.5, 1.535) @ S(0.8, 0.8, 0.8))
+    for x in (-0.6, 0.6):
+        p.add(cylinder(0.12, 0.2, T(x, -d / 2 + 0.5, 1.64), segments=12, radius2=0.1), "CapWhite")
+        p.add(cylinder(0.1, 0.05, T(x, -d / 2 + 0.5, 1.765), segments=12), "Berry")
+    # The counter at the front, planked, and its top.
+    cy = d / 2 - 0.5
+    p.add(box((w - 0.6, 0.55, 0.78), T(0, cy, 0.57), bevel=0.05), "Wood")
+    for k in range(7):
+        p.add(box((0.04, 0.02, 0.68), T(-1.5 + k * 0.5, cy + 0.285, 0.57), bevel=0.0), "WoodDark")
+    p.add(box((w - 0.4, 0.7, 0.08), T(0, cy, 0.99), bevel=0.03), "WoodDark")
+    top = 1.03
+    # Two baskets of berry muffins on the left.
+    for bx in (-1.45, -0.85):
+        p.add(cylinder(0.25, 0.12, T(bx, cy, top + 0.06), segments=18, radius2=0.28), "Basket")
+        p.add(torus(0.27, 0.03, T(bx, cy, top + 0.12), segments=18, sides=6), "Basket")
+        for mx, my in ((-0.1, -0.07), (0.1, -0.07), (0.0, 0.1)):
+            muffin(p, T(bx + mx, cy + my, top + 0.08))
+    # A pot of soup in the middle, steam rising from it.
+    p.add(cylinder(0.27, 0.06, T(0.05, cy, top + 0.03), segments=18), "Metal")
+    p.add(cylinder(0.24, 0.3, T(0.05, cy, top + 0.21), segments=20, radius2=0.25), "Metal")
+    p.add(torus(0.25, 0.03, T(0.05, cy, top + 0.36), segments=20, sides=6), "Metal")
+    p.add(cylinder(0.225, 0.02, T(0.05, cy, top + 0.33), segments=20), "Soup")
+    p.add(box((0.04, 0.04, 0.42), T(0.17, cy - 0.05, top + 0.45) @ R("Y", 25), bevel=0.0), "WoodDark")
+    for k, (sx, sz, r) in enumerate(((0.0, 0.48, 0.12), (0.08, 0.66, 0.1), (-0.03, 0.82, 0.08))):
+        p.add(sphere(r, T(0.05 + sx, cy, top + sz), scale=(1, 1, 0.8), segments=12, rings=6), "Steam")
+    # Pies on the right, one cut.
+    pie(p, T(0.85, cy, top))
+    pie(p, T(1.4, cy - 0.05, top))
+    p.add(box((0.2, 0.18, 0.05), T(1.45, cy + 0.25, top + 0.025) @ R("Z", 15), bevel=0.0), "Pie")
+    # The roof: a red mushroom cap with white spots, cream gills beneath.
+    rx, ry, roof, ch = w / 2 + 0.05, d / 2 + 0.15, 2.2, 0.75
+    p.add(cylinder(1.0, 0.1, T(0, 0, roof + 0.02) @ S(rx - 0.08, ry - 0.08, 1), segments=32), "Gills")
+    p.add(dome(1.0, ch, T(0, 0, roof) @ S(rx, ry, 1), segments=32), "Cap")
+    cap_spots(p, rx, ry, ch, roof, 8, 0.24, seed=0.3)
+    # The sign under the cap's front edge: "Mushroom Munchies".
+    sy = d / 2 - 0.05
+    p.add(box((3.3, 0.1, 0.42), T(0, sy, 2.07), bevel=0.06), "WoodDark")
+    p.add(box((3.12, 0.06, 0.3), T(0, sy + 0.04, 2.07), bevel=0.04), "AwningCream")
+    p.add(text("Mushroom Munchies", 0.23, T(0, sy + 0.08, 2.07)), "SignText")
+    # Little lanterns hanging at the front corners and by the back wall.
+    for x in (-1, 1):
+        lantern(p, T(x * (w / 2 - 0.22), d / 2 - 0.05, roof - 0.02))
+        lantern(p, T(x * 1.2, -d / 2 + 0.55, roof - 0.02) @ S(0.8, 0.8, 0.8))
+    p.finish()
+
+
 def street_lamp():
     # A mushroom street lamp: a dark post on a round foot, a glowing bulb hanging under a spotted
     # cap whose underside and spots glow too.
@@ -689,6 +784,7 @@ fountain()
 for i in range(len(HOUSES)):
     house(i)
 clothing_shop()
+food_stall()
 street_lamp()
 bench()
 fence()

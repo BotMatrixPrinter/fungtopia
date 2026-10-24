@@ -12,7 +12,7 @@ namespace Fungtopia.Town.View;
 /// Map module's scene, loaded read-only) under a simple sky. <c>TOWN_PREVIEW=night</c> sets the
 /// clock to 22:00 (lamps lit, a dark blue night), anything else is noon. <c>TOWN_VIEW</c> picks the
 /// camera: <c>square</c> (default, over the town from its entrance), <c>home</c> (your house and
-/// Millie's), <c>clinic</c> (the clinic and the furniture stall), <c>fountain</c>, <c>houses</c>, <c>shop</c> (Abby's clothing shop), <c>ground</c> (low, at the clinic's foot on its slope and the lamps by it).
+/// Millie's), <c>clinic</c> (the clinic and the furniture stall), <c>fountain</c>, <c>houses</c>, <c>shop</c> (Abby's clothing shop), <c>food</c> (the Mushroom Munchies food stall), <c>ground</c> (low, at the clinic's foot on its slope and the lamps by it).
 /// </summary>
 public partial class TownPreview : Node3D
 {
@@ -49,6 +49,7 @@ public partial class TownPreview : Node3D
             "fountain" => (new Vector3(7f, 4.5f, 203f), new Vector3(0f, 1.2f, 215f)),
             "houses" => (new Vector3(-30f, 7f, 192f), new Vector3(-50f, 3f, 176f)),
             "shop" => (new Vector3(6f, 5f, 229f), new Vector3(0f, 3.5f, 246f)),
+            "food" => (new Vector3(-0.8f, 3.4f, 211f), new Vector3(-5.2f, 1.6f, 205.3f)),
             "ground" => (new Vector3(12f, 1.6f, 197f), new Vector3(24f, 0.8f, 210f)),
             _ => (new Vector3(20f, 24f, 168f), new Vector3(-4f, 0f, 222f)),
         };
