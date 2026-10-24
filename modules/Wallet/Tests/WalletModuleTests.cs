@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Numerics;
 using Fungtopia.Monsters;
 using Fungtopia.Player;
+using Fungtopia.Save;
 using Fungtopia.Shell;
 using Xunit;
 
@@ -15,7 +16,7 @@ public class WalletModuleTests
 
     /// <summary>
     /// Fake of the shell's bus: delivers messages to subscribers like the real one, and records
-    /// every WalletState, CoinsEarned and SpendResult published.
+    /// every WalletState, CoinsEarned, SpendResult and SavePart published.
     /// </summary>
     private sealed class FakeBus : IMessageBus
     {
@@ -23,6 +24,7 @@ public class WalletModuleTests
         public readonly List<WalletState> States = new();
         public readonly List<CoinsEarned> Earned = new();
         public readonly List<SpendResult> Results = new();
+        public readonly List<SavePart> Parts = new();
         public readonly List<Type> Subscribed = new();
 
         public void Subscribe<T>(IMessageHandler<T> handler) where T : struct
@@ -41,6 +43,8 @@ public class WalletModuleTests
                 Earned.Add(earned);
             if (message is SpendResult result)
                 Results.Add(result);
+            if (message is SavePart part)
+                Parts.Add(part);
             if (_handlers.TryGetValue(typeof(T), out var list))
                 foreach (var handler in list)
                     ((IMessageHandler<T>)handler).Handle(message);
@@ -310,6 +314,113 @@ public class WalletModuleTests
     public void TickBeforeStartThrows()
     {
         Assert.Throws<InvalidOperationException>(() => new WalletModule().Tick(Step));
+    }
+
+    /// <summary>A started wallet holding <paramref name="coins"/>, earned through a grant.</summary>
+    private static WalletModule StartedWith(FakeBus bus, int coins)
+    {
+        var wallet = Started(bus);
+        bus.Publish(new GrantCoins(coins, "test"));
+        Assert.Equal(coins, wallet.Coins);
+        return wallet;
+    }
+
+    [Fact]
+    public void AnswersCollectSaveWithOneCompactVersionedWalletPart()
+    {
+        var bus = new FakeBus();
+        StartedWith(bus, 1234);
+        bus.Publish(new CollectSave(7));
+        var part = Assert.Single(bus.Parts);
+        Assert.Equal(7, part.RequestId);
+        Assert.Equal("Wallet", part.Module);
+        Assert.DoesNotContain(" ", part.Json);
+        Assert.DoesNotContain("\n", part.Json);
+        using var json = System.Text.Json.JsonDocument.Parse(part.Json);
+        Assert.Equal(WalletModule.SaveVersion, json.RootElement.GetProperty("version").GetInt32());
+        Assert.Equal(1234, json.RootElement.GetProperty("coins").GetInt32());
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1234)]
+    [InlineData(int.MaxValue)]
+    public void SaveThenRestoreGivesBackTheSameWalletQuietly(int coins)
+    {
+        var savedBus = new FakeBus();
+        var saved = StartedWith(savedBus, coins);
+        savedBus.Publish(new CollectSave(1));
+        var part = Assert.Single(savedBus.Parts);
+
+        // A fresh wallet (a new session) and one that already holds other coins both end up equal.
+        foreach (int before in new[] { 0, 99 })
+        {
+            var bus = new FakeBus();
+            var wallet = before == 0 ? Started(bus) : StartedWith(bus, before);
+            var logs = new List<string>();
+            wallet.Log = logs.Add;
+            int earnedBefore = bus.Earned.Count;
+            long countBefore = wallet.EarnedCount;
+            bus.Publish(new RestorePart(part.Module, part.Json));
+            Assert.Equal(saved.Coins, wallet.Coins);
+            Assert.Equal(earnedBefore, bus.Earned.Count);
+            Assert.Equal(countBefore, wallet.EarnedCount);
+            Assert.Empty(bus.Results);
+            Assert.Empty(logs);
+            wallet.Tick(Step);
+            Assert.Equal(coins, bus.States[^1].Coins);
+            bus.Publish(new CollectSave(2));
+            Assert.Equal(part.Json, bus.Parts[^1].Json);
+        }
+    }
+
+    [Fact]
+    public void RestoringAnotherModulesPartChangesNothing()
+    {
+        var bus = new FakeBus();
+        var wallet = StartedWith(bus, 300);
+        wallet.Log = _ => Assert.Fail("nothing to log");
+        bus.Publish(new RestorePart("Pet", "{\"version\":1,\"coins\":5}"));
+        bus.Publish(new RestorePart("Pet", "not json"));
+        Assert.Equal(300, wallet.Coins);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("not json")]
+    [InlineData("{\"version\":1,\"coins\":")]
+    [InlineData("[1,2]")]
+    [InlineData("null")]
+    [InlineData("{\"coins\":500}")]
+    [InlineData("{\"version\":2,\"coins\":500}")]
+    [InlineData("{\"version\":1,\"coins\":-5}")]
+    [InlineData("{\"version\":1,\"coins\":\"lots\"}")]
+    [InlineData("{\"version\":1,\"coins\":99999999999}")]
+    public void BadOrUnknownJsonKeepsTheDefaultsAndLogsOnce(string json)
+    {
+        var bus = new FakeBus();
+        var wallet = StartedWith(bus, 300);
+        var logs = new List<string>();
+        wallet.Log = logs.Add;
+        int earnedBefore = bus.Earned.Count;
+        bus.Publish(new RestorePart("Wallet", json));
+        bus.Publish(new RestorePart("Wallet", json));
+        Assert.Equal(new WalletModule().Coins, wallet.Coins);
+        Assert.Equal(0, wallet.Coins);
+        Assert.Equal(earnedBefore, bus.Earned.Count);
+        Assert.Single(logs);
+    }
+
+    [Fact]
+    public void ANullJsonKeepsTheDefaults()
+    {
+        var bus = new FakeBus();
+        var wallet = Started(bus);
+        var logs = new List<string>();
+        wallet.Log = logs.Add;
+        bus.Publish(new RestorePart("Wallet", null!));
+        Assert.Equal(0, wallet.Coins);
+        Assert.Single(logs);
     }
 
     /// <summary>The materials of coin.glb (the exported Mushroom Coin), read from its glTF JSON chunk.</summary>

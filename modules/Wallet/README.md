@@ -4,13 +4,13 @@ The player's Mushroom Coins (M¢). Every defeated monster pays its reward into t
 whoever made the kill (the player or the pet): 50 M¢ for a normal monster, 200 M¢ for a hard one
 (the `Reward` the Monsters module puts in `MonsterKilled`). Other modules can grant coins
 (quest rewards, `GrantCoins`) and spend them (purchases, `SpendCoins`, which only goes through
-when there are enough). Nothing else takes coins away: the player's defeat costs none. Coins are kept for the session (saving to disk comes later). Each
+when there are enough). Nothing else takes coins away: the player's defeat costs none. The coins are saved with the game (see Saving below). Each
 reward pops a little burst of gold mushroom coins out of the kill.
 
 - `Contract/` — `Fungtopia.Wallet.Contract` (namespace `Fungtopia.Wallet`), see below.
 - `Core/` — `Fungtopia.Wallet.Core`: `WalletModule`, the module's one `IModule`. It listens to
-  `Fungtopia.Monsters.MonsterKilled`, `SpendCoins`, `GrantCoins` and `Fungtopia.Player.PlayerState`
-  (for the player's position only), and keeps the latest 16 rewards in `Recent` (a ring,
+  `Fungtopia.Monsters.MonsterKilled`, `SpendCoins`, `GrantCoins`, `Fungtopia.Player.PlayerState`
+  (for the player's position only) and `Fungtopia.Save.CollectSave` / `RestorePart`, and keeps the latest 16 rewards in `Recent` (a ring,
   counted by `EarnedCount`) for the view.
 - `Godot/` — `Main.tscn` with `WalletView`, which plays a `CoinBurst` (seven spinning gold
   coins flying up, golden sparkles, a rising "+50 M¢") at each reward's position, from a pool
@@ -44,3 +44,13 @@ the same `RequestId`. Spending publishes no `CoinsEarned`.
 A `GrantCoins` adds `Amount` like a reward: it publishes a `CoinsEarned` at the player's
 position (the latest `PlayerState`; the origin before the first one) so the HUD's "+N" pop-up
 and the view's coin burst show there. An `Amount` of 0 or less adds nothing.
+
+## Saving
+
+The Save module's `Fungtopia.Save.CollectSave` is answered at once with one `SavePart` (same
+`RequestId`, `Module` "Wallet") whose `Json` is compact JSON: `{"version":1,"coins":1234}`.
+A `RestorePart` for "Wallet" sets the coins back to exactly that, quietly: no `CoinsEarned`
+(no pop-up, no coin burst) and nothing in `Recent`. When its JSON is missing, unreadable, of an
+unknown version, or holds negative or non-integer coins, the wallet goes back to its defaults
+(0 M¢), and the first such part is logged once (`WalletModule.Log`, the console by default).
+`RestorePart`s for other modules are ignored.
