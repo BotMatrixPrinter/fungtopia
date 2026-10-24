@@ -5,6 +5,8 @@ using Fungtopia.Forest;
 using Fungtopia.Input;
 using Fungtopia.Player;
 using Fungtopia.Shell;
+using Fungtopia.StartScreen;
+using Fungtopia.Wardrobe;
 using Xunit;
 
 namespace Fungtopia.Camera.Tests;
@@ -14,11 +16,13 @@ public class CameraModuleTests
     private const double Step = 1.0 / 60;
     private const float Degree = MathF.PI / 180f;
 
-    /// <summary>Fake of the shell's bus: delivers player and input messages and records every pose published.</summary>
+    /// <summary>Fake of the shell's bus: delivers player, input and screen messages and records every pose published.</summary>
     private sealed class FakeBus : IMessageBus
     {
         private IMessageHandler<PlayerState>? _state;
         private IMessageHandler<PlayerInput>? _input;
+        private IMessageHandler<WardrobeState>? _wardrobe;
+        private IMessageHandler<StartScreenState>? _start;
         public readonly List<CameraPose> Poses = new(1024);
         public int OtherMessages;
 
@@ -28,6 +32,10 @@ public class CameraModuleTests
                 _state = state;
             if (handler is IMessageHandler<PlayerInput> input && typeof(T) == typeof(PlayerInput))
                 _input = input;
+            if (handler is IMessageHandler<WardrobeState> wardrobe && typeof(T) == typeof(WardrobeState))
+                _wardrobe = wardrobe;
+            if (handler is IMessageHandler<StartScreenState> start && typeof(T) == typeof(StartScreenState))
+                _start = start;
         }
 
         public void Publish<T>(in T message) where T : struct
@@ -38,6 +46,10 @@ public class CameraModuleTests
                 _state?.Handle(in state);
             else if (message is PlayerInput input)
                 _input?.Handle(in input);
+            else if (message is WardrobeState wardrobe)
+                _wardrobe?.Handle(in wardrobe);
+            else if (message is StartScreenState start)
+                _start?.Handle(in start);
             else
                 OtherMessages++;
         }
@@ -66,6 +78,25 @@ public class CameraModuleTests
             bus.Publish(State(feet));
             camera.Tick(new TickContext(camera.Ticks, Step));
         }
+    }
+
+    /// <summary>Ticks with the player standing at <paramref name="feet"/> facing <paramref name="facing"/>, with the screens' states.</summary>
+    private static void RunScreens(CameraModule camera, FakeBus bus, Vector3 feet, float facing, bool wardrobe, bool start, int ticks)
+    {
+        for (int i = 0; i < ticks; i++)
+        {
+            bus.Publish(new PlayerState(feet, facing, Vector3.Zero, true, 10, 10, true, CharacterKind.Girl));
+            bus.Publish(new WardrobeState(wardrobe, false));
+            bus.Publish(new StartScreenState(start));
+            camera.Tick(new TickContext(camera.Ticks, Step));
+        }
+    }
+
+    /// <summary>Where <paramref name="point"/> shows: x right, y up, as tangents of the angle from the view's center; z its depth ahead.</summary>
+    private static Vector3 OnScreen(CameraPose pose, Vector3 point)
+    {
+        Vector3 local = Vector3.Transform(point - pose.Position, Quaternion.Inverse(pose.Orientation));
+        return new Vector3(local.X / -local.Z, local.Y / -local.Z, -local.Z);
     }
 
     private static Vector3 ShoulderOf(CameraModule camera) => camera.Head + CameraModule.Right(camera.Yaw) * CameraModule.ShoulderOffset;
@@ -336,6 +367,174 @@ public class CameraModuleTests
         Assert.Equal(3f - CameraModule.Clearance, toTrunk, 2);
     }
 
+    // ---- the front view (wardrobe, shop, start screen) ----
+
+    private const float Facing = 0.8f;
+    private static readonly int TransitionTicks = (int)MathF.Ceiling(CameraModule.TransitionSeconds * 60f);
+
+    [Fact]
+    public void FramesTheFrontOfThePlayerWhileTheWardrobeIsOpen()
+    {
+        var (camera, bus) = Started();
+        var feet = ForestBounds.PlayerStart;
+        RunScreens(camera, bus, feet, Facing, false, false, 30);
+        RunScreens(camera, bus, feet, Facing, true, false, TransitionTicks + 1);
+        Assert.Equal(1f, camera.Framing);
+
+        var pose = bus.Poses[^1];
+        var chest = feet + new Vector3(0f, CameraModule.ChestHeight, 0f);
+        Vector3 facingDir = CameraModule.Forward(Facing);
+        Vector3 offset = pose.Position - chest;
+        // About 2.5 m in front of the player, at chest height.
+        Assert.InRange(Vector3.Dot(offset, facingDir), 2.2f, 2.6f);
+        Assert.Equal(0f, offset.Y, 3);
+        Assert.InRange(new Vector2(offset.X, offset.Z).Length(), 2.4f, 2.7f);
+        // Level, upright, looking back at the player.
+        Vector3 look = Vector3.Transform(-Vector3.UnitZ, pose.Orientation);
+        Assert.Equal(0f, look.Y, 4);
+        Assert.True(Vector3.Dot(look, -facingDir) > 0.95f, $"looks along {look}");
+        Assert.True(Vector3.Transform(Vector3.UnitY, pose.Orientation).Y > 0.99f);
+        // The chest shows a little right of the screen center, at the center's height.
+        var onScreen = OnScreen(pose, chest);
+        Assert.InRange(onScreen.X, 0.15f, 0.35f);
+        Assert.Equal(0f, onScreen.Y, 3);
+        Assert.InRange(onScreen.Z, 2.4f, 2.6f);
+        // The whole character (feet to the top of the big head, about 1.5 m) is in view at 70 degrees.
+        float halfHeight = MathF.Tan(35f * Degree);
+        Assert.InRange(OnScreen(pose, feet).Y, -halfHeight, 0f);
+        Assert.InRange(OnScreen(pose, feet + new Vector3(0f, 1.5f, 0f)).Y, 0f, halfHeight);
+        // The published pose's yaw is the front view's.
+        Assert.Equal(CameraModule.FrontYaw(Facing, camera.OrbitSeconds), pose.Yaw, 4);
+        Assert.True(Vector3.Distance(CameraModule.FrontView(feet, Facing, camera.OrbitSeconds).Position, pose.Position) < 1e-3f);
+    }
+
+    [Fact]
+    public void TheStartScreenAlsoFramesTheFrontView()
+    {
+        var (camera, bus) = Started();
+        var feet = ForestBounds.PlayerStart;
+        RunScreens(camera, bus, feet, 0f, false, true, TransitionTicks + 1);
+        Assert.True(camera.FrontViewWanted);
+        Assert.Equal(1f, camera.Framing);
+        var pose = bus.Poses[^1];
+        Assert.True(Vector3.Distance(CameraModule.FrontView(feet, 0f, camera.OrbitSeconds).Position, pose.Position) < 1e-3f);
+        // Facing north (-Z): the camera is north of the player, looking south.
+        Assert.True(pose.Position.Z < feet.Z - 2f);
+        Assert.True(Vector3.Transform(-Vector3.UnitZ, pose.Orientation).Z > 0.95f);
+    }
+
+    [Fact]
+    public void SwingsSmoothlyRoundToTheFrontWithoutPassingThroughThePlayer()
+    {
+        var (camera, bus) = Started();
+        var feet = ForestBounds.PlayerStart;
+        RunScreens(camera, bus, feet, Facing, false, false, 30);
+        var chest = feet + new Vector3(0f, CameraModule.ChestHeight, 0f);
+        var front = CameraModule.FrontView(feet, Facing, 0f).Position;
+        Vector3 last = bus.Poses[^1].Position;
+        Quaternion lastTurn = bus.Poses[^1].Orientation;
+        for (int i = 1; i <= TransitionTicks; i++)
+        {
+            RunScreens(camera, bus, feet, Facing, true, false, 1);
+            var pose = bus.Poses[^1];
+            Assert.True(Vector3.Distance(last, pose.Position) < 0.4f, $"tick {i}: jumped {Vector3.Distance(last, pose.Position)} m");
+            Assert.True(MathF.Abs(Quaternion.Dot(lastTurn, pose.Orientation)) > 0.998f, $"tick {i}: turned too fast");
+            Assert.True(Vector3.Distance(pose.Position, chest) > 2f, $"tick {i}: too close to the player");
+            if (i == TransitionTicks / 2)
+                Assert.True(Vector3.Distance(pose.Position, front) > 1f, "still on the way halfway through");
+            last = pose.Position;
+            lastTurn = pose.Orientation;
+        }
+        // Eased: slow at the start and the end, fast in the middle.
+        Assert.True(Vector3.Distance(bus.Poses[^1].Position, bus.Poses[^2].Position) < 0.05f);
+        Assert.Equal(1f, camera.Framing);
+    }
+
+    [Fact]
+    public void OrbitsSlowlyALittleAroundTheFront()
+    {
+        var (camera, bus) = Started();
+        var feet = ForestBounds.PlayerStart;
+        RunScreens(camera, bus, feet, Facing, true, false, TransitionTicks + 1);
+        var chest = feet + new Vector3(0f, CameraModule.ChestHeight, 0f);
+        float baseYaw = Facing + MathF.PI;
+        float min = float.MaxValue, max = float.MinValue;
+        float lastYaw = bus.Poses[^1].Yaw;
+        int ticks = (int)(CameraModule.OrbitPeriod * 60f);
+        for (int i = 0; i < ticks; i++)
+        {
+            RunScreens(camera, bus, feet, Facing, true, false, 1);
+            var pose = bus.Poses[^1];
+            float swing = MathF.IEEERemainder(pose.Yaw - baseYaw, MathF.Tau);
+            min = MathF.Min(min, swing);
+            max = MathF.Max(max, swing);
+            Assert.True(MathF.Abs(MathF.IEEERemainder(pose.Yaw - lastYaw, MathF.Tau)) < 0.2f * Degree, "orbits slowly");
+            lastYaw = pose.Yaw;
+            // The player stays framed the same way: same distance, a little right of center.
+            var onScreen = OnScreen(pose, chest);
+            Assert.InRange(onScreen.X, 0.15f, 0.35f);
+            Assert.InRange(onScreen.Z, 2.4f, 2.6f);
+            Assert.Equal(feet.Y + CameraModule.ChestHeight, pose.Position.Y, 3);
+        }
+        // A little each way, enough to see the outfit in 3D.
+        Assert.InRange(max, 14f * Degree, 15.01f * Degree);
+        Assert.InRange(min, -15.01f * Degree, -14f * Degree);
+    }
+
+    [Fact]
+    public void ReturnsSmoothlyToTheOrbitBehindWhenClosed()
+    {
+        var (camera, bus) = Started();
+        var feet = ForestBounds.PlayerStart;
+        Look(bus, 0.4f, -0.1f);
+        RunScreens(camera, bus, feet, Facing, false, false, 30);
+        var before = bus.Poses[^1];
+        float yaw = camera.Yaw, pitch = camera.Pitch;
+
+        RunScreens(camera, bus, feet, Facing, true, false, 200);
+        // The screens own the input: looking around while open does not move the orbit.
+        Look(bus, 1f, 0.5f);
+        Assert.Equal(yaw, camera.Yaw);
+        Assert.Equal(pitch, camera.Pitch);
+
+        Vector3 last = bus.Poses[^1].Position;
+        var chest = feet + new Vector3(0f, CameraModule.ChestHeight, 0f);
+        for (int i = 1; i <= TransitionTicks; i++)
+        {
+            RunScreens(camera, bus, feet, Facing, false, false, 1);
+            var pose = bus.Poses[^1];
+            Assert.True(Vector3.Distance(last, pose.Position) < 0.4f, $"tick {i}: jumped");
+            Assert.True(Vector3.Distance(pose.Position, chest) > 2f, $"tick {i}: too close to the player");
+            if (i == TransitionTicks / 2)
+                Assert.True(Vector3.Distance(pose.Position, before.Position) > 1f, "still on the way back halfway through");
+            last = pose.Position;
+        }
+        Assert.Equal(0f, camera.Framing);
+        var after = bus.Poses[^1];
+        Assert.True(Vector3.Distance(before.Position, after.Position) < 1e-3f, "back where it was");
+        Assert.True(MathF.Abs(Quaternion.Dot(before.Orientation, after.Orientation)) > 0.99999f);
+        Assert.Equal(before.Yaw, after.Yaw, 5);
+
+        // Looking around works again.
+        Look(bus, 0.2f, 0f);
+        Assert.Equal(yaw - 0.2f, camera.Yaw, 5);
+    }
+
+    [Fact]
+    public void ReopeningOnTheWayBackTurnsAroundWithoutAJump()
+    {
+        var (camera, bus) = Started();
+        var feet = ForestBounds.PlayerStart;
+        RunScreens(camera, bus, feet, Facing, false, true, 120);
+        RunScreens(camera, bus, feet, Facing, false, false, TransitionTicks / 3);
+        float framing = camera.Framing;
+        Assert.InRange(framing, 0.2f, 0.95f);
+        Vector3 last = bus.Poses[^1].Position;
+        RunScreens(camera, bus, feet, Facing, true, false, 1);
+        Assert.True(camera.Framing > framing, "heads back to the front");
+        Assert.True(Vector3.Distance(last, bus.Poses[^1].Position) < 0.4f);
+    }
+
     // ---- performance ----
 
     [Fact]
@@ -350,6 +549,9 @@ public class CameraModuleTests
             Look(bus, 0.01f, 0.005f);
             Run(camera, bus, OnGround(0f, 84f - i * 0.05f), 1);
         }
+        // Into the front view and back.
+        for (int i = 0; i < 300; i++)
+            RunScreens(camera, bus, OnGround(0f, 74f), Facing, i < 150, false, 1);
         Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
     }
 
@@ -364,6 +566,8 @@ public class CameraModuleTests
                 Look(bus, 0.02f, MathF.Sin(i * 0.1f) * 0.05f);
                 Run(camera, bus, OnGround(MathF.Sin(i * 0.05f) * 3f, 84f - i * 0.08f), 1);
             }
+            for (int i = 0; i < 150; i++)
+                RunScreens(camera, bus, OnGround(0f, 76f), Facing, false, i < 100, 1);
             return bus.Poses[^1];
         }
         var a = RunOnce();

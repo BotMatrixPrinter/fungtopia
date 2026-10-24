@@ -20,11 +20,20 @@ and publishes one `CameraPose` per fixed tick.
     (`Fungtopia.Forest.Obstacles`, treated as tall cylinders) is in the way, the camera pulls in
     at once to keep `Clearance` (0.3 m) from it, and eases back out (`ReturnSharpness`, 4 per
     second) once the view clears.
+  - **Front view.** While `Fungtopia.Wardrobe.WardrobeState.Open` (the wardrobe or Abby's shop)
+    or `Fungtopia.StartScreen.StartScreenState.Open`, the camera swings round to the player's
+    front (`FrontView`): `FrontDistance` (2.5 m) from the chest, level at `ChestHeight` (0.6 m
+    above the feet), sitting `FrameShift` (0.6 m) to the screen-left so the player shows a little
+    right of the screen center (clear of a panel on the left). There it orbits slowly,
+    `OrbitAngle` (15 degrees) each way around the front over `OrbitPeriod` (16 s). The swing in
+    and back out takes `TransitionSeconds` (1 s), eased (`Framing` 0..1); it blends the orbit's
+    yaw, pitch, distance and center, not positions, so it goes round the player, never through
+    them. Look input is ignored while open, so it comes back to the orbit it left.
   - Modules tick in name order, so the camera uses the player's state from the previous tick.
 - `Godot/`: `Main.tscn` with `CameraView`, a `Camera3D` (70 degree FOV) made current when it
   loads, so the Input module aims through it. Each frame it is placed between the last two
   poses (a jump of more than 3 m is a cut).
 - `Tests/`: xUnit tests of `CameraModule` with a fake `IMessageBus`: orbit limits, smooth
-  following, ground and trunk pull-in, no allocations per tick, determinism.
+  following, ground and trunk pull-in, the front view's framing, orbit and transitions, no allocations per tick, determinism.
 
 Test it with `./test.sh Camera` from the repository root.
