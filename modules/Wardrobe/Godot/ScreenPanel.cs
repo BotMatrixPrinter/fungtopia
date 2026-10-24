@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Fungtopia.Input;
 using Godot;
 
 namespace Fungtopia.Wardrobe.View;
@@ -6,7 +7,8 @@ namespace Fungtopia.Wardrobe.View;
 /// <summary>
 /// The shared frame of the wardrobe and shop screens, styled like the start screen's "Make your
 /// look": on the right half of the screen only (the character stands on the left), a big cream
-/// heading, the rounded cream panel (header, body, a footer with the controls hint) and big
+/// heading, the rounded cream panel (header, body, a footer with the controls hint: the button icons
+/// of the device in use, see <see cref="WardrobePrompts"/>) and big
 /// mushroom buttons under it (Done). The view does the mouse hit-testing and focus moves.
 /// </summary>
 public abstract partial class ScreenPanel : Control
@@ -19,14 +21,16 @@ public abstract partial class ScreenPanel : Control
     protected readonly Label Title;
     protected readonly VBoxContainer Header = new() { Alignment = BoxContainer.AlignmentMode.Center };
     protected readonly VBoxContainer Body = new();
-    protected readonly Label Hint;
+    protected readonly RichTextLabel Hint;
     protected readonly HBoxContainer Footer = new();
     protected readonly HBoxContainer Buttons = new() { Alignment = BoxContainer.AlignmentMode.Center };
     protected readonly CapButton DoneButton = new("Done", WardrobeStyle.Green, new Vector2(240, 104), 40);
     protected readonly WardrobeModule Core;
     protected readonly IconStudio Icons;
 
-    protected ScreenPanel(WardrobeModule core, IconStudio icons, string title, string hint)
+    private DeviceKind? _hintDevice;
+
+    protected ScreenPanel(WardrobeModule core, IconStudio icons, string title)
     {
         Core = core;
         Icons = icons;
@@ -52,10 +56,17 @@ public abstract partial class ScreenPanel : Control
         column.AddChild(Body);
 
         Footer.AddThemeConstantOverride("separation", 16);
-        Hint = WardrobeStyle.Label(hint, 18, WardrobeStyle.Soft);
-        Hint.HorizontalAlignment = HorizontalAlignment.Left;
-        Hint.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-        Hint.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        // Grows to fit its lines at any icon size; a group (icons and words) wraps as a whole.
+        Hint = new RichTextLabel
+        {
+            BbcodeEnabled = true, FitContent = true, ScrollActive = false, AutowrapMode = TextServer.AutowrapMode.WordSmart,
+            SizeFlagsHorizontal = SizeFlags.ExpandFill, SizeFlagsVertical = SizeFlags.ShrinkCenter,
+            MouseFilter = MouseFilterEnum.Ignore, FocusMode = FocusModeEnum.None,
+        };
+        Hint.AddThemeFontOverride("normal_font", WardrobeStyle.Font);
+        Hint.AddThemeFontSizeOverride("normal_font_size", 18);
+        Hint.AddThemeColorOverride("default_color", WardrobeStyle.Soft);
+        Hint.AddThemeConstantOverride("line_separation", 4);
         Footer.AddChild(Hint);
         column.AddChild(Footer);
 
@@ -67,6 +78,22 @@ public abstract partial class ScreenPanel : Control
 
     /// <summary>Called every frame while shown: rebuilds what changed.</summary>
     public abstract void Refresh();
+
+    /// <summary>The controls hint for <paramref name="device"/> (BBCode with its button icons).</summary>
+    public abstract string HintFor(DeviceKind device);
+
+    /// <summary>The hint shown now (BBCode), for the device in use.</summary>
+    public string HintText => Hint.Text;
+
+    /// <summary>Called every frame while shown: shows the hint of the Core's <see cref="WardrobeModule.Device"/> when it changed.</summary>
+    public void RefreshHint()
+    {
+        var device = Core.Device;
+        if (_hintDevice == device)
+            return;
+        _hintDevice = device;
+        Hint.Text = HintFor(device);
+    }
 
     /// <summary>Page Up / Page Down, the triggers: the previous or next tab (when the screen has tabs).</summary>
     public virtual void StepTab(int direction)

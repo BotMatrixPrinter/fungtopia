@@ -1,3 +1,4 @@
+using Fungtopia.Input;
 using Fungtopia.Shell;
 using Fungtopia.Wallet;
 using Godot;
@@ -11,7 +12,8 @@ namespace Fungtopia.Wardrobe.View;
 /// simulated mouse drag), and the <see cref="WardrobeView"/> on the right. The environment
 /// variable WARDROBE_PREVIEW picks: "wardrobe" (default, the Top tab), "look" (the Look tab),
 /// "shop" (Abby's shop after one purchase, trying on the Triangle Party Dress it cannot afford)
-/// or "items" (four outfits side by side, no panel).
+/// or "items" (four outfits side by side, no panel). WARDROBE_DEVICE picks the device whose
+/// prompts the hints show: "keyboard" (default), "xbox", "playstation", "nintendo" or "generic".
 /// </summary>
 public partial class WardrobePreview : Node3D, IMessageHandler<SpendCoins>, IMessageHandler<AppearanceState>,
     IMessageHandler<PreviewYaw>
@@ -50,6 +52,16 @@ public partial class WardrobePreview : Node3D, IMessageHandler<SpendCoins>, IMes
         _view = (WardrobeView)GD.Load<PackedScene>("res://modules/Wardrobe/Godot/Main.tscn").Instantiate();
         _view.Bind(_wardrobe);
         AddChild(_view);
+        // No Input module here: make its icons loadable and say which device is in use.
+        WardrobeGlyphs.Register(Prompts.GlyphDirectory);
+        _bus.Publish(new ActiveDevice(OS.GetEnvironment("WARDROBE_DEVICE").ToLowerInvariant() switch
+        {
+            "xbox" => DeviceKind.Xbox,
+            "playstation" or "ps" => DeviceKind.PlayStation,
+            "nintendo" => DeviceKind.Nintendo,
+            "generic" => DeviceKind.Generic,
+            _ => DeviceKind.KeyboardMouse,
+        }));
 
         _bus.Publish(new WalletState(_coins));
         _bus.Publish(new GrantItem("round_glasses", "Millie's quest"));

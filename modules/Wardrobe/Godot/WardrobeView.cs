@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using Fungtopia.Input;
 using Fungtopia.Shell;
 using Godot;
 using GodotInput = Godot.Input;
@@ -12,7 +14,9 @@ namespace Fungtopia.Wardrobe.View;
 /// mouse clicks (hit-tested here, so they are not taken to recapture the mouse), a mouse drag on
 /// the left half, Q / E, LB / RB and the right stick to turn the character (the Core's
 /// <see cref="PreviewYaw"/>), arrows / W A S D / d-pad / left stick to move the focus, Enter /
-/// Space / A to choose, Page Up / Page Down / LT / RT for tabs, Esc / B for Done.
+/// Space / A to choose, Page Up / Page Down / LT / RT for tabs, Esc / B for Done. As the Input
+/// module does not see that input, this view tells the Core which device it came from, so the
+/// screens' hints show that device's buttons (<see cref="WardrobeModule.Device"/>).
 /// </summary>
 public partial class WardrobeView : Node, IModuleView
 {
@@ -29,6 +33,7 @@ public partial class WardrobeView : Node, IModuleView
     private float _triggerLeft;
     private float _triggerRight;
     private bool _dragging;
+    private readonly Dictionary<int, DeviceKind> _families = new();
 
     public void Bind(IModule module) => _wardrobe = (WardrobeModule)module;
 
@@ -56,6 +61,7 @@ public partial class WardrobeView : Node, IModuleView
             _shown = want;
             if (_shown != null)
             {
+                _families.Clear(); // pads may have been swapped since
                 _shown.Visible = true;
                 _shown.Refresh();
                 _shown.FirstFocus().GrabFocus();
@@ -67,6 +73,7 @@ public partial class WardrobeView : Node, IModuleView
         if (_shown != null)
         {
             _shown.Place(GetViewport().GetVisibleRect().Size);
+            _shown.RefreshHint();
             _shown.Refresh();
             // Held turning: Q / LB to the left, E / RB to the right, or the right stick.
             _wardrobe.SetTurnButtons(
@@ -87,6 +94,7 @@ public partial class WardrobeView : Node, IModuleView
     {
         if (_layer != null || _wardrobe == null)
             return;
+        WardrobeGlyphs.Register();
         _icons = new IconStudio { Name = "Icons" };
         AddChild(_icons);
         _layer = new CanvasLayer { Layer = 20 };
@@ -101,6 +109,7 @@ public partial class WardrobeView : Node, IModuleView
     {
         if (_shown == null || _wardrobe == null || !_wardrobe.Open)
             return;
+        NoteDevice(e);
         switch (e)
         {
             case InputEventMouseMotion motion:
@@ -153,6 +162,34 @@ public partial class WardrobeView : Node, IModuleView
         }
         // Nothing reaches the game (walking, jumping, the map) while a screen is open.
         GetViewport().SetInputAsHandled();
+    }
+
+    /// <summary>Tells the Core which device real input comes from (the same rules as the Input module's).</summary>
+    private void NoteDevice(InputEvent e)
+    {
+        switch (e)
+        {
+            case InputEventKey { Pressed: true, Echo: false }:
+            case InputEventMouseButton { Pressed: true }:
+            case InputEventMouseMotion motion when motion.Relative.Length() >= MouseSwitchPixels:
+                _wardrobe!.NoteDevice(DeviceKind.KeyboardMouse);
+                break;
+            case InputEventJoypadButton { Pressed: true } button:
+                _wardrobe!.NoteDevice(Family(button.Device));
+                break;
+            case InputEventJoypadMotion stick when Mathf.Abs(stick.AxisValue) > WardrobeModule.StickDeadZone:
+                _wardrobe!.NoteDevice(Family(stick.Device));
+                break;
+        }
+    }
+
+    private const float MouseSwitchPixels = 2f;
+
+    private DeviceKind Family(int device)
+    {
+        if (!_families.TryGetValue(device, out var family))
+            _families[device] = family = WardrobePrompts.PadFamily(GodotInput.GetJoyName(device), GodotInput.GetJoyGuid(device));
+        return family;
     }
 
     private void Stick(InputEventJoypadMotion motion)

@@ -2,6 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Numerics;
+using System.Linq;
+using System.Text.RegularExpressions;
+using Fungtopia.Input;
 using Fungtopia.Map;
 using Fungtopia.Monsters;
 using Fungtopia.Player;
@@ -222,6 +225,36 @@ public class WardrobeModuleTests
         if (character is CharacterKind kind)
             bus.Publish(Player(kind));
         return wardrobe;
+    }
+
+    [Fact]
+    public void DeviceFollowsActiveDeviceAndTheViewsNotes()
+    {
+        var bus = new FakeBus();
+        var wardrobe = Started(bus);
+        Assert.Equal(DeviceKind.KeyboardMouse, wardrobe.Device);
+        bus.Publish(new ActiveDevice(DeviceKind.PlayStation));
+        Assert.Equal(DeviceKind.PlayStation, wardrobe.Device);
+
+        // While a screen is open the view takes the input: its note wins over the Input module's
+        // unchanged device, published again every tick.
+        bus.Publish(new OpenWardrobe());
+        wardrobe.NoteDevice(DeviceKind.KeyboardMouse);
+        bus.Publish(new ActiveDevice(DeviceKind.PlayStation));
+        wardrobe.Tick(Step);
+        Assert.Equal(DeviceKind.KeyboardMouse, wardrobe.Device);
+        wardrobe.NoteDevice(DeviceKind.Xbox);
+        Assert.Equal(DeviceKind.Xbox, wardrobe.Device);
+
+        // A new device from the Input module is followed at once.
+        bus.Publish(new ActiveDevice(DeviceKind.Nintendo));
+        Assert.Equal(DeviceKind.Nintendo, wardrobe.Device);
+
+        // Opening a screen shows the Input module's device (the press that opened it went through it).
+        wardrobe.Close();
+        wardrobe.NoteDevice(DeviceKind.KeyboardMouse);
+        bus.Publish(new OpenShop());
+        Assert.Equal(DeviceKind.Nintendo, wardrobe.Device);
     }
 
     private static PlayerState Player(CharacterKind kind) =>
@@ -891,4 +924,124 @@ public class WardrobeModuleTests
         public void Subscribe<T>(IMessageHandler<T> handler) where T : struct { }
         public void Publish<T>(in T message) where T : struct => Published++;
     }
+}
+
+public class WardrobePromptsTests
+{
+    public static readonly TheoryData<DeviceKind> Devices = new()
+    {
+        DeviceKind.KeyboardMouse, DeviceKind.Xbox, DeviceKind.PlayStation, DeviceKind.Nintendo, DeviceKind.Generic,
+    };
+
+    /// <summary>The icon file-name prefixes of a device's buttons (Generic pads show the Xbox ones).</summary>
+    private static string[] Families(DeviceKind device) => device switch
+    {
+        DeviceKind.KeyboardMouse => new[] { "key_", "mouse_" },
+        DeviceKind.PlayStation => new[] { "ps_" },
+        DeviceKind.Nintendo => new[] { "ns_" },
+        _ => new[] { "xbox_" },
+    };
+
+    private static readonly string[] AllFamilies = { "key_", "mouse_", "xbox_", "ps_", "ns_" };
+
+    private static string[] IconsIn(string bbcode) =>
+        Regex.Matches(bbcode, @"\[img=\d+\](.*?)\[/img\]").Select(m => m.Groups[1].Value).ToArray();
+
+    private static string Glyph(string path) => Path.GetFileNameWithoutExtension(path);
+
+    private static string Words(string bbcode) => Regex.Replace(bbcode, @"\[img=\d+\].*?\[/img\]", "").Replace('\u00A0', ' ');
+
+    private static string RepoFile(string resPath)
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !File.Exists(Path.Combine(dir.FullName, "project.godot")))
+            dir = dir.Parent;
+        Assert.NotNull(dir);
+        return Path.Combine(dir!.FullName, resPath.Substring("res://".Length));
+    }
+
+    private static void OnlyThatDevice(string bbcode, DeviceKind device)
+    {
+        var icons = IconsIn(bbcode);
+        Assert.NotEmpty(icons);
+        var own = Families(device);
+        foreach (var icon in icons)
+        {
+            string glyph = Glyph(icon);
+            Assert.True(own.Any(glyph.StartsWith), $"{device} hint shows {glyph}");
+            Assert.True(File.Exists(RepoFile(icon)), $"missing icon {icon}");
+        }
+        foreach (var other in AllFamilies.Except(own))
+            Assert.DoesNotContain("/" + other, bbcode);
+        // No button names in words, as in the old "Enter / A" and "Esc / B" hints.
+        string words = Words(bbcode);
+        Assert.DoesNotContain("/", words);
+        foreach (var name in new[] { "Esc", "Enter", "Page", "LB", "RB", "LT", "RT", "Cross", "Circle", "stick", " A ", " B ", " Q ", " E " })
+            Assert.DoesNotContain(name, " " + words + " ");
+    }
+
+    [Theory]
+    [MemberData(nameof(Devices))]
+    public void WardrobeHintShowsOnlyThatDevicesIcons(DeviceKind device)
+    {
+        string hint = WardrobePrompts.Wardrobe(device);
+        OnlyThatDevice(hint, device);
+        Assert.Contains(Prompts.Rich(PromptAction.Confirm, device, WardrobePrompts.IconSize) + "\u00A0Choose", hint);
+        Assert.Contains(Prompts.Rich(PromptAction.Back, device, WardrobePrompts.IconSize) + "\u00A0Done", hint);
+        Assert.Contains(Prompts.Icon(PromptAction.TurnLeft, device), hint);
+        Assert.Contains(Prompts.Icon(PromptAction.TurnRight, device), hint);
+        Assert.Contains(WardrobePrompts.TabIcon(-1, device), hint);
+        Assert.Contains(WardrobePrompts.TabIcon(1, device), hint);
+        Assert.Contains("Tabs", hint);
+    }
+
+    [Theory]
+    [MemberData(nameof(Devices))]
+    public void ShopHintShowsOnlyThatDevicesIcons(DeviceKind device)
+    {
+        string hint = WardrobePrompts.Shop(device);
+        OnlyThatDevice(hint, device);
+        Assert.Contains(Prompts.Rich(PromptAction.Confirm, device, WardrobePrompts.IconSize) + "\u00A0Pick,\u00A0then\u00A0Buy", hint);
+        Assert.Contains(Prompts.Rich(PromptAction.Back, device, WardrobePrompts.IconSize) + "\u00A0Done", hint);
+        Assert.Contains(Prompts.Icon(PromptAction.TurnLeft, device), hint);
+        Assert.DoesNotContain("Tabs", hint);
+    }
+
+    [Fact]
+    public void EachDeviceShowsItsOwnButtons()
+    {
+        Assert.Contains("[img=32]res://modules/Input/Glyphs/key_enter.svg[/img]\u00A0Choose", WardrobePrompts.Wardrobe(DeviceKind.KeyboardMouse));
+        Assert.Contains("[img=32]res://modules/Input/Glyphs/key_esc.svg[/img]\u00A0Done", WardrobePrompts.Wardrobe(DeviceKind.KeyboardMouse));
+        Assert.Contains("res://modules/Wardrobe/Godot/Glyphs/key_pgup.svg", WardrobePrompts.Wardrobe(DeviceKind.KeyboardMouse));
+        Assert.Contains("mouse_left.svg[/img]\u00A0Drag", WardrobePrompts.Wardrobe(DeviceKind.KeyboardMouse));
+        Assert.Contains("xbox_a.svg[/img]\u00A0Choose", WardrobePrompts.Wardrobe(DeviceKind.Xbox));
+        Assert.Contains("xbox_b.svg[/img]\u00A0Done", WardrobePrompts.Shop(DeviceKind.Xbox));
+        Assert.Contains("xbox_lt.svg", WardrobePrompts.Wardrobe(DeviceKind.Xbox));
+        Assert.Contains("xbox_rs.svg", WardrobePrompts.Wardrobe(DeviceKind.Xbox));
+        Assert.Contains("ps_cross.svg[/img]\u00A0Choose", WardrobePrompts.Wardrobe(DeviceKind.PlayStation));
+        Assert.Contains("ps_circle.svg[/img]\u00A0Done", WardrobePrompts.Shop(DeviceKind.PlayStation));
+        Assert.Contains("ps_l2.svg", WardrobePrompts.Wardrobe(DeviceKind.PlayStation));
+        Assert.Contains("ns_zr.svg", WardrobePrompts.Wardrobe(DeviceKind.Nintendo));
+        Assert.Equal(WardrobePrompts.Wardrobe(DeviceKind.Xbox), WardrobePrompts.Wardrobe(DeviceKind.Generic));
+    }
+
+    [Fact]
+    public void IconSizeIsUsedForEveryIcon()
+    {
+        string hint = WardrobePrompts.Wardrobe(DeviceKind.PlayStation, 48);
+        Assert.Equal(IconsIn(hint).Length, Regex.Matches(hint, @"\[img=48\]").Count);
+        Assert.DoesNotContain("[img=32]", hint);
+    }
+
+    [Theory]
+    [InlineData("PS5 Controller", "", DeviceKind.PlayStation)]
+    [InlineData("Sony Interactive Entertainment Wireless Controller", "", DeviceKind.PlayStation)]
+    [InlineData("Nintendo Switch Pro Controller", "", DeviceKind.Nintendo)]
+    [InlineData("Xbox Series X Controller", "", DeviceKind.Xbox)]
+    [InlineData("Wireless Controller", "030000004c050000cc09000011810000", DeviceKind.PlayStation)]
+    [InlineData("Some Pad", "030000005e0400008e02000010010000", DeviceKind.Xbox)]
+    [InlineData("Some Pad", "03000000790000000600000010010000", DeviceKind.Generic)]
+    [InlineData(null, null, DeviceKind.Generic)]
+    public void PadFamilyFromNameOrVendor(string? name, string? guid, DeviceKind expected) =>
+        Assert.Equal(expected, WardrobePrompts.PadFamily(name, guid));
 }

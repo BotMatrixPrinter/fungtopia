@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text.Json;
+using Fungtopia.Input;
 using Fungtopia.Monsters;
 using Fungtopia.Player;
 using Fungtopia.Save;
@@ -34,7 +35,8 @@ public enum BuyResult
 public sealed class WardrobeModule : IModule, IMessageHandler<SetLook>, IMessageHandler<Equip>,
     IMessageHandler<GrantItem>, IMessageHandler<OpenWardrobe>, IMessageHandler<OpenShop>,
     IMessageHandler<MonsterKilled>, IMessageHandler<PlayerState>, IMessageHandler<WalletState>,
-    IMessageHandler<SpendResult>, IMessageHandler<CollectSave>, IMessageHandler<RestorePart>
+    IMessageHandler<SpendResult>, IMessageHandler<CollectSave>, IMessageHandler<RestorePart>,
+    IMessageHandler<ActiveDevice>
 {
     /// <summary>The <see cref="SpendCoins.RequestId"/>s of the shop start here (other shops use their own).</summary>
     public const int RequestIdBase = 0x5744_0000;
@@ -95,6 +97,15 @@ public sealed class WardrobeModule : IModule, IMessageHandler<SetLook>, IMessage
     public int Coins { get; private set; }
 
     public bool Open { get; private set; }
+
+    /// <summary>
+    /// The device whose prompts the screens show: the latest <see cref="ActiveDevice"/>, or the one
+    /// <see cref="NoteDevice"/> saw since (the view takes the input while a screen is open, so the
+    /// Input module does not see a device change there). Keyboard and mouse before any.
+    /// </summary>
+    public DeviceKind Device { get; private set; }
+
+    private DeviceKind _busDevice;
     public bool Shop { get; private set; }
 
     public bool TarantulaRewarded { get; private set; }
@@ -163,6 +174,7 @@ public sealed class WardrobeModule : IModule, IMessageHandler<SetLook>, IMessage
         bus.Subscribe<SpendResult>(this);
         bus.Subscribe<CollectSave>(this);
         bus.Subscribe<RestorePart>(this);
+        bus.Subscribe<ActiveDevice>(this);
     }
 
     public void Tick(in TickContext context)
@@ -327,6 +339,18 @@ public sealed class WardrobeModule : IModule, IMessageHandler<SetLook>, IMessage
 
     public void Handle(in WalletState message) => Coins = message.Coins;
 
+    /// <summary>Follows the Input module's device when it changes (it publishes it every tick).</summary>
+    public void Handle(in ActiveDevice message)
+    {
+        if (message.Kind == _busDevice)
+            return;
+        _busDevice = message.Kind;
+        Device = message.Kind;
+    }
+
+    /// <summary>The view saw input from <paramref name="kind"/> (while a screen is open): its prompts show.</summary>
+    public void NoteDevice(DeviceKind kind) => Device = kind;
+
     public void Handle(in SpendResult message)
     {
         if (_buyPending < 0 || message.RequestId != _requestId)
@@ -475,6 +499,8 @@ public sealed class WardrobeModule : IModule, IMessageHandler<SetLook>, IMessage
     {
         Open = true;
         Shop = shop;
+        // The press that opened the screen went through the Input module: its device is current.
+        Device = _busDevice;
         LastBuy = BuyResult.None;
         LastBuyItem = -1;
         _tryOn = -1;

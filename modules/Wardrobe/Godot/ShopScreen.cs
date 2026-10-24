@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Fungtopia.Input;
 using Godot;
 
 namespace Fungtopia.Wardrobe.View;
@@ -23,7 +24,7 @@ public partial class ShopScreen : ScreenPanel
     private string _shownKey = "";
 
     public ShopScreen(WardrobeModule core, IconStudio icons)
-        : base(core, icons, "Abby's Clothes", Hints)
+        : base(core, icons, "Abby's Clothes")
     {
         var top = new HBoxContainer();
         top.AddThemeConstantOverride("separation", 18);
@@ -64,8 +65,8 @@ public partial class ShopScreen : ScreenPanel
         Buttons.MoveChild(_buy, 0);
     }
 
-    /// <summary>The controls, shown at the bottom of the panel.</summary>
-    public const string Hints = "Turn: drag left, Q / E, LB / RB, stick    Pick: Enter / A, then Buy    Done: Esc / B";
+    /// <summary>The controls, shown at the bottom of the panel with the device's button icons.</summary>
+    public override string HintFor(DeviceKind device) => WardrobePrompts.Shop(device);
 
     /// <summary>The item the highlighted card shows (an index in <see cref="Catalog.Items"/>), else the picked one, else -1.</summary>
     public int Highlighted

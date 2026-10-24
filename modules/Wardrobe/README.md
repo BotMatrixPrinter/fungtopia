@@ -6,16 +6,20 @@ clothes for free) and Abby's shop screen (Mushroom Town: buy clothes for Mushroo
 Some clothes are rewards. Adding a piece of clothing is one `Catalog` entry plus one model script.
 
 - `Contract/` — `Fungtopia.Wardrobe.Contract` (namespace `Fungtopia.Wardrobe`), see below.
-- `Core/` — `Fungtopia.Wardrobe.Core`: `WardrobeModule`, the module's one `IModule`.
+- `Core/` — `Fungtopia.Wardrobe.Core`: `WardrobeModule`, the module's one `IModule`, and
+  `WardrobePrompts` (the screens' controls hints as button icons, see [Prompts](#prompts)).
 - `Godot/` — `Main.tscn` with `WardrobeView` (the screens); `WardrobeScreen`, `ShopScreen` and their
-  frame `ScreenPanel`; `CapButton` (the big mushroom Done / Buy buttons); `AbbyPortrait` (Abby drawn in the shop's header); `IconStudio` (renders each
+  frame `ScreenPanel`; `CapButton` (the big mushroom Done / Buy buttons); `AbbyPortrait` (Abby drawn in the shop's header); `WardrobeGlyphs` (makes this module's icons loadable unimported); `IconStudio` (renders each
   model's little icon in its own `SubViewport`); `ToonGlb` (loads the .glb files toon-shaded with ink
-  outlines); `Mannequin` and `Preview.tscn` (for screenshots only); `Shaders/`.
+  outlines); `Mannequin` and `Preview.tscn` (for screenshots only); `Shaders/`; `Glyphs/`
+  (`key_pgup`, `key_pgdn`: the tab keys' icons, which the Input module lacks, drawn like its
+  keycaps by `make_glyphs.py`, run with `python3`).
 - `Models/` — `kit.py` (shared Blender helpers and the rig's sizes), `Clothes/<id>.py` and
   `Hair/<id>.py`: one script per item or hair style, each exporting `<id>.glb` next to itself.
 - `Tests/` — `WardrobeModuleTests.cs`: `CatalogTests` (the catalog and looks are well-formed, every
   model and its script exist) and `WardrobeModuleTests` (`WardrobeModule` with a fake `IMessageBus`
-  that also plays the wallet; saving and restoring round trips, bad save data keeps the defaults).
+  that also plays the wallet; saving and restoring round trips, bad save data keeps the defaults,
+  the prompt device) and `WardrobePromptsTests` (each device's hints show its own icons only).
 
 Test it with `./test.sh Wardrobe` from the repository root.
 
@@ -55,6 +59,7 @@ check the model and the script exist.
 
 `WardrobeModule` reads `Fungtopia.Player.PlayerState` (the character: Girl or Boy),
 `Fungtopia.Monsters.MonsterKilled`, `Fungtopia.Wallet.WalletState` and `SpendResult`,
+`Fungtopia.Input.ActiveDevice`,
 `Fungtopia.Save.CollectSave` and `RestorePart`, and the messages above; it publishes
 `Fungtopia.Wallet.SpendCoins` and `Fungtopia.Save.SavePart`.
 
@@ -89,6 +94,10 @@ check the model and the script exist.
   dress the default outfit. It publishes nothing: no `ItemReceived`, no `SpendCoins`; the first
   Tarantula / Ladybug rewards count as given when their item is owned. Missing or unreadable JSON, or
   another version, changes nothing and writes one line to `Log` (the console) per game.
+- **Prompt device.** `Device` is the device whose buttons the hints show: the `ActiveDevice` kind
+  whenever the Input module reports a new one, or the one the view passes to `NoteDevice(kind)`
+  since (while a screen is open the view takes the input, so the Input module sees no change);
+  opening a screen goes back to the Input module's device.
 - `Coins` (the latest `WalletState`), `Owns`, `Worn(slot)`, `BottomHidden`, `CanBuy`, `Appearance`
   are for the view. No allocations per tick.
 
@@ -121,6 +130,25 @@ if the Player module ignores `Move` while `WardrobeState.Open` (its job).
   highlighted card (focused or hovered; else the picked one) is tried on the character. Picking a
   card selects it and focuses Buy; the answer shows under it ("Not enough M¢" or "Thank you!").
 
+## Prompts
+
+The footer of each screen is a `RichTextLabel` hint with the button icons of `Device` only,
+each followed by what it does, rebuilt the frame the device changes (it grows to fit its lines
+at any icon size; a group of icons and words wraps as a whole). `WardrobePrompts.Wardrobe(device,
+size = 32)` and `Shop(device, size)` build its BBCode with `Prompts.Rich`:
+
+| | Keyboard and mouse | Xbox (and Generic) | PlayStation | Nintendo |
+| --- | --- | --- | --- | --- |
+| Turn | Q E, left mouse (drag) | LB RB, right stick | L1 R1, right stick | L R, right stick |
+| Tabs (wardrobe) | Page Up, Page Down | LT RT | L2 R2 | ZL ZR |
+| Choose / Pick, then Buy | Enter | A | Cross | B |
+| Done | Esc | B | Circle | A |
+
+`TabIcon(direction, device)` is the tab buttons' icon (no `PromptAction` has them). The view
+tells the device of the input it takes from the event: keyboard, mouse buttons and mouse motion of
+2 px or more are keyboard and mouse, a pad's button or an axis past the dead zone that pad's
+family (`PadFamily(name, guid)`, the Input module's rules).
+
 ## Models
 
 Run a script from the repository root, e.g. `blender -b --factory-startup --python
@@ -141,4 +169,5 @@ on clothes.
 dressed mannequin (the Player's rig with the hair, skin and items applied), turned by `PreviewYaw`
 from a simulated mouse drag; `WARDROBE_PREVIEW` picks `look` (the Look tab), `shop` (Abby's shop
 after buying the Flower Clip, trying on the Triangle Party Dress it fails to afford) or `items`
-(four outfits side by side).
+(four outfits side by side); `WARDROBE_DEVICE` (`keyboard`, `xbox`, `playstation`, `nintendo`,
+`generic`) the device whose prompts show.

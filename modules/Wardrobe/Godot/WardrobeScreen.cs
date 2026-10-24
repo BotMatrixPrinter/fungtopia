@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Fungtopia.Input;
 using Godot;
 
 namespace Fungtopia.Wardrobe.View;
@@ -20,7 +21,7 @@ public partial class WardrobeScreen : ScreenPanel
     private string _shownKey = "";
 
     public WardrobeScreen(WardrobeModule core, IconStudio icons)
-        : base(core, icons, "My Wardrobe", Hints)
+        : base(core, icons, "My Wardrobe")
     {
         var tabs = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
         tabs.AddThemeConstantOverride("separation", 5);
@@ -38,9 +39,8 @@ public partial class WardrobeScreen : ScreenPanel
         Body.AddChild(_content);
     }
 
-    /// <summary>The controls, shown at the bottom of the panel.</summary>
-    public const string Hints = "Turn: drag left, Q / E, LB / RB, right stick    Tabs: Page Up / Down, LT / RT    " +
-                                "Choose: Enter / A    Done: Esc / B";
+    /// <summary>The controls, shown at the bottom of the panel with the device's button icons.</summary>
+    public override string HintFor(DeviceKind device) => WardrobePrompts.Wardrobe(device);
 
     public int Tab => _tab;
 
