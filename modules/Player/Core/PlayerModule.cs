@@ -1,18 +1,21 @@
 using System;
 using System.Numerics;
-using Fungtopia.Forest;
+using Fungtopia.Dialogue;
 using Fungtopia.Input;
+using Fungtopia.Map;
 using Fungtopia.Shell;
 
 namespace Fungtopia.Player;
 
 /// <summary>
-/// The player character in the Mushroom Forest: walks relative to the camera, turns smoothly,
-/// jumps, follows the ground, slides along giant mushroom trunks and the forest's edge, takes
-/// damage, and comes back at the start a while after defeat. Publishes <see cref="PlayerState"/>
-/// every tick and <see cref="PlayerDefeated"/> once per defeat.
+/// The player character in the whole world (Fungtopia.Map): starts at the home door in Mushroom
+/// Town, walks relative to the camera, turns smoothly, jumps, follows the ground, slides along
+/// trunks, buildings and the edge of the walkable ground, stands still while a dialogue is open,
+/// takes damage, stays down after defeat until the next <see cref="TeleportPlayer"/>.
+/// Publishes <see cref="PlayerState"/> every tick and <see cref="PlayerDefeated"/> once per defeat.
 /// </summary>
-public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessageHandler<DamagePlayer>
+public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessageHandler<DamagePlayer>,
+    IMessageHandler<TeleportPlayer>, IMessageHandler<DialogueState>
 {
     public const float WalkSpeed = 5f;
     public const float JumpHeight = 1.2f;
@@ -23,18 +26,18 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
     public const float Radius = 0.4f;
     public const int MaxHealth = 10;
     public const float InvulnerableAfterHit = 0.7f;
-    public const float ComebackDelay = 3f;
 
     private IMessageBus? _bus;
     private PlayerInput _input;
     private bool _jumpQueued;
     private bool _defeatPending;
+    private bool _talking;
 
     /// <summary>The setting that picks the character (Girl by default).</summary>
     public CharacterKind Character { get; set; } = CharacterKind.Girl;
 
-    public Vector3 Position { get; private set; } = ForestBounds.PlayerStart;
-    public float Facing { get; private set; }
+    public Vector3 Position { get; private set; } = Places.HomeDoor.Position;
+    public float Facing { get; private set; } = Places.HomeDoor.Yaw;
     public Vector3 Velocity { get; private set; }
     public bool Grounded { get; private set; } = true;
     public int Health { get; private set; } = MaxHealth;
@@ -61,13 +64,15 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
         _bus = bus;
         bus.Subscribe<PlayerInput>(this);
         bus.Subscribe<DamagePlayer>(this);
+        bus.Subscribe<TeleportPlayer>(this);
+        bus.Subscribe<DialogueState>(this);
         State = MakeState();
     }
 
     /// <summary>Puts the player standing on the ground at (x, z) of <paramref name="feet"/>.</summary>
     public void PlaceAt(Vector3 feet, float facing = 0f)
     {
-        Position = new Vector3(feet.X, Terrain.HeightAt(feet.X, feet.Z), feet.Z);
+        Position = new Vector3(feet.X, Ground.HeightAt(feet.X, feet.Z), feet.Z);
         Facing = WrapAngle(facing);
         Velocity = Vector3.Zero;
         Grounded = true;
@@ -85,6 +90,25 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
         else if (float.IsFinite(message.Look.X))
             CameraYaw = WrapAngle(CameraYaw - message.Look.X);
     }
+
+    /// <summary>Moves there at once; after a defeat also brings the player back with full health.</summary>
+    public void Handle(in TeleportPlayer message)
+    {
+        Vector3 p = message.Position;
+        if (!float.IsFinite(p.X) || !float.IsFinite(p.Z))
+            return;
+        if (!Alive)
+        {
+            Alive = true;
+            Health = MaxHealth;
+            DefeatedSeconds = 0f;
+            InvulnerableSeconds = 0f;
+        }
+        _jumpQueued = false;
+        PlaceAt(p, message.Facing);
+    }
+
+    public void Handle(in DialogueState message) => _talking = message.Open;
 
     public void Handle(in DamagePlayer message)
     {
@@ -116,11 +140,7 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
             _bus.Publish(new PlayerDefeated(Position));
         }
         if (!Alive)
-        {
             DefeatedSeconds += dt;
-            if (DefeatedSeconds >= ComebackDelay)
-                ComeBack();
-        }
 
         Move(dt);
         _jumpQueued = false;
@@ -129,22 +149,14 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
         _bus.Publish(State);
     }
 
-    private void ComeBack()
-    {
-        Alive = true;
-        Health = MaxHealth;
-        DefeatedSeconds = 0f;
-        InvulnerableSeconds = 0f;
-        PlaceAt(ForestBounds.PlayerStart, 0f);
-    }
-
     private void Move(float dt)
     {
         Vector3 start = Position;
         float vy = Velocity.Y;
 
         // The wanted horizontal velocity, from the stick relative to the camera's yaw.
-        Vector2 move = Alive ? _input.Move : Vector2.Zero;
+        bool canWalk = Alive && !_talking;
+        Vector2 move = canWalk ? _input.Move : Vector2.Zero;
         if (!float.IsFinite(move.X) || !float.IsFinite(move.Y))
             move = Vector2.Zero;
         float length = move.Length();
@@ -167,7 +179,7 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
                 TurnToward(MathF.Atan2(-wantX, -wantZ), dt);
         }
 
-        if (Alive && _jumpQueued && Grounded)
+        if (canWalk && _jumpQueued && Grounded)
         {
             vy = MathF.Sqrt(2f * Gravity * JumpHeight);
             Grounded = false;
@@ -175,13 +187,13 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
 
         float x = start.X + wantX * dt;
         float z = start.Z + wantZ * dt;
-        ResolveCollisions(ref x, ref z);
+        ResolveCollisions(start.X, start.Z, ref x, ref z);
 
-        float ground = Terrain.HeightAt(x, z);
+        float ground = Ground.HeightAt(x, z);
         float y;
         if (Grounded)
         {
-            // Walking: stay on the ground, also down slopes (the forest has no ledges).
+            // Walking: stay on the ground, also down slopes (the walkable ground has no ledges).
             y = ground;
             vy = 0f;
         }
@@ -202,36 +214,62 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
         Velocity = new Vector3((x - start.X) / dt, vy, (z - start.Z) / dt);
     }
 
-    /// <summary>Pushes (x, z) out of every trunk it overlaps and back inside the forest's square.</summary>
-    private static void ResolveCollisions(ref float x, ref float z)
+    /// <summary>Whether a player standing at (x, z) is on walkable ground and clear of obstacles.</summary>
+    public static bool CanStand(float x, float z) =>
+        Areas.Walkable(x, z, Radius) && !Ground.Blocks(x, z, Radius);
+
+    /// <summary>
+    /// Pushes (x, z) out of every obstacle it overlaps (trunks, buildings) and back onto the
+    /// walkable ground, each along its normal so motion along the edge stays (sliding). Where
+    /// that does not settle (a tight corner) the player stays at (startX, startZ).
+    /// </summary>
+    private static void ResolveCollisions(float startX, float startZ, ref float x, ref float z)
     {
-        for (int pass = 0; pass < 3; pass++)
+        for (int pass = 0; pass < 4; pass++)
         {
             bool moved = false;
-            foreach (var o in Obstacles.All)
+            if (Ground.Blocks(x, z, Radius))
             {
-                float dx = x - o.X, dz = z - o.Z, r = o.Radius + Radius;
-                float d2 = dx * dx + dz * dz;
-                if (d2 >= r * r)
-                    continue;
-                float d = MathF.Sqrt(d2);
-                if (d < 1e-5f)
+                foreach (var o in Ground.Obstacles)
                 {
-                    dx = 0f;
-                    dz = 1f;
-                    d = 1f;
+                    float dx = x - o.X, dz = z - o.Z, r = o.Radius + Radius;
+                    float d2 = dx * dx + dz * dz;
+                    if (d2 >= r * r)
+                        continue;
+                    float d = MathF.Sqrt(d2);
+                    if (d < 1e-5f)
+                    {
+                        dx = 0f;
+                        dz = 1f;
+                        d = 1f;
+                    }
+                    float push = (r + 1e-4f) / d;
+                    x = o.X + dx * push;
+                    z = o.Z + dz * push;
                 }
-                // Out to the trunk's edge along its normal; motion along the edge stays (sliding).
-                float push = (r + 1e-4f) / d;
-                x = o.X + dx * push;
-                z = o.Z + dz * push;
                 moved = true;
             }
-            float limit = ForestBounds.HalfSize - Radius;
-            x = Math.Clamp(x, -limit, limit);
-            z = Math.Clamp(z, -limit, limit);
+            if (!Areas.Walkable(x, z, Radius))
+            {
+                // Back inside along the walkable ground's normal (the gradient of its depth).
+                const float h = 0.01f;
+                float gx = Areas.Depth(x + h, z) - Areas.Depth(x - h, z);
+                float gz = Areas.Depth(x, z + h) - Areas.Depth(x, z - h);
+                float g = MathF.Sqrt(gx * gx + gz * gz);
+                if (g < 1e-6f)
+                    break;
+                float push = Radius - Areas.Depth(x, z) + 1e-3f;
+                x += gx / g * push;
+                z += gz / g * push;
+                moved = true;
+            }
             if (!moved)
-                break;
+                return;
+        }
+        if (!CanStand(x, z) && CanStand(startX, startZ))
+        {
+            x = startX;
+            z = startZ;
         }
     }
 
@@ -256,5 +294,5 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
     }
 
     private PlayerState MakeState() =>
-        new(Position, Facing, Velocity, Grounded, Health, MaxHealth, Alive, Character);
+        new(Position, Facing, Velocity, Grounded, Health, MaxHealth, Alive, Character, Areas.At(Position.X, Position.Z));
 }

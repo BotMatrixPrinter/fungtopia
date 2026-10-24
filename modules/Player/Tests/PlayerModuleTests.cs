@@ -1,8 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
-using Fungtopia.Forest;
+using Fungtopia.Dialogue;
 using Fungtopia.Input;
+using Fungtopia.Map;
 using Fungtopia.Shell;
 using Xunit;
 
@@ -79,11 +80,17 @@ public class PlayerModuleTests
     // ---- Start and state ----
 
     [Fact]
-    public void StartsAtThePlayerStartWithFullHealthAsTheGirl()
+    public void StartsInMushroomTownAtTheHomeDoorFacingOutWithFullHealthAsTheGirl()
     {
         TickWith(Idle);
         var s = Assert.Single(_bus.States);
-        Assert.Equal(ForestBounds.PlayerStart, s.Position);
+        Assert.Equal(Places.HomeDoor.Position, s.Position);
+        Assert.Equal(Places.HomeDoor.Yaw, s.Facing);
+        Assert.Equal(Area.Town, s.Area);
+        // Facing out: away from the house, toward the town square.
+        var house = Buildings.First(BuildingKind.PlayerHouse);
+        AssertDirection(house.Front, FacingDirection(s.Facing));
+        Assert.True(PlayerModule.CanStand(s.Position.X, s.Position.Z));
         Assert.Equal(10, s.Health);
         Assert.Equal(10, s.MaxHealth);
         Assert.True(s.Alive);
@@ -274,14 +281,15 @@ public class PlayerModuleTests
     [Fact]
     public void FollowsTheGroundUpAndDownHills()
     {
-        // North up the path from the start for 6 s, over rolling ground.
+        // North up the forest path from its south clearing for 6 s, over rolling ground.
+        _player.PlaceAt(new Vector3(0f, 0f, 84f));
         float lowest = float.MaxValue, highest = float.MinValue;
         for (int i = 0; i < 360; i++)
         {
             TickWith(Moving(0f, 1f));
             var p = _bus.States[^1].Position;
             Assert.True(_bus.States[^1].Grounded);
-            Assert.Equal(Terrain.HeightAt(p.X, p.Z), p.Y, 4);
+            Assert.Equal(Ground.HeightAt(p.X, p.Z), p.Y, 4);
             lowest = MathF.Min(lowest, p.Y);
             highest = MathF.Max(highest, p.Y);
         }
@@ -291,15 +299,17 @@ public class PlayerModuleTests
     // ---- Obstacles and bounds ----
 
     /// <summary>A trunk with no other trunk within 10 m of its edge.</summary>
-    private static Obstacle LoneTrunk()
+    private static Circle LoneTrunk()
     {
-        foreach (var o in Obstacles.All)
+        var all = Ground.Obstacles;
+        for (int i = 0; i < Ground.ForestTrunkCount; i++)
         {
+            var o = all[i];
             bool alone = true;
-            foreach (var other in Obstacles.All)
-                if (!other.Equals(o) && Vector2.Distance(o.Center, other.Center) < o.Radius + other.Radius + 10f)
+            for (int k = 0; k < all.Length; k++)
+                if (k != i && Vector2.Distance(o.Center, all[k].Center) < o.Radius + all[k].Radius + 10f)
                     alone = false;
-            if (alone && ForestBounds.Contains(o.X, o.Z, o.Radius + 10f))
+            if (alone && Areas.Forest.Contains(o.X, o.Z, o.Radius + 10f))
                 return o;
         }
         throw new InvalidOperationException("no lone trunk in the forest");
@@ -337,27 +347,217 @@ public class PlayerModuleTests
     }
 
     [Fact]
-    public void StaysInsideTheForestAndSlidesAlongItsEdge()
+    public void StaysInsideTheForestAndSlidesAlongItsEdgeAwayFromTheRoads()
     {
-        _player.PlaceAt(new Vector3(0f, 0f, 92f)); // the start clearing, by the south edge
-        float limit = ForestBounds.HalfSize - PlayerModule.Radius;
-        Run(3.0, Moving(0f, -1f)); // south
-        Assert.Equal(limit, _player.Position.Z, 3);
-        Assert.True(Flat(_bus.States[^1].Velocity).Length() < 0.01f);
-        // South-east: blocked to the south, slides east.
-        float x = _player.Position.X;
-        Run(0.5, Moving(1f, -1f));
-        Assert.Equal(limit, _player.Position.Z, 3);
-        Assert.True(_player.Position.X > x + 1f);
-        Assert.True(_bus.States[^1].Velocity.X > 3f);
-        // The east edge, at the end of the west-east path.
+        // The east edge, at the end of the west-east path: no road leaves there.
+        float limit = Areas.ForestHalfSize - PlayerModule.Radius;
         _player.PlaceAt(new Vector3(96f, 0f, -40f));
-        Run(2.0, Moving(1f, 0f));
-        Assert.Equal(limit, _player.Position.X, 3);
-        Assert.True(ForestBounds.Contains(_player.Position.X, _player.Position.Z));
+        Run(2.0, Moving(1f, 0f)); // east
+        Assert.Equal(limit, _player.Position.X, 2);
+        Assert.True(Flat(_bus.States[^1].Velocity).Length() < 0.01f);
+        // North-east: blocked to the east, slides north.
+        float z = _player.Position.Z;
+        Run(0.4, Moving(1f, 1f));
+        Assert.Equal(limit, _player.Position.X, 2);
+        Assert.True(_player.Position.Z < z - 1f);
+        Assert.True(_bus.States[^1].Velocity.Z < -3f);
+        Assert.Equal(Area.Forest, _bus.States[^1].Area);
     }
 
-    // ---- Damage, defeat and comeback ----
+    /// <summary>Walks toward (x, z) by pointing the camera at it and pushing forward, for at most <paramref name="seconds"/>.</summary>
+    private void WalkTo(float x, float z, double seconds = 20.0)
+    {
+        for (int i = 0; i < seconds / Step; i++)
+        {
+            var to = new Vector3(x - _player.Position.X, 0f, z - _player.Position.Z);
+            if (to.Length() < 0.2f)
+                return;
+            TickWith(Moving(0f, 1f, aim: to));
+            var p = _player.Position;
+            Assert.True(PlayerModule.CanStand(p.X, p.Z), $"stood on unwalkable or blocked ground at ({p.X}, {p.Z})");
+            Assert.Equal(Ground.HeightAt(p.X, p.Z), p.Y, 3);
+        }
+        throw new InvalidOperationException($"did not reach ({x}, {z}), stuck at {_player.Position}");
+    }
+
+    /// <summary>Walks a road's center line (NaN-separated in <see cref="Areas.RoadPoints"/>) and returns the areas passed, in order.</summary>
+    private List<Area> WalkRoad(int road)
+    {
+        var points = Areas.RoadPoints;
+        int line = 0, first = -1, last = -1;
+        for (int i = 0; i < points.Length; i++)
+        {
+            if (float.IsNaN(points[i].X)) { line++; continue; }
+            if (line != road) continue;
+            if (first < 0) first = i;
+            last = i;
+        }
+        _player.PlaceAt(new Vector3(points[first].X, 0f, points[first].Y));
+        var areas = new List<Area> { Areas.At(_player.Position.X, _player.Position.Z) };
+        int seen = _bus.States.Count;
+        for (int i = first + 1; i <= last; i++)
+        {
+            WalkTo(points[i].X, points[i].Y);
+            for (; seen < _bus.States.Count; seen++)
+                if (_bus.States[seen].Area != areas[^1])
+                    areas.Add(_bus.States[seen].Area);
+        }
+        return areas;
+    }
+
+    [Fact]
+    public void WalksFromTheForestAlongTheSouthRoadIntoMushroomTown()
+    {
+        Assert.Equal(new[] { Area.Forest, Area.Road, Area.Town }, WalkRoad(0));
+        Assert.Equal(Area.Town, Areas.At(_player.Position.X, _player.Position.Z));
+        // And on to the town square's signpost and the clinic.
+        WalkTo(Places.SignpostTown.Position.X, Places.SignpostTown.Position.Z - 2f);
+        WalkTo(10f, 200f);
+        WalkTo(Places.ClinicDoor.Position.X, Places.ClinicDoor.Position.Z);
+        Assert.Equal(Area.Town, _bus.States[^1].Area);
+    }
+
+    [Fact]
+    public void WalksFromTheForestAlongTheNorthRoadIntoPetCity()
+    {
+        Assert.Equal(new[] { Area.Forest, Area.Road, Area.PetCity }, WalkRoad(1));
+        WalkTo(Places.LucySpot.Position.X, Places.LucySpot.Position.Z);
+        Assert.Equal(Area.PetCity, _bus.States[^1].Area);
+    }
+
+    [Fact]
+    public void WalksFromHomeOutOfTownAndIntoTheForest()
+    {
+        WalkTo(-10f, 200f);
+        WalkTo(0f, 160f);
+        WalkTo(0f, 150f);
+        WalkTo(0f, 104f);
+        WalkTo(0f, 90f);
+        Assert.Equal(Area.Forest, _bus.States[^1].Area);
+    }
+
+    [Fact]
+    public void CannotLeaveTheRoadSideways()
+    {
+        _player.PlaceAt(new Vector3(0f, 0f, 102f)); // the straight first stretch of the south road
+        Assert.Equal(Area.Road, Areas.At(0f, 102f));
+        Run(2.0, Moving(1f, 0f)); // east, off the road
+        Assert.Equal(Areas.RoadHalfWidth - PlayerModule.Radius, _player.Position.X, 2);
+        Assert.True(Flat(_bus.States[^1].Velocity).Length() < 0.01f);
+        Run(2.0, Moving(-1f, 0f)); // west, off the other side
+        Assert.Equal(-(Areas.RoadHalfWidth - PlayerModule.Radius), _player.Position.X, 2);
+        Assert.Equal(Area.Road, _bus.States[^1].Area);
+    }
+
+    [Fact]
+    public void CannotLeaveMushroomTownOverItsEdge()
+    {
+        _player.PlaceAt(new Vector3(0f, 0f, 282f));
+        Run(3.0, Moving(0f, -1f)); // south, out of town
+        Assert.Equal(Areas.Town.MaxZ - PlayerModule.Radius, _player.Position.Z, 2);
+        Assert.True(Areas.Walkable(_player.Position.X, _player.Position.Z, PlayerModule.Radius - 0.01f));
+        Assert.Equal(Area.Town, _bus.States[^1].Area);
+        // Nor out of the forest's south edge beside the road gap.
+        _player.PlaceAt(new Vector3(-30f, 0f, 96f));
+        Run(3.0, Moving(0f, -1f));
+        Assert.Equal(Areas.ForestHalfSize - PlayerModule.Radius, _player.Position.Z, 2);
+    }
+
+    [Fact]
+    public void CannotWalkIntoABuilding()
+    {
+        var house = Buildings.First(BuildingKind.PlayerHouse); // its door faces east
+        var door = Places.HomeDoor.Position;
+        for (int i = 0; i < 180; i++)
+        {
+            TickWith(Moving(-1f, 0f)); // west, straight at the house
+            Assert.False(house.Contains(_player.Position.X, _player.Position.Z, PlayerModule.Radius - 0.05f),
+                $"walked into the house at {_player.Position}");
+        }
+        Assert.True(_player.Position.X < door.X - 0.2f, "did not walk up to the wall");
+        Assert.True(Flat(_bus.States[^1].Velocity).Length() < 0.1f, "still moving into the wall");
+        // The clinic across the square blocks too.
+        var clinic = Buildings.First(BuildingKind.Clinic); // its door faces west
+        _player.PlaceAt(Places.ClinicDoor.Position);
+        Run(3.0, Moving(1f, 0f)); // east, into it
+        Assert.False(clinic.Contains(_player.Position.X, _player.Position.Z, PlayerModule.Radius - 0.05f));
+        Assert.True(Flat(_bus.States[^1].Velocity).Length() < 0.1f);
+    }
+
+    // ---- Teleport ----
+
+    [Fact]
+    public void TeleportMovesThereAtOnceWithNoVelocity()
+    {
+        Run(0.5, Moving(1f, 0f)); // walking
+        var to = Places.ClinicDoor;
+        _bus.Publish(new TeleportPlayer(to.Position, to.Yaw));
+        Assert.Equal(to.Position, _player.Position);
+        Assert.Equal(to.Yaw, _player.Facing, 5);
+        Assert.Equal(Vector3.Zero, _player.Velocity);
+        Assert.True(_player.Grounded);
+        TickWith(Idle);
+        var s = _bus.States[^1];
+        Assert.Equal(to.Position, s.Position); // no sliding
+        Assert.Equal(Vector3.Zero, s.Velocity);
+        Assert.Equal(Area.Town, s.Area);
+        // Walking on starts from there, not from the old spot.
+        TickWith(Moving(0f, 1f));
+        Assert.True(Vector2.Distance(Flat(to.Position), Flat(_player.Position)) <= PlayerModule.WalkSpeed * Step + 1e-3f);
+    }
+
+    [Fact]
+    public void TeleportsIntoTheHouseAndAcrossTheWorld()
+    {
+        _bus.Publish(new TeleportPlayer(Places.HomeInterior.Position, Places.HomeInterior.Yaw));
+        TickWith(Idle);
+        Assert.Equal(Area.Home, _bus.States[^1].Area);
+        Assert.Equal(Areas.HomeFloorY, _bus.States[^1].Position.Y, 3);
+        Run(1.0, Moving(0f, 1f)); // walks around the room
+        Assert.Equal(Area.Home, _bus.States[^1].Area);
+        Assert.True(Flat(_bus.States[^1].Velocity).Length() > 1f);
+        var sign = Places.Signpost(Area.PetCity);
+        _bus.Publish(new TeleportPlayer(sign.Position + new Vector3(4.5f, 0f, 0f), sign.Yaw));
+        TickWith(Idle);
+        Assert.Equal(Area.PetCity, _bus.States[^1].Area);
+        Assert.Equal(sign.Position.Z, _bus.States[^1].Position.Z, 3);
+    }
+
+    [Fact]
+    public void TeleportWhileAliveKeepsHealth()
+    {
+        _bus.Publish(new DamagePlayer(3, Vector3.Zero));
+        TickWith(Idle);
+        _bus.Publish(new TeleportPlayer(Places.ClinicDoor.Position, 0f));
+        TickWith(Idle);
+        Assert.Equal(7, _bus.States[^1].Health);
+        Assert.True(_bus.States[^1].Alive);
+    }
+
+    // ---- Dialogue ----
+
+    [Fact]
+    public void StandsStillWhileADialogueIsOpen()
+    {
+        _player.PlaceAt(Middle);
+        _bus.Publish(new DialogueState(true, 3));
+        var at = _player.Position;
+        Run(1.0, Moving(1f, 1f, jump: true));
+        Assert.Equal(at, _player.Position);
+        Assert.Equal(Vector3.Zero, _bus.States[^1].Velocity);
+        Assert.True(_bus.States[^1].Grounded);
+        // A jump pressed while talking is not kept for later.
+        _bus.Publish(new DialogueState(false, -1));
+        TickWith(Idle);
+        Assert.True(_bus.States[^1].Grounded);
+        // Closed: walks and jumps again.
+        Run(0.5, Moving(0f, 1f));
+        Assert.True(Flat(_bus.States[^1].Velocity).Length() > 4f);
+        TickWith(Moving(0f, 1f, jump: true));
+        Assert.False(_bus.States[^1].Grounded);
+    }
+
+    // ---- Damage, defeat and coming back ----
 
     [Fact]
     public void DamageLowersHealth()
@@ -444,22 +644,33 @@ public class PlayerModuleTests
     }
 
     [Fact]
-    public void ComesBackAtTheStartWithFullHealthAfterThreeSeconds()
+    public void StaysDownAfterDefeatUntilATeleportBringsItBackWithFullHealth()
     {
         _player.PlaceAt(Middle);
         _bus.Publish(new DamagePlayer(10, Vector3.Zero));
         TickWith(Idle);
-        Run(2.9, Idle);
-        Assert.False(_bus.States[^1].Alive);
-        Run(0.2, Idle);
+        var fell = _player.Position;
+        Run(30.0, Moving(0f, 1f)); // no automatic comeback, however long
+        var down = _bus.States[^1];
+        Assert.False(down.Alive);
+        Assert.Equal(0, down.Health);
+        Assert.Equal(fell, down.Position);
+        Assert.Single(_bus.Defeats);
+        // The next morning at the clinic.
+        var clinic = Places.ClinicDoor;
+        _bus.Publish(new TeleportPlayer(clinic.Position, clinic.Yaw));
+        TickWith(Idle);
         var s = _bus.States[^1];
         Assert.True(s.Alive);
         Assert.Equal(10, s.Health);
-        Assert.Equal(ForestBounds.PlayerStart, s.Position);
+        Assert.Equal(clinic.Position, s.Position);
+        Assert.Equal(Area.Town, s.Area);
         Assert.True(s.Grounded);
+        Assert.Equal(0f, _player.InvulnerableSeconds);
         Assert.Single(_bus.Defeats);
-        // It can be hurt and defeated again.
-        Run(1.0, Moving(0f, 1f));
+        // It can walk, be hurt and be defeated again.
+        Run(0.5, Moving(0f, 1f));
+        Assert.True(Flat(_bus.States[^1].Velocity).Length() > 1f);
         _bus.Publish(new DamagePlayer(10, Vector3.Zero));
         TickWith(Idle);
         Assert.Equal(2, _bus.Defeats.Count);
@@ -481,6 +692,7 @@ public class PlayerModuleTests
         {
             player.Handle(input);
             player.Handle(new DamagePlayer(1, Vector3.Zero));
+            player.Handle(new DialogueState(i % 200 < 100, 1));
             player.Tick(new TickContext(i + 1, Step));
         }
         Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());

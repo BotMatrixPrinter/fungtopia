@@ -67,7 +67,7 @@ public partial class PlayerView : Node3D, IModuleView
         float alpha = (float)Engine.GetPhysicsInterpolationFraction();
         var from = ToGodot(_previous.Position);
         var to = ToGodot(_current.Position);
-        // A comeback at the start is a jump, not a glide across the forest.
+        // A teleport (fast travel, the clinic, the house) is a jump, not a glide across the world.
         var position = from.DistanceTo(to) > 2f ? to : from.Lerp(to, alpha);
         float facing = Mathf.LerpAngle(_previous.Facing, _current.Facing, alpha);
         _model.Transform = new Transform3D(new Basis(Vector3.Up, facing), position);

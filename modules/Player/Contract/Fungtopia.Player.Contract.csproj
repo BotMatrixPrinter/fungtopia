@@ -4,4 +4,7 @@
     <RootNamespace>Fungtopia.Player</RootNamespace>
     <Nullable>enable</Nullable>
   </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../Map/Contract/Fungtopia.Map.Contract.csproj" />
+  </ItemGroup>
 </Project>
