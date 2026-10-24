@@ -35,8 +35,8 @@ positive turns left; the direction of yaw `a` is `(-sin a, 0, -cos a)`.
 
 `PetModule` reads `Fungtopia.Player.PlayerState` and `TeleportPlayer` (Player Contract),
 `Fungtopia.Monsters.MonsterState`, `Fungtopia.StartScreen.GameStart` (StartScreen Contract),
-`AdoptPet` and `SetActivePet`, publishes
-`Fungtopia.Monsters.HitMonster` (Monsters Contract), and uses the Map's `Ground` (height,
+`AdoptPet` and `SetActivePet`, `Fungtopia.Save.CollectSave` and `RestorePart` (Save Contract), publishes
+`Fungtopia.Monsters.HitMonster` (Monsters Contract), `Fungtopia.Save.SavePart`, and uses the Map's `Ground` (height,
 obstacles) and `Areas` (walkable ground) (Map Contract). Until the first `PlayerState` it waits
 beside `Places.HomeDoor`.
 
@@ -49,6 +49,14 @@ beside `Places.HomeDoor`.
   one. Only the active pet is out: it follows, fights and is in `PetState`; a newly active pet
   appears beside the player (the other one went home). `OwnedPets` is published every tick,
   after `PetState`.
+
+- **Saving.** On `CollectSave` it answers at once with one `SavePart` (Module `"Pet"`):
+  compact JSON `{"v":1,"cat":true,"dog":false,"crow":true,"active":"Crow"}` (`SaveVersion`;
+  `active` is null before `GameStart`, when nothing is owned). On `RestorePart` for `"Pet"` it
+  restores exactly that: the owned pets, the active one (beside the player, the Crow hovering) and
+  whether the game has started (a later `GameStart` is then ignored). It publishes nothing while
+  restoring (no adoption, no rewards). Bad JSON, another version, or an active pet that is not
+  owned keeps the current state and writes one line to `Log` (the console by default).
 
 Each tick, for the active pet:
 
@@ -80,7 +88,7 @@ Each tick, for the active pet:
 - **Defeated player.** While `PlayerState.Alive` is false it drops its target, goes to 1.1 m
   from the player and sits there (`Sitting`; the Crow lands) until they come back.
 
-Helpers: `Started` (`GameStart` came), `Kind` (the active pet), `Owned`,
+Helpers: `Started` (`GameStart` came or a started game was restored), `Kind` (the active pet), `Owned`,
 `Owns(kind)`, `PlaceAt(feet, facing)` puts the pet somewhere (on the ground, the Crow hovering).
 The view also reads `Velocity`, `Altitude`, `Sitting`, `SinceBite`, `Teleported` (also set on
 the tick after a teleport or switch between ticks) and `Ticks`; tests also read `TargetId`. No

@@ -16,6 +16,7 @@
     <ProjectReference Include="../../Monsters/Contract/Fungtopia.Monsters.Contract.csproj" />
     <ProjectReference Include="../../Map/Contract/Fungtopia.Map.Contract.csproj" />
     <ProjectReference Include="../../StartScreen/Contract/Fungtopia.StartScreen.Contract.csproj" />
+    <ProjectReference Include="../../Save/Contract/Fungtopia.Save.Contract.csproj" />
     <ProjectReference Include="../../../shell/Contract/Fungtopia.Shell.Contract.csproj" />
   </ItemGroup>
 </Project>

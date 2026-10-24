@@ -4,6 +4,7 @@ using System.Numerics;
 using Fungtopia.Map;
 using Fungtopia.Monsters;
 using Fungtopia.Player;
+using Fungtopia.Save;
 using Fungtopia.Shell;
 using Fungtopia.StartScreen;
 using Xunit;
@@ -21,6 +22,9 @@ public class PetModuleTests
         public readonly List<PetState> States = new();
         public readonly List<(long Tick, HitMonster Hit)> Hits = new();
         public readonly List<OwnedPets> Owned = new();
+        public readonly List<SavePart> Parts = new();
+        /// <summary>Every message published, by type name, to see that restoring has no side effects.</summary>
+        public readonly List<Type> Published = new();
         public long Tick;
 
         public void Subscribe<T>(IMessageHandler<T> handler) where T : struct
@@ -38,6 +42,9 @@ public class PetModuleTests
                 Hits.Add((Tick, hit));
             else if (message is OwnedPets owned)
                 Owned.Add(owned);
+            else if (message is SavePart part)
+                Parts.Add(part);
+            Published.Add(typeof(T));
             if (_handlers.TryGetValue(typeof(T), out var list))
                 foreach (var handler in list)
                     ((IMessageHandler<T>)handler).Handle(in message);
@@ -939,6 +946,189 @@ public class PetModuleTests
         TickOnce();
         Assert.NotEqual(Area.Home, Areas.At(_pet.Position.X, _pet.Position.Z));
         Run(2.0, () => Assert.NotEqual(Area.Home, Areas.At(_pet.Position.X, _pet.Position.Z)));
+    }
+
+    // ---- Save games ----
+
+    /// <summary>Publishes a CollectSave and returns the Pet's one answer.</summary>
+    private static SavePart Collect(FakeBus bus, int requestId)
+    {
+        int before = bus.Parts.Count;
+        bus.Publish(new CollectSave(requestId));
+        Assert.Equal(before + 1, bus.Parts.Count);
+        return bus.Parts[^1];
+    }
+
+    private static PetModule StartedPet(FakeBus bus, List<string> log, int starter = GameStart.Cat)
+    {
+        var pet = new PetModule { Log = log.Add };
+        pet.Start(bus);
+        bus.Publish(new GameStart(GameStart.Girl, starter));
+        return pet;
+    }
+
+    private static void AssertSameOwned(OwnedPets expected, OwnedPets actual)
+    {
+        Assert.Equal(expected.Cat, actual.Cat);
+        Assert.Equal(expected.Dog, actual.Dog);
+        Assert.Equal(expected.Crow, actual.Crow);
+        Assert.Equal(expected.Active, actual.Active);
+    }
+
+    [Fact]
+    public void AnswersCollectSaveWithOnePetPartHoldingVersionedCompactJson()
+    {
+        _bus.Publish(new AdoptPet(PetKind.Crow));
+        var part = Collect(_bus, 42);
+        Assert.Equal(42, part.RequestId);
+        Assert.Equal(SaveModules.Pet, part.Module);
+        Assert.DoesNotContain("\n", part.Json);
+        Assert.DoesNotContain(" ", part.Json);
+        using var doc = System.Text.Json.JsonDocument.Parse(part.Json);
+        Assert.Equal(PetModule.SaveVersion, doc.RootElement.GetProperty("v").GetInt32());
+    }
+
+    [Theory]
+    [InlineData(GameStart.Cat, false, PetKind.Cat)]
+    [InlineData(GameStart.Dog, false, PetKind.Dog)]
+    [InlineData(GameStart.Cat, true, PetKind.Crow)]
+    [InlineData(GameStart.Dog, true, PetKind.Dog)]
+    [InlineData(GameStart.Cat, true, PetKind.Cat)]
+    public void SaveThenRestoreGivesBackTheSameOwnedAndActivePets(int starter, bool adoptCrow, PetKind active)
+    {
+        var log = new List<string>();
+        var bus = new FakeBus();
+        var pet = StartedPet(bus, log, starter);
+        if (adoptCrow)
+            bus.Publish(new AdoptPet(PetKind.Crow));
+        bus.Publish(new SetActivePet(active));
+        var original = pet.Owned;
+        Assert.Equal(active, original.Active);
+        string json = Collect(bus, 1).Json;
+
+        // A different game: another module instance, started with the other starter.
+        var bus2 = new FakeBus();
+        var restored = StartedPet(bus2, log, starter == GameStart.Cat ? GameStart.Dog : GameStart.Cat);
+        bus2.Publish(new RestorePart(SaveModules.Pet, json));
+        AssertSameOwned(original, restored.Owned);
+        Assert.True(restored.Started);
+        Assert.Equal(active, restored.Kind);
+        Assert.Equal(active == PetKind.Crow ? PetModule.HoverHeight : 0f, restored.Altitude);
+
+        // Into a module that has not seen GameStart (loading from the title screen).
+        var bus3 = new FakeBus();
+        var fresh = new PetModule { Log = log.Add };
+        fresh.Start(bus3);
+        bus3.Publish(new RestorePart(SaveModules.Pet, json));
+        AssertSameOwned(original, fresh.Owned);
+        Assert.True(fresh.Started);
+        // A GameStart after the load does not replace the restored pets.
+        bus3.Publish(new GameStart(GameStart.Girl, starter == GameStart.Cat ? GameStart.Dog : GameStart.Cat));
+        AssertSameOwned(original, fresh.Owned);
+        // It saves the same state again, and publishes it every tick.
+        Assert.Equal(json, Collect(bus3, 2).Json);
+        fresh.Tick(new TickContext(0, Step));
+        AssertSameOwned(original, bus3.Owned[^1]);
+        Assert.Equal(active, bus3.States[^1].Kind);
+        Assert.Empty(log);
+    }
+
+    [Fact]
+    public void SaveBeforeTheGameStartsRestoresToNoPet()
+    {
+        var log = new List<string>();
+        var bus = new FakeBus();
+        var pet = new PetModule { Log = log.Add };
+        pet.Start(bus);
+        string json = Collect(bus, 1).Json;
+        var bus2 = new FakeBus();
+        var other = StartedPet(bus2, log);
+        bus2.Publish(new RestorePart(SaveModules.Pet, json));
+        Assert.False(other.Started);
+        AssertSameOwned(pet.Owned, other.Owned);
+        other.Tick(new TickContext(0, Step));
+        Assert.Empty(bus2.States);
+        Assert.Empty(log);
+    }
+
+    [Fact]
+    public void RestoringHasNoSideEffects()
+    {
+        var log = new List<string>();
+        var bus = new FakeBus();
+        var pet = StartedPet(bus, log);
+        bus.Publish(new AdoptPet(PetKind.Crow));
+        string json = Collect(bus, 1).Json;
+
+        var bus2 = new FakeBus();
+        var restored = new PetModule { Log = log.Add };
+        restored.Start(bus2);
+        bus2.Publish(new RestorePart(SaveModules.Pet, json));
+        // Only the RestorePart itself went over the bus: no adoption, purchase, bite or anything else.
+        Assert.Equal(new[] { typeof(RestorePart) }, bus2.Published);
+        Assert.Empty(log);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("not json")]
+    [InlineData("{")]
+    [InlineData("null")]
+    [InlineData("[]")]
+    [InlineData("{\"v\":99,\"cat\":true,\"dog\":true,\"crow\":true,\"active\":\"Crow\"}")]
+    [InlineData("{\"cat\":true,\"dog\":true,\"crow\":true,\"active\":\"Crow\"}")]
+    [InlineData("{\"v\":1,\"cat\":true,\"dog\":false,\"crow\":false,\"active\":\"Dog\"}")]
+    [InlineData("{\"v\":1,\"cat\":true,\"dog\":false,\"crow\":false,\"active\":\"Unicorn\"}")]
+    [InlineData("{\"v\":1,\"cat\":\"yes\",\"dog\":false,\"crow\":false,\"active\":\"Cat\"}")]
+    [InlineData("{\"v\":1,\"cat\":false,\"dog\":false,\"crow\":false,\"active\":\"Crow\"}")]
+    public void BadJsonKeepsTheCurrentStateAndLogsOnce(string json)
+    {
+        var log = new List<string>();
+        var bus = new FakeBus();
+        var pet = StartedPet(bus, log, GameStart.Dog);
+        var before = pet.Owned;
+        bus.Publish(new RestorePart(SaveModules.Pet, json));
+        AssertSameOwned(before, pet.Owned);
+        Assert.True(pet.Started);
+        Assert.Single(log);
+
+        // Before the game starts too: still no pet.
+        var bus2 = new FakeBus();
+        var log2 = new List<string>();
+        var fresh = new PetModule { Log = log2.Add };
+        fresh.Start(bus2);
+        bus2.Publish(new RestorePart(SaveModules.Pet, json));
+        Assert.False(fresh.Started);
+        Assert.Single(log2);
+    }
+
+    [Fact]
+    public void NullJsonKeepsDefaults()
+    {
+        var log = new List<string>();
+        var bus = new FakeBus();
+        var pet = StartedPet(bus, log);
+        var before = pet.Owned;
+        bus.Publish(new RestorePart(SaveModules.Pet, null!));
+        AssertSameOwned(before, pet.Owned);
+        Assert.Single(log);
+    }
+
+    [Fact]
+    public void IgnoresOtherModulesParts()
+    {
+        var log = new List<string>();
+        var bus = new FakeBus();
+        var pet = StartedPet(bus, log);
+        bus.Publish(new AdoptPet(PetKind.Crow));
+        var crowGame = Collect(bus, 1).Json;
+        var bus2 = new FakeBus();
+        var other = StartedPet(bus2, log);
+        bus2.Publish(new RestorePart(SaveModules.Wallet, crowGame));
+        bus2.Publish(new RestorePart(SaveModules.Home, "garbage"));
+        Assert.False(other.Owns(PetKind.Crow));
+        Assert.Equal(PetKind.Cat, other.Kind);
+        Assert.Empty(log);
     }
 
     // ---- Performance ----

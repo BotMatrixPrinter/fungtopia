@@ -1,8 +1,11 @@
 using System;
 using System.Numerics;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Fungtopia.Map;
 using Fungtopia.Monsters;
 using Fungtopia.Player;
+using Fungtopia.Save;
 using Fungtopia.Shell;
 using Fungtopia.StartScreen;
 
@@ -17,12 +20,16 @@ namespace Fungtopia.Pet;
 /// alive monster within 8 m of the player, bites it every second (the Crow swoops down and pecks
 /// every 0.8 s) and comes back; runs around obstacles on the Map's walkable ground; sits by the
 /// defeated player. Publishes <see cref="PetState"/> and <see cref="OwnedPets"/> every tick and
-/// <see cref="HitMonster"/> for each bite or peck.
+/// <see cref="HitMonster"/> for each bite or peck. Saves the owned and active pets in the "Pet"
+/// part of a save game (<see cref="CollectSave"/>, <see cref="RestorePart"/>).
 /// </summary>
 public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageHandler<MonsterState>,
     IMessageHandler<TeleportPlayer>, IMessageHandler<AdoptPet>, IMessageHandler<SetActivePet>,
-    IMessageHandler<GameStart>
+    IMessageHandler<GameStart>, IMessageHandler<CollectSave>, IMessageHandler<RestorePart>
 {
+    /// <summary>The version written in the "Pet" save part; restoring any other one keeps the current state.</summary>
+    public const int SaveVersion = 1;
+
     /// <summary>How far from the player the pet waits, meters.</summary>
     public const float FollowDistance = 2f;
     /// <summary>A following pet stays put until the player is this much farther than <see cref="FollowDistance"/>.</summary>
@@ -89,6 +96,9 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
     /// <summary>Appeared beside the player between ticks (a teleport, a pet switch): the next tick reports it.</summary>
     private bool _teleportPending;
 
+    /// <summary>Where a save part that cannot be restored is reported (one line each).</summary>
+    public Action<string> Log { get; set; } = Console.WriteLine;
+
     public PetModule()
     {
         var door = Places.HomeDoor;
@@ -154,6 +164,8 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
         bus.Subscribe<AdoptPet>(this);
         bus.Subscribe<SetActivePet>(this);
         bus.Subscribe<GameStart>(this);
+        bus.Subscribe<CollectSave>(this);
+        bus.Subscribe<RestorePart>(this);
         State = MakeState();
     }
 
@@ -259,6 +271,81 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
         SinceBite = 100f;
         Altitude = kind == PetKind.Crow ? HoverHeight : 0f;
         if (_hasPlayer)
+        {
+            TeleportBeside(_playerPosition);
+            _teleportPending = true;
+        }
+        else
+            SetPosition();
+        State = MakeState();
+    }
+
+    /// <summary>The "Pet" save part: owned pets and the active one (null before the game starts).</summary>
+    private sealed record SaveData(
+        [property: JsonPropertyName("v")] int Version,
+        [property: JsonPropertyName("cat")] bool Cat,
+        [property: JsonPropertyName("dog")] bool Dog,
+        [property: JsonPropertyName("crow")] bool Crow,
+        [property: JsonPropertyName("active")] string? Active);
+
+    private static readonly JsonSerializerOptions SaveJson = new()
+    {
+        UnmappedMemberHandling = JsonUnmappedMemberHandling.Skip,
+    };
+
+    /// <summary>Answers a save at once with the owned pets and the active one.</summary>
+    public void Handle(in CollectSave message)
+    {
+        var data = new SaveData(SaveVersion, _ownsCat, _ownsDog, _ownsCrow, Started ? Kind.ToString() : null);
+        _bus?.Publish(new SavePart(message.RequestId, SaveModules.Pet, JsonSerializer.Serialize(data, SaveJson)));
+    }
+
+    /// <summary>
+    /// Restores the owned and active pets of a loaded game, quietly: nothing is published (no
+    /// adoption, no reward); the active pet just appears beside the player. A part that cannot be
+    /// read (bad JSON, another version, an active pet not owned) keeps the current state and is logged.
+    /// </summary>
+    public void Handle(in RestorePart message)
+    {
+        if (message.Module != SaveModules.Pet)
+            return;
+        SaveData? data;
+        try
+        {
+            data = message.Json == null ? null : JsonSerializer.Deserialize<SaveData>(message.Json, SaveJson);
+        }
+        catch (JsonException)
+        {
+            data = null;
+        }
+        if (data == null || data.Version != SaveVersion)
+        {
+            Log($"Fungtopia: Pet: cannot restore the saved pets (unreadable or version {data?.Version}); keeping the current ones.");
+            return;
+        }
+        bool none = !data.Cat && !data.Dog && !data.Crow;
+        PetKind kind = PetKind.Cat;
+        bool valid = data.Active == null
+            ? none
+            : Enum.TryParse(data.Active, false, out kind) && Defined(kind)
+              && new OwnedPets(data.Cat, data.Dog, data.Crow, kind).Owns(kind);
+        if (!valid)
+        {
+            Log($"Fungtopia: Pet: cannot restore the saved pets (active pet '{data.Active}' not owned); keeping the current ones.");
+            return;
+        }
+        Started = data.Active != null;
+        _ownsCat = data.Cat;
+        _ownsDog = data.Dog;
+        _ownsCrow = data.Crow;
+        Kind = kind;
+        TargetId = -1;
+        Sitting = false;
+        _biteCooldown = 0f;
+        SinceBite = 100f;
+        _following = false;
+        Altitude = Started && kind == PetKind.Crow ? HoverHeight : 0f;
+        if (Started && _hasPlayer)
         {
             TeleportBeside(_playerPosition);
             _teleportPending = true;
