@@ -177,17 +177,51 @@ public class ForestTests
     [Fact]
     public void ThereIsAForestOfObstacles()
     {
+        // Trunks today, any solid prop the Map adds later: plenty of them, none bigger than a giant trunk.
         Assert.Equal(Obstacles.All.Length, Obstacles.Count);
-        Assert.InRange(Obstacles.Count, 80, 400);
+        Assert.True(Obstacles.Count >= 80, $"only {Obstacles.Count} obstacles");
         foreach (var o in Obstacles.All)
-            Assert.InRange(o.Radius, 0.5f, 3f);
+        {
+            Assert.True(o.Radius > 0f && o.Radius <= 3f, $"obstacle at ({o.X}, {o.Z}) has radius {o.Radius}");
+            Assert.Equal(new Vector2(o.X, o.Z), o.Center);
+        }
     }
 
     [Fact]
-    public void ObstaclesAreInsideTheBounds()
+    public void ObstaclesLieInsideTheForestOrOnItsWall()
     {
+        // The center is in the square; the circle may reach into the mushroom wall around it, never past it.
+        float wall = ForestBounds.HalfSize + ForestRing.Depth;
         foreach (var o in Obstacles.All)
-            Assert.True(ForestBounds.Contains(o.X, o.Z, margin: o.Radius), $"trunk at ({o.X}, {o.Z}) leaves the bounds");
+        {
+            Assert.True(ForestBounds.Contains(o.X, o.Z), $"obstacle at ({o.X}, {o.Z}) is outside the square");
+            Assert.True(MathF.Abs(o.X) + o.Radius <= wall && MathF.Abs(o.Z) + o.Radius <= wall, $"obstacle at ({o.X}, {o.Z}) reaches past the wall");
+        }
+    }
+
+    [Fact]
+    public void ObstaclesLeaveTheGapsClear()
+    {
+        // (The start is kept clear in StartIsInAClearClearing, paths and clearings in ObstaclesKeepOffPathsAndClearingsAndEachOther.)
+        foreach (var o in Obstacles.All)
+        {
+            // The Map's road gaps north and south: nothing stands in their whole width at the square's edge.
+            foreach (var gap in new[] { Areas.ForestGapSouth, Areas.ForestGapNorth })
+            {
+                bool inGap = MathF.Abs(o.X - gap.X) < Areas.ForestGapHalfWidth + o.Radius
+                    && MathF.Abs(o.Z - gap.Y) < 1f + o.Radius;
+                Assert.False(inGap, $"obstacle at ({o.X}, {o.Z}) blocks the road gap at {gap}");
+            }
+            // The west gap: the Deep Forest path runs into the square.
+            Assert.False(Areas.DeepForestPath.Contains(o.X, o.Z, -o.Radius), $"obstacle at ({o.X}, {o.Z}) blocks the west gap");
+        }
+        // A walker comes in through each road gap: 8 m straight into the square (then the path test takes over), nothing in the way.
+        foreach (var gap in new[] { Areas.ForestGapSouth, Areas.ForestGapNorth })
+            for (float d = 0f; d <= 8f; d += 0.25f)
+                Assert.False(Obstacles.Blocks(gap.X, gap.Y - MathF.Sign(gap.Y) * d, radius: 0.5f), $"the way in through the gap at {gap} is blocked {d} m in");
+        // And in through the west gap, along the Deep Forest path.
+        for (float x = Areas.DeepForestPath.MinX; x <= Areas.DeepForestPath.MaxX + 4f; x += 0.25f)
+            Assert.False(Obstacles.Blocks(x, 0f, radius: 0.5f), $"the way in through the west gap is blocked at x = {x}");
     }
 
     [Fact]
@@ -199,9 +233,11 @@ public class ForestTests
             var o = all[i];
             Assert.True(ForestLayout.PathDistance(o.X, o.Z) > ForestLayout.PathHalfWidth + o.Radius);
             Assert.True(ForestLayout.ClearingDepth(o.X, o.Z) < -o.Radius);
-            for (int j = i + 1; j < all.Length; j++)
-                Assert.True(Vector2.Distance(o.Center, all[j].Center) > o.Radius + all[j].Radius + 1f);
         }
+        // The trunks (the first ForestTrunkCount, before any prop the Map adds) stand more than 1 m apart.
+        for (int i = 0; i < Ground.ForestTrunkCount; i++)
+        for (int j = i + 1; j < Ground.ForestTrunkCount; j++)
+            Assert.True(Vector2.Distance(all[i].Center, all[j].Center) > all[i].Radius + all[j].Radius + 1f);
     }
 
     [Fact]
@@ -218,15 +254,12 @@ public class ForestTests
     [Fact]
     public void ObstaclesAreTheSameEveryTime()
     {
+        // The layout depends on no random seed or clock, only on fixed math: every call gives the same list.
         var first = Obstacles.All.ToArray();
         var second = Obstacles.All.ToArray();
+        Assert.NotEmpty(first);
         Assert.Equal(first, second);
-        // Pinned values: the layout depends on no random seed or clock, only on fixed math.
-        Assert.Equal(235, first.Length);
-        Assert.Equal(-94.2996f, first[0].X, 3);
-        Assert.Equal(-95.3378f, first[0].Z, 3);
-        Assert.Equal(1.3795f, first[0].Radius, 3);
-        Assert.Equal(92.2112f, first[^1].X, 3);
+        Assert.Equal(first.Length, Obstacles.Count);
     }
 
     [Fact]

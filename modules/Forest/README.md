@@ -15,7 +15,7 @@ whether it is night, for the glowing mushrooms.
   stand, the logs, the west gap's overgrown trail and dark mushrooms, and `ForestRandom`, the fixed
   hash the layout uses.
 - `Godot/` — `Main.tscn` with `ForestView`, which draws the forest from the Contract.
-- `Tests/` — `ForestTests.cs`: xUnit tests of the Contract (its forwarding values equal the Map's; `Obstacles` are exactly the Map's obstacles in the forest area),
+- `Tests/` — `ForestTests.cs`: xUnit tests of the Contract (its forwarding values equal the Map's; `Obstacles` are exactly the Map's obstacles in the forest area; at least 80, radii up to 3 m, inside the square or on its wall, the same on every call, off paths, clearings, road gaps and the start, with no fixed count, so they hold once the Map adds solid props),
   of `ForestRing` (it matches the Map's obstacles and walkable ground; it opens at the west gap just
   as wide as the Map's path and is closed along the rest of the strip), of `ForestProps` (no prop
   blocks the west gap or the trail) and of `ForestModule` with a fake `IMessageBus`.
