@@ -19,6 +19,7 @@ public class TravelModuleTests
         public readonly List<Type> Subscribed = new();
         public readonly List<MapState> States = new();
         public readonly List<TeleportPlayer> Teleports = new();
+        public readonly List<UiFocus> Focus = new();
         public int OtherMessages;
 
         public void Subscribe<T>(IMessageHandler<T> handler) where T : struct => Subscribed.Add(typeof(T));
@@ -29,6 +30,8 @@ public class TravelModuleTests
                 States.Add(state);
             else if (message is TeleportPlayer teleport)
                 Teleports.Add(teleport);
+            else if (message is UiFocus focus)
+                Focus.Add(focus);
             else
                 OtherMessages++;
         }
@@ -48,8 +51,13 @@ public class TravelModuleTests
             Travel.Start(Bus);
         }
 
-        public void Tick(bool interact = false, bool openMap = false, Vector2 move = default)
+        /// <summary>
+        /// One tick. <paramref name="move"/> goes into PlayerInput.Move; <paramref name="stick"/> is the
+        /// view's held left stick (<see cref="TravelModule.Navigate"/>).
+        /// </summary>
+        public void Tick(bool interact = false, bool openMap = false, Vector2 move = default, Vector2 stick = default)
         {
+            Travel.Navigate(stick);
             // Input and Player tick before Travel (modules tick in name order).
             Travel.Handle(new PlayerInput(move, Vector2.Zero, false, false, false, Vector3.Zero, interact, openMap));
             Travel.Handle(new PlayerState(Position, 0f, Vector3.Zero, true, 10, 10, Alive, CharacterKind.Girl));
@@ -63,6 +71,9 @@ public class TravelModuleTests
         }
 
         public bool LastOpen => Bus.States[^1].Open;
+
+        /// <summary>Whether Input would see the map's owner open, from the UiFocus messages so far.</summary>
+        public bool Focused => Bus.Focus.Count > 0 && Bus.Focus[^1].Open;
     }
 
     private static Vector3 Near(Place signpost, float dx = 1.2f, float dz = 0.8f) =>
@@ -342,16 +353,18 @@ public class TravelModuleTests
 
         // One push right is one step, however long it is held.
         for (int i = 0; i < 20; i++)
-            rig.Tick(move: new Vector2(1f, 0f));
+            rig.Tick(stick: new Vector2(1f, 0f));
         Assert.Equal(1, rig.Travel.Selected);
         rig.Tick();
-        rig.Tick(move: new Vector2(0f, 0.9f));
+        rig.Tick(stick: new Vector2(0f, 0.9f));
         Assert.Equal(2, rig.Travel.Selected);
         rig.Tick();
-        rig.Tick(move: new Vector2(1f, 0f));
+        rig.Tick(stick: new Vector2(1f, 0f));
         Assert.Equal(2, rig.Travel.Selected); // stays on the last one
-        rig.Travel.Step(-1);
         rig.Tick();
+        rig.Tick(stick: new Vector2(-0.3f, 0f)); // under StickStep: no step
+        Assert.Equal(2, rig.Travel.Selected);
+        rig.Tick(stick: new Vector2(0f, -1f));
         Assert.Equal(1, rig.Travel.Selected);
         rig.Travel.Step(-1);
         rig.Tick();
@@ -365,6 +378,120 @@ public class TravelModuleTests
         rig.Wait(TravelModule.FadeOutSeconds);
         Assert.Single(rig.Bus.Teleports);
         Assert.Equal(TravelModule.ArrivalPoint(Area.Forest), rig.Bus.Teleports[0].Position);
+    }
+
+    [Fact]
+    public void PlayerInputMoveDoesNotStepTheSelection()
+    {
+        // Input zeroes Move while the map holds UiFocus; the map's choosing comes from the view.
+        var rig = new Rig(TownSquare);
+        rig.Tick(openMap: true);
+        rig.Tick(move: new Vector2(1f, 0f));
+        rig.Tick();
+        rig.Tick(move: new Vector2(0f, 1f));
+        Assert.Equal(0, rig.Travel.Selected);
+    }
+
+    [Fact]
+    public void AStickHeldWhenTheMapOpensDoesNotStep()
+    {
+        var rig = new Rig(TownSquare);
+        rig.Tick(stick: new Vector2(1f, 0f));
+        rig.Tick(openMap: true, stick: new Vector2(1f, 0f));
+        rig.Tick(stick: new Vector2(1f, 0f));
+        Assert.Equal(0, rig.Travel.Selected);
+        rig.Tick();
+        rig.Tick(stick: new Vector2(1f, 0f));
+        Assert.Equal(1, rig.Travel.Selected);
+    }
+
+    [Fact]
+    public void ConfirmPicksTheSelectedPlace()
+    {
+        var rig = new Rig(TownSquare);
+        rig.Travel.Confirm(); // ignored while closed
+        rig.Tick();
+        rig.Tick(openMap: true);
+        Assert.True(rig.Travel.Open);
+        Assert.Equal(-1, rig.Travel.Traveling);
+        rig.Travel.Step(2);
+        rig.Tick();
+        rig.Travel.Confirm();
+        rig.Tick();
+        Assert.Equal(2, rig.Travel.Traveling);
+        rig.Wait(TravelModule.FadeOutSeconds);
+        Assert.Single(rig.Bus.Teleports);
+        Assert.Equal(TravelModule.ArrivalPoint(Area.PetCity), rig.Bus.Teleports[0].Position);
+    }
+
+    [Fact]
+    public void HoldsUiFocusWhileTheMapIsOpen()
+    {
+        var rig = new Rig(Near(Places.SignpostTown));
+        rig.Wait(0.5f);
+        Assert.Empty(rig.Bus.Focus); // nothing while closed
+
+        rig.Tick(interact: true);
+        Assert.Single(rig.Bus.Focus);
+        Assert.Equal(TravelModule.FocusOwner, rig.Bus.Focus[0].Owner);
+        Assert.True(rig.Bus.Focus[0].Open);
+        rig.Wait(2f);
+        Assert.Single(rig.Bus.Focus); // published once, not every tick
+        Assert.True(rig.Focused);
+
+        rig.Travel.Close();
+        rig.Tick();
+        Assert.Equal(2, rig.Bus.Focus.Count);
+        Assert.Equal(TravelModule.FocusOwner, rig.Bus.Focus[1].Owner);
+        Assert.False(rig.Focused);
+        rig.Wait(1f);
+        Assert.Equal(2, rig.Bus.Focus.Count);
+    }
+
+    [Fact]
+    public void OpenMapAgainReleasesUiFocus()
+    {
+        var rig = new Rig(TownSquare);
+        rig.Tick(openMap: true);
+        Assert.True(rig.Focused);
+        rig.Tick(openMap: true);
+        Assert.False(rig.Focused);
+        Assert.Equal(2, rig.Bus.Focus.Count);
+        rig.Tick(openMap: true);
+        Assert.True(rig.Focused);
+        Assert.Equal(3, rig.Bus.Focus.Count);
+    }
+
+    [Fact]
+    public void GoingIndoorsReleasesUiFocus()
+    {
+        var rig = new Rig(TownSquare);
+        rig.Tick(openMap: true);
+        rig.Position = Places.HomeInterior.Position;
+        rig.Tick();
+        Assert.False(rig.Travel.Open);
+        Assert.False(rig.Focused);
+        Assert.Equal(2, rig.Bus.Focus.Count);
+    }
+
+    [Fact]
+    public void TravelReleasesUiFocusWhenTheMapClosesAtTheTeleport()
+    {
+        var rig = new Rig(DeepForest);
+        rig.Tick(openMap: true);
+        rig.Travel.Pick(0);
+        rig.Tick();
+        // Still held through the fade to black, while the map shows.
+        while (rig.Bus.Teleports.Count == 0)
+        {
+            Assert.True(rig.Focused);
+            rig.Tick();
+        }
+        Assert.False(rig.Focused);
+        Assert.Equal(2, rig.Bus.Focus.Count);
+        rig.Wait(TravelModule.FadeInSeconds + 1f);
+        Assert.Equal(2, rig.Bus.Focus.Count);
+        Assert.False(rig.Focused);
     }
 
     [Fact]

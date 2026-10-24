@@ -10,6 +10,9 @@ map with a short fade and teleports the player to that place's signpost.
 - `Contract/` — `Fungtopia.Travel.Contract` (namespace `Fungtopia.Travel`):
   - `MapState(bool Open)`: published by Travel every tick; `Open` is true while the map shows (from
     opening until the fade after a pick is black), so the HUD can hide and the player can stand still.
+- It also publishes `Fungtopia.Input.UiFocus` (owner `TravelModule.FocusOwner`) open on the tick the
+  map opens and closed on the tick it closes (`Close`, `OpenMap` again, indoors, or the teleport after
+  a pick), once each, so Input stops walking, looking, jumping and firing while the map shows.
 - `Core/` — `Fungtopia.Travel.Core`: `TravelModule` (the one `IModule`) and `MapLayout`.
 - `Godot/` — `Main.tscn` with `TravelView`; `MapCanvas` (the map, drawn in code); `SignpostModel`
   (loads the model); `Preview.tscn` for screenshots; `Shaders/` (toon surface, ink outline).
@@ -20,9 +23,10 @@ Test it with `./test.sh Travel` from the repository root.
 
 ## Core
 
-`TravelModule` reads `Fungtopia.Input.PlayerInput` (`Interact`, `OpenMap`, `Move`) and
+`TravelModule` reads `Fungtopia.Input.PlayerInput` (`Interact`, `OpenMap`) and
 `Fungtopia.Player.PlayerState` (`Position`, `Area`, `Alive`), and the world from the Map Contract.
-It publishes `MapState` every tick and `Fungtopia.Player.TeleportPlayer` once per trip. Each tick:
+It publishes `MapState` every tick, `UiFocus` when the map opens or closes, and
+`Fungtopia.Player.TeleportPlayer` once per trip. Each tick:
 
 - **Prompt.** `NearSignpost` is the signpost within `PromptRadius` (2.5 m, horizontal) of the
   player, or -1; `ShowPrompt` (text `PromptText`, "E / X: Map") while near one, alive, outdoors,
@@ -30,10 +34,12 @@ It publishes `MapState` every tick and `Fungtopia.Player.TeleportPlayer` once pe
 - **Opening.** While closed, alive and not in `Area.Home`: `OpenMap`, or `Interact` near a
   signpost, opens the map. `Here` ("you are here") is the destination nearest the player (the area
   it is in; on a road the one it is least outside of); the selection starts there.
-- **While open.** No teleport is sent until a place is chosen. The stick (or W A S D) steps the
-  selection once per push (right / up toward Pet City, left / down toward Town, no wrapping); the
-  view's arrow keys (`Step`), mouse hover (`Hover`) and click (`Pick`) apply at the next tick.
-  `Interact` picks the selected place. `Close()` (Esc / B), `OpenMap` again, or ending up indoors
+- **While open.** No teleport is sent until a place is chosen. Input zeroes `PlayerInput.Move`
+  while the map holds `UiFocus`, so the map's choosing comes from the view: the held left stick
+  (`Navigate`, kept until the next call) steps the selection once per push past `StickStep` (right /
+  up toward Pet City, left / down toward Town, no wrapping); arrows, W A S D and the D-pad (`Step`),
+  mouse hover (`Hover`), click (`Pick`) and confirm (`Confirm`) apply at the next tick.
+  `Interact` or `Confirm` picks the selected place. `Close()` (Esc / B), `OpenMap` again, or ending up indoors
   closes it without a trip.
 - **A trip.** On a pick: `FadeOutSeconds` (0.3 s) to black with the map still shown, then the map
   closes and one `TeleportPlayer` goes to `ArrivalPoint(area)`: `ArrivalGap` (1.5 m) in front of
@@ -64,7 +70,8 @@ Forest raised in the middle, Pet City right, radius 215; `Hit(point)`, `ToCanvas
 
 While the map is open the mouse is freed (and captured again when it closes); mouse motion,
 left clicks (handled, so the Input module does not take them to recapture the mouse), arrow keys,
-Esc and gamepad B go to the Core.
+W A S D (physical keys) and the D-pad (`Step`), Enter / Space / gamepad A (`Confirm`), Esc and gamepad
+B (`Close`) go to the Core, and the first pad's left stick goes to `Navigate` every frame.
 
 Screenshots: `./screenshot.sh modules/Travel/Godot/Preview.tscn` shows the open map;
 `TRAVEL_PREVIEW=signpost` shows the Town signpost with its prompt instead.

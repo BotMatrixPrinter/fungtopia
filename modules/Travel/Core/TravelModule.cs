@@ -11,7 +11,8 @@ namespace Fungtopia.Travel;
 /// Fast travel between Mushroom Town, Mushroom Forest and Pet City. Shows a prompt near the
 /// signposts, opens the travel map on Interact there or on OpenMap anywhere outdoors, and on a
 /// pick fades out, publishes <see cref="TeleportPlayer"/> to that place's signpost and fades in.
-/// Publishes <see cref="MapState"/> every tick.
+/// Publishes <see cref="MapState"/> every tick, and <see cref="UiFocus"/> (owner
+/// <see cref="FocusOwner"/>) when the map opens and when it closes, so Input stops walking meanwhile.
 /// </summary>
 public sealed class TravelModule : IModule, IMessageHandler<PlayerInput>, IMessageHandler<PlayerState>
 {
@@ -31,6 +32,9 @@ public sealed class TravelModule : IModule, IMessageHandler<PlayerInput>, IMessa
 
     /// <summary>Stick deflection that steps the map's selection; it must come back under half of it first.</summary>
     public const float StickStep = 0.5f;
+
+    /// <summary>The <see cref="UiFocus.Owner"/> of the travel map.</summary>
+    public const int FocusOwner = 0x7472_6176; // "trav"
 
     private static readonly Area[] s_destinations = { Area.Town, Area.Forest, Area.PetCity };
 
@@ -60,6 +64,9 @@ public sealed class TravelModule : IModule, IMessageHandler<PlayerInput>, IMessa
     private int _pendingSteps;
     private bool _pendingClose;
     private int _hover = -1;
+    private bool _pendingConfirm;
+    private Vector2 _navigate;
+    private bool _focused;
 
     /// <summary>The three places, in map order: Town, Forest, PetCity.</summary>
     public static ReadOnlySpan<Area> Destinations => s_destinations;
@@ -159,6 +166,15 @@ public sealed class TravelModule : IModule, IMessageHandler<PlayerInput>, IMessa
     /// <summary>View: arrow keys moved the selection by <paramref name="steps"/> (+ toward Pet City).</summary>
     public void Step(int steps) => _pendingSteps += steps;
 
+    /// <summary>View: Enter / Space / gamepad A was pressed: picks the selected place at the next tick while open.</summary>
+    public void Confirm() => _pendingConfirm = true;
+
+    /// <summary>
+    /// View: the held direction of the left stick (x right, y up, length 0..1). Kept until the next
+    /// call; one push past <see cref="StickStep"/> steps the selection once.
+    /// </summary>
+    public void Navigate(Vector2 direction) => _navigate = direction;
+
     /// <summary>View: Esc / B was pressed. Applied at the next tick.</summary>
     public void Close() => _pendingClose = true;
 
@@ -178,6 +194,7 @@ public sealed class TravelModule : IModule, IMessageHandler<PlayerInput>, IMessa
         bool interact = _haveInput && _input.Interact;
         bool openMap = _haveInput && _input.OpenMap;
         int stick = StickSteps();
+        bool confirm = interact || _pendingConfirm;
 
         switch (_phase)
         {
@@ -205,7 +222,7 @@ public sealed class TravelModule : IModule, IMessageHandler<PlayerInput>, IMessa
                 break;
             default:
                 if (Open)
-                    TickOpen(interact, openMap, stick, outdoors);
+                    TickOpen(confirm, openMap, stick, outdoors);
                 else if (outdoors && alive && (openMap || (interact && NearSignpost >= 0)))
                 {
                     Open = true;
@@ -218,12 +235,18 @@ public sealed class TravelModule : IModule, IMessageHandler<PlayerInput>, IMessa
         _pendingPick = -1;
         _pendingSteps = 0;
         _pendingClose = false;
+        _pendingConfirm = false;
         _hover = -1;
         _haveInput = false;
+        if (Open != _focused)
+        {
+            _focused = Open;
+            _bus.Publish(new UiFocus(FocusOwner, Open));
+        }
         _bus.Publish(new MapState(Open));
     }
 
-    private void TickOpen(bool interact, bool openMap, int stick, bool outdoors)
+    private void TickOpen(bool confirm, bool openMap, int stick, bool outdoors)
     {
         if (_pendingClose || openMap || !outdoors)
         {
@@ -233,7 +256,7 @@ public sealed class TravelModule : IModule, IMessageHandler<PlayerInput>, IMessa
         if (_hover >= 0 && _hover < s_destinations.Length)
             Selected = _hover;
         Selected = Math.Clamp(Selected + _pendingSteps + stick, 0, s_destinations.Length - 1);
-        int pick = _pendingPick >= 0 && _pendingPick < s_destinations.Length ? _pendingPick : interact ? Selected : -1;
+        int pick = _pendingPick >= 0 && _pendingPick < s_destinations.Length ? _pendingPick : confirm ? Selected : -1;
         if (pick < 0)
             return;
         Selected = pick;
@@ -245,9 +268,8 @@ public sealed class TravelModule : IModule, IMessageHandler<PlayerInput>, IMessa
     /// <summary>One step per stick push (right or up: +1, left or down: -1), after it came back near the center.</summary>
     private int StickSteps()
     {
-        if (!_haveInput)
-            return 0;
-        var move = _input.Move;
+        // Input zeroes PlayerInput.Move while the map holds UiFocus, so the stick comes from the view.
+        var move = _navigate;
         float main = MathF.Abs(move.X) >= MathF.Abs(move.Y) ? move.X : move.Y;
         if (MathF.Abs(main) < StickStep * 0.5f)
         {

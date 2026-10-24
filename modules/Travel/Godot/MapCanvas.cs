@@ -80,7 +80,7 @@ public partial class MapCanvas : Control
         Text("Fungtopia", new Vector2(MapLayout.Width * 0.5f, 140f), 80, Ink, Ribbon, 14);
         foreach (var dot in _roadDots)
             DrawCircle(dot, 8f, Road, true, -1f, true);
-        Text("Click a place, or choose with the stick / arrow keys and press E / X.   Esc / B: close",
+        Text("Click a place, or choose with arrows / WASD / stick and press Enter / E / A.   Esc / B: close",
             new Vector2(MapLayout.Width * 0.5f, 1000f), 30, Ink, Parchment, 0);
 
         for (int i = 0; i < MapLayout.Centers.Length; i++)
