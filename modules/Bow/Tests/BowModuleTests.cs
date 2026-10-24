@@ -6,6 +6,7 @@ using Fungtopia.Input;
 using Fungtopia.Monsters;
 using Fungtopia.Player;
 using Fungtopia.Shell;
+using MapGround = Fungtopia.Map.Ground;
 using Xunit;
 
 namespace Fungtopia.Bow.Tests;
@@ -53,6 +54,8 @@ public class BowModuleTests
     private readonly List<MonsterState> _monsters = new();
     private PlayerState _player;
     private long _tick;
+    /// <summary>The camera (the aim ray's origin); null puts it 3 m straight behind the hold point along the aim.</summary>
+    private Vector3? _camera;
 
     /// <summary>15 m south of the middle clearing's center: open ground for 30 m to the north.</summary>
     private static readonly Vector3 Spot = OnGround(0f, 10f);
@@ -70,13 +73,20 @@ public class BowModuleTests
     private static PlayerState PlayerAt(Vector3 feet, bool alive = true, float facing = 0f) =>
         new(feet, facing, Vector3.Zero, true, alive ? 10 : 0, 10, alive, CharacterKind.Girl);
 
-    private static PlayerInput Input(bool fire, Vector3 aim) =>
-        new(Vector2.Zero, Vector2.Zero, false, fire, true, Vector3.Normalize(aim));
+    private static PlayerInput Input(bool fire, Vector3 aim, Vector3 camera) =>
+        new(Vector2.Zero, Vector2.Zero, false, fire, true, Vector3.Normalize(aim), false, false, camera);
+
+    private Vector3 Hold => BowGeometry.HoldPoint(_player.Position, _player.Facing);
+
+    private Vector3 CameraFor(Vector3 aim) => _camera ?? Hold - Vector3.Normalize(aim) * 3f;
+
+    /// <summary>Over the left shoulder, as the camera sits while drawing (facing 0: left is -X, behind is +Z).</summary>
+    private static Vector3 ShoulderCamera(Vector3 feet) => feet + new Vector3(-0.6f, 1.7f, 2.6f);
 
     /// <summary>One tick as the host runs it: Input, Player and Monsters publish, then the bow ticks.</summary>
     private void TickWith(bool fire, Vector3 aim)
     {
-        _bus.Publish(Input(fire, aim));
+        _bus.Publish(Input(fire, aim, CameraFor(aim)));
         _bus.Publish(_player);
         foreach (var m in _monsters)
             _bus.Publish(m);
@@ -219,7 +229,18 @@ public class BowModuleTests
         Assert.True(Vector3.Distance(start, a.PreviousPosition) < 1e-4f, $"{a.PreviousPosition} vs {start}");
         var step = a.Position - a.PreviousPosition;
         Assert.Equal(45f * Dt, step.Length(), 2);
-        Assert.True(Vector3.Dot(Vector3.Normalize(step), aim) > 0.999f);
+        // The camera is right behind the hold point: along the aim, raised only a little against gravity.
+        AssertAlongAimRaisedALittle(aim, a.Velocity);
+    }
+
+    /// <summary>Same heading as <paramref name="aim"/>, pitched up by gravity's lift only (under 4 degrees).</summary>
+    private static void AssertAlongAimRaisedALittle(Vector3 aim, Vector3 velocity)
+    {
+        var flatAim = Vector2.Normalize(new Vector2(aim.X, aim.Z));
+        var flatV = Vector2.Normalize(new Vector2(velocity.X, velocity.Z));
+        Assert.True(Vector2.Dot(flatAim, flatV) > 0.99999f, $"{velocity} vs {aim}");
+        float pitchAim = MathF.Asin(Vector3.Normalize(aim).Y), pitchV = MathF.Asin(Vector3.Normalize(velocity).Y);
+        Assert.InRange(pitchV - pitchAim, 0f, 4f * MathF.PI / 180f);
     }
 
     [Fact]
@@ -258,7 +279,7 @@ public class BowModuleTests
         var start = Spot + new Vector3(BowGeometry.HoldForward, BowGeometry.HoldUp, BowGeometry.HoldRight);
         Assert.True(Vector3.Distance(start, a.PreviousPosition) < 1e-4f, $"{a.PreviousPosition} vs {start}");
         Assert.Equal(BowGeometry.HoldPoint(Spot, facing), a.PreviousPosition);
-        Assert.True(Vector3.Dot(Vector3.Normalize(a.Velocity), aim) > 0.999f);
+        AssertAlongAimRaisedALittle(aim, a.Velocity);
     }
 
     [Fact]
@@ -272,7 +293,13 @@ public class BowModuleTests
         _bus.Publish(_player);
         _bow.Tick(new TickContext(_tick++, Step));
         var v = OnlyArrow().Velocity;
-        Assert.True(Vector3.Dot(Vector3.Normalize(v), -Vector3.UnitX) > 0.999f);
+        AssertAlongAimRaisedALittle(-Vector3.UnitX, v);
+        // Its target is on the facing's line from the hold point.
+        var target = _bus.States[^1].Target;
+        var hold = BowGeometry.HoldPoint(Spot, MathF.PI / 2);
+        Assert.Equal(hold.Y, target.Y, 3);
+        Assert.Equal(hold.Z, target.Z, 3);
+        Assert.True(target.X < hold.X - 1f);
     }
 
     [Fact]
@@ -310,6 +337,177 @@ public class BowModuleTests
         Run((int)(BowModule.MaxFlightSeconds * 60) + 1, false, North);
         Assert.Equal(0, UsedSlots());
         Assert.Equal(0, _bus.States[^1].ArrowsInFlight);
+    }
+
+    // ---- The crosshair's target ----
+
+    /// <summary>Draws for a few ticks with the camera at <paramref name="camera"/> along <paramref name="aim"/>; the published target.</summary>
+    private Vector3 TargetWhileDrawing(Vector3 camera, Vector3 aim)
+    {
+        _camera = camera;
+        Run(5, true, aim);
+        Assert.True(_bus.States[^1].Draw > 0f);
+        Assert.Equal(_bow.Target, _bus.States[^1].Target);
+        return _bus.States[^1].Target;
+    }
+
+    private static float DistanceToRay(Vector3 p, Vector3 origin, Vector3 aim)
+    {
+        aim = Vector3.Normalize(aim);
+        var f = p - origin;
+        return (f - aim * Vector3.Dot(f, aim)).Length();
+    }
+
+    [Fact]
+    public void TheTargetIsTheNearSideOfTheFirstMonsterOnTheCrosshair()
+    {
+        var camera = ShoulderCamera(Spot);
+        var near = Monster(1, OnGround(Spot.X + 1f, Spot.Z - 12f));
+        var far = Monster(2, OnGround(Spot.X + 2f, Spot.Z - 24f)); // right behind it on the same ray
+        _monsters.Add(far);
+        _monsters.Add(near);
+        var center = near.Position + new Vector3(0f, near.Radius, 0f);
+        var aim = Vector3.Normalize(center - camera);
+        var target = TargetWhileDrawing(camera, aim);
+        Assert.True(DistanceToRay(target, camera, aim) < 1e-3f);
+        Assert.Equal(near.Radius, Vector3.Distance(target, center), 2);
+        Assert.True(Vector3.Dot(target - center, aim) < 0f); // the side facing the camera
+    }
+
+    [Fact]
+    public void MonstersBetweenTheCameraAndTheCharacterAreNotTheTarget()
+    {
+        var camera = ShoulderCamera(Spot);
+        var aim = Vector3.Normalize(new Vector3(0f, 0.1f, -1f));
+        // A monster right behind the player, on the camera's ray.
+        var behind = camera + aim * 1.2f;
+        _monsters.Add(Monster(1, behind - new Vector3(0f, 0.3f, 0f), radius: 0.3f));
+        var target = TargetWhileDrawing(camera, aim);
+        Assert.True(Vector3.Dot(target - Hold, aim) > 0f, $"{target}");
+    }
+
+    [Fact]
+    public void TheTargetIsOnTheFirstSolidObstacleOnTheCrosshair()
+    {
+        // East of a forest giant mushroom's stem, facing west (-X) toward it.
+        var trunk = MapGround.Obstacles[MapGround.ForestTrunkCount / 2];
+        var feet = OnGround(trunk.X + trunk.Radius + 3f, trunk.Z);
+        _player = PlayerAt(feet, facing: MathF.PI / 2);
+        var camera = feet + new Vector3(2.6f, 1.7f, 0.6f); // behind and over the left shoulder
+        var aim = Vector3.Normalize(new Vector3(trunk.X, feet.Y + 1.5f, trunk.Z) - camera);
+        var target = TargetWhileDrawing(camera, aim);
+        Assert.True(DistanceToRay(target, camera, aim) < 1e-3f);
+        Assert.Equal(trunk.Radius, Vector2.Distance(new Vector2(target.X, target.Z), new Vector2(trunk.X, trunk.Z)), 2);
+        Assert.True(target.X > trunk.X);
+        Assert.True(MapGround.Blocks(target.X - 0.05f, target.Z));
+    }
+
+    [Fact]
+    public void TheTargetIsOnTheGroundWhereTheCrosshairMeetsIt()
+    {
+        var camera = ShoulderCamera(Spot);
+        var spot = OnGround(Spot.X + 0.5f, Spot.Z - 9f);
+        var aim = Vector3.Normalize(spot - camera);
+        var target = TargetWhileDrawing(camera, aim);
+        Assert.True(DistanceToRay(target, camera, aim) < 1e-3f);
+        Assert.Equal(MapGround.HeightAt(target.X, target.Z), target.Y, 2);
+        Assert.True(Vector3.Distance(target, spot) < 0.2f, $"{target} vs {spot}");
+    }
+
+    [Fact]
+    public void WithNothingOnTheCrosshairTheTargetIs60MetersAlongIt()
+    {
+        var camera = ShoulderCamera(Spot);
+        var aim = Vector3.Normalize(new Vector3(0.2f, 0.6f, -1f)); // up into the sky
+        var target = TargetWhileDrawing(camera, aim);
+        Assert.True(Vector3.Distance(camera + aim * BowModule.MaxAimDistance, target) < 1e-3f, $"{target}");
+        Assert.Equal(60f, BowModule.MaxAimDistance);
+    }
+
+    /// <summary>Ticks until the shot arrow is gone or <paramref name="seconds"/> pass; its closest approach to <paramref name="point"/>.</summary>
+    private float ClosestApproach(Vector3 point, Vector3 aim, float seconds)
+    {
+        float best = float.PositiveInfinity;
+        for (int i = 0; i < seconds * 60; i++)
+        {
+            Arrow a = default;
+            foreach (var arrow in _bow.Arrows)
+                if (arrow.Shot == 1)
+                    a = arrow;
+            // The tick's straight segment from its previous to its new position.
+            var d = a.Position - a.PreviousPosition;
+            float t = d.LengthSquared() > 0f ? Math.Clamp(Vector3.Dot(point - a.PreviousPosition, d) / d.LengthSquared(), 0f, 1f) : 0f;
+            best = MathF.Min(best, Vector3.Distance(point, a.PreviousPosition + d * t));
+            if (a.Phase != ArrowPhase.Flying)
+                break;
+            TickWith(false, aim);
+        }
+        return best;
+    }
+
+    [Theory]
+    [InlineData(10f, 1.5f, 0.5f, 36)]
+    [InlineData(10f, -2f, -1f, 1)]
+    [InlineData(25f, 3f, 1f, 18)]
+    [InlineData(25f, -1f, -2f, 1)]
+    [InlineData(45f, -4f, 2f, 36)]
+    [InlineData(45f, 2f, -3f, 1)]
+    public void ArrowsFlyFromTheBowToWhereTheCrosshairIs(float distance, float side, float up, int drawTicks)
+    {
+        // High above the forest (nothing else in the way); the camera over the left shoulder.
+        var feet = Spot + new Vector3(0f, 15f, 0f);
+        _player = PlayerAt(feet);
+        var camera = ShoulderCamera(feet);
+        var center = Hold + new Vector3(side, up, -distance);
+        _monsters.Add(Monster(5, center - new Vector3(0f, 0.15f, 0f), radius: 0.15f));
+        var aim = Vector3.Normalize(center - camera);
+        _camera = camera;
+        Shoot(drawTicks, aim);
+        var target = _bus.States[^1].Target;
+        Assert.True(Vector3.Distance(target, center) < 0.16f, $"{target}");
+        Assert.Equal(BowGeometry.HoldPoint(feet, 0f), OnlyArrow().PreviousPosition);
+        Assert.True(ClosestApproach(target, aim, 3f) < 0.3f);
+        Assert.Equal(5, Assert.Single(_bus.Hits).MonsterId);
+    }
+
+    [Theory]
+    [InlineData(10f)]
+    [InlineData(25f)]
+    [InlineData(45f)]
+    public void ArrowsLandOnGroundTargets(float distance)
+    {
+        // A long gentle downhill look from up on something: the crosshair rests on the ground.
+        var feet = Spot + new Vector3(0f, 4f, 0f);
+        _player = PlayerAt(feet);
+        var camera = ShoulderCamera(feet);
+        var spot = OnGround(Hold.X, Hold.Z - distance);
+        var aim = Vector3.Normalize(spot - camera);
+        _camera = camera;
+        Shoot(36, aim);
+        var target = _bus.States[^1].Target;
+        Assert.True(Vector3.Distance(target, spot) < 0.3f, $"{target} vs {spot}");
+        Assert.True(ClosestApproach(target, aim, 3f) < 0.3f);
+        var a = OnlyArrow();
+        Assert.Equal(ArrowPhase.Stuck, a.Phase);
+        Assert.True(Vector3.Distance(a.Position, target) < 0.3f, $"{a.Position} vs {target}");
+    }
+
+    [Fact]
+    public void WithTheCameraRightBehindTheHoldPointNothingChanges()
+    {
+        // The old line: from the hold point along the camera's aim; the arrow goes where it pointed.
+        var aim = Vector3.Normalize(new Vector3(0.1f, 0.25f, -1f));
+        Shoot(36, aim); // the default camera: 3 m straight behind the hold point
+        var target = _bus.States[^1].Target;
+        Assert.True(DistanceToRay(target, Hold, aim) < 1e-3f);
+        Assert.Equal(BowModule.MaxAimDistance - 3f, Vector3.Distance(Hold, target), 2);
+        var a = OnlyArrow();
+        Assert.Equal(Hold, a.PreviousPosition);
+        AssertAlongAimRaisedALittle(aim, a.Velocity);
+        // The launch velocity (before its first tick of gravity) is the bow's aim.
+        var launch = Vector3.Normalize(a.Velocity + new Vector3(0f, BowModule.Gravity * Dt, 0f));
+        Assert.True(Vector3.Distance(_bow.AimDirection, launch) < 1e-4f, $"{_bow.AimDirection} vs {launch}");
+        Assert.True(ClosestApproach(target, aim, 3f) < 0.3f);
     }
 
     // ---- Hits ----
@@ -518,8 +716,8 @@ public class BowModuleTests
         bow.Start(new NullBus());
         var player = PlayerAt(Spot);
         var monster = Monster(1, OnGround(Spot.X, Spot.Z - 20f));
-        var fire = Input(true, North);
-        var release = Input(false, North);
+        var fire = Input(true, North, ShoulderCamera(Spot));
+        var release = Input(false, North, ShoulderCamera(Spot));
         void Frame(in PlayerInput input, long tick)
         {
             bow.Handle(input);

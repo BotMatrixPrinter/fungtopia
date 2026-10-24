@@ -25,7 +25,7 @@ Test it with `./test.sh Bow` from the repository root.
 
 | Message | Who publishes it | What it is |
 | --- | --- | --- |
-| `BowState` | Bow, once every tick | `Draw` (0..1, how far the bow is drawn), `ArrowsInFlight` (flying arrows; stuck ones do not count). |
+| `BowState` | Bow, once every tick | `Draw` (0..1, how far the bow is drawn), `ArrowsInFlight` (flying arrows; stuck ones do not count), `Target` (the world point the crosshair is on, see below; for the pose and HUD). The two-argument constructor leaves `Target` zero. |
 
 `BowGeometry` (a static class, not a message) is where the character holds the bow, for the Player
 module to put the bow hand there and for the Bow module to shoot from:
@@ -40,17 +40,28 @@ module to put the bow hand there and for the Bow module to shoot from:
 
 ## Core
 
-`BowModule` reads `Fungtopia.Input.PlayerInput` (`Fire`, `HasAim`, `AimDirection`),
-`Fungtopia.Player.PlayerState` and `Fungtopia.Monsters.MonsterState`, and the forest's `Terrain`,
-`Obstacles` and `ForestBounds` (Forest Contract). It publishes `Fungtopia.Monsters.HitMonster`.
+`BowModule` reads `Fungtopia.Input.PlayerInput` (`Fire`, `HasAim`, `AimOrigin`, `AimDirection`),
+`Fungtopia.Player.PlayerState` and `Fungtopia.Monsters.MonsterState`, the forest's `Terrain`,
+`Obstacles` and `ForestBounds` (Forest Contract) for the arrows' flight, and `Fungtopia.Map.Ground`
+(Map Contract) for the crosshair's target. It publishes `Fungtopia.Monsters.HitMonster`.
 Each tick:
+
+- **Target.** While the player is `Alive`, the crosshair's point (`Target`): the camera's ray from
+  `AimOrigin` along `AimDirection` (without an aim: from the hold point along the player's facing)
+  is searched up to 60 m (`MaxAimDistance`) for the first hit among living monsters' spheres, solid
+  obstacles (`Ground.Blocks`, up to 6 m above the ground) and the ground (`Ground.HeightAt`),
+  marched in 0.25 m steps and refined by bisection; with no hit, the point 60 m along the ray. The
+  search starts abreast of the hold point, so nothing between the camera and the character counts.
 
 - **Draw.** While `Fire` is held and the player is `Alive`, `Draw` rises by `dt / 0.6 s` up to 1
   (full after 0.6 s; holding longer keeps it full).
 - **Shot.** Releasing `Fire` after drawing shoots one arrow and sets `Draw` back to 0. The arrow
   starts at the bow hand, `BowGeometry.HoldPoint(Position, Facing)` of the player (the hold
-  offset turned by the player's facing, not by the aim), flying along `AimDirection` (the player's facing when there is no aim) at
-  25 m/s + 20 m/s × draw (25..45 m/s). No drawing or shooting while the player is not `Alive`:
+  offset turned by the player's facing, not by the aim), at 25 m/s + 20 m/s × draw (25..45 m/s),
+  toward `Target`, aimed higher by the fall over its flight time (`LaunchVelocity`) so it passes
+  through the target: the camera can sit over the shoulder and the arrow still lands where the
+  crosshair is. With the camera straight behind the hold point this is the camera's own line
+  (raised only by that small lift). No drawing or shooting while the player is not `Alive`:
   the draw is lost.
 - **Flight.** Gravity of 4 m/s² (light); each tick the arrow moves by its new velocity and points
   along it. Collisions are swept along the whole step, so fast arrows never tunnel.
@@ -68,7 +79,7 @@ Each tick:
 - **Pool.** 24 arrow slots (`Arrows`). A shot takes a free slot, else reuses the slot shot longest
   ago, stuck arrows before flying ones. Each shot gets a new `Shot` number.
 
-`BowModule` also exposes `Draw`, `AimDirection`, `Player`, `HasPlayer` and `Ticks`; the view
+`BowModule` also exposes `Draw`, `Target`, `AimDirection` (the launch direction while drawing), `Player`, `HasPlayer` and `Ticks`; the view
 reads only `Arrows`. No allocations per tick.
 
 ## View

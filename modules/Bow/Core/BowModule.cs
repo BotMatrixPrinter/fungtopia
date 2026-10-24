@@ -5,6 +5,7 @@ using Fungtopia.Input;
 using Fungtopia.Monsters;
 using Fungtopia.Player;
 using Fungtopia.Shell;
+using MapGround = Fungtopia.Map.Ground;
 
 namespace Fungtopia.Bow;
 
@@ -41,6 +42,10 @@ public sealed class BowModule : IModule, IMessageHandler<PlayerInput>, IMessageH
     public const float OutsideMargin = 10f;
     public const int PoolSize = 24;
     public const int MaxMonsters = 256;
+    /// <summary>How far along the aim ray the crosshair's target is looked for, meters.</summary>
+    public const float MaxAimDistance = 60f;
+    /// <summary>Step of the aim ray's march over the ground and obstacles, meters.</summary>
+    public const float AimMarchStep = 0.25f;
 
     private readonly Arrow[] _arrows = new Arrow[PoolSize];
     private MonsterState[] _monsters = new MonsterState[MaxMonsters];
@@ -52,6 +57,7 @@ public sealed class BowModule : IModule, IMessageHandler<PlayerInput>, IMessageH
     private PlayerInput _input;
     private bool _drawing;
     private int _shots;
+    private float _dt = 1f / 60;
 
     /// <summary>How far the bow is drawn, 0..1.</summary>
     public float Draw { get; private set; }
@@ -62,8 +68,14 @@ public sealed class BowModule : IModule, IMessageHandler<PlayerInput>, IMessageH
     /// <summary>Whether a <see cref="PlayerState"/> has arrived yet.</summary>
     public bool HasPlayer { get; private set; }
 
-    /// <summary>The direction the bow points while drawing (the latest shot direction).</summary>
+    /// <summary>
+    /// The direction the bow points while drawing (the latest shot direction): from the hold point
+    /// toward <see cref="Target"/>, raised a little against gravity.
+    /// </summary>
     public Vector3 AimDirection { get; private set; } = -Vector3.UnitZ;
+
+    /// <summary>The point the crosshair is on (see <see cref="BowState.Target"/>).</summary>
+    public Vector3 Target { get; private set; }
 
     /// <summary>Number of ticks run; the view uses it to see new ticks.</summary>
     public long Ticks { get; private set; }
@@ -110,6 +122,8 @@ public sealed class BowModule : IModule, IMessageHandler<PlayerInput>, IMessageH
         if (_bus == null)
             throw new InvalidOperationException("BowModule.Tick before Start.");
         float dt = (float)context.StepSeconds;
+        if (dt > 0f)
+            _dt = dt;
         Ticks++;
 
         // The monsters published since the last tick are the ones arrows can hit now.
@@ -120,7 +134,7 @@ public sealed class BowModule : IModule, IMessageHandler<PlayerInput>, IMessageH
         UpdateDraw(dt);
         int inFlight = MoveArrows(dt);
 
-        State = new BowState(Draw, inFlight);
+        State = new BowState(Draw, inFlight, Target);
         _bus.Publish(State);
     }
 
@@ -133,45 +147,153 @@ public sealed class BowModule : IModule, IMessageHandler<PlayerInput>, IMessageH
             Draw = 0f;
             return;
         }
-        Vector3 aim = ShotDirection();
+        // The crosshair's point, every tick (the pose and HUD read it while drawing).
+        Vector3 hold = HoldPoint();
+        AimRay(hold, out Vector3 origin, out Vector3 ray);
+        Target = FindTarget(origin, ray, hold);
         if (_input.Fire)
         {
             _drawing = true;
             Draw = MathF.Min(1f, Draw + dt / FullDrawSeconds);
-            AimDirection = aim;
+            AimDirection = Vector3.Normalize(LaunchVelocity(hold, Target, SpeedFor(Draw), _dt));
         }
         else if (_drawing)
         {
             _drawing = false;
-            AimDirection = aim;
-            Shoot(aim, Draw);
+            Vector3 velocity = LaunchVelocity(hold, Target, SpeedFor(Draw), _dt);
+            AimDirection = Vector3.Normalize(velocity);
+            Shoot(hold, velocity, Draw);
             Draw = 0f;
         }
     }
 
-    /// <summary>The input's aim when it is valid, else the player's facing.</summary>
-    private Vector3 ShotDirection()
+    /// <summary>The character's bow hand (the Player module draws the bow there).</summary>
+    private Vector3 HoldPoint()
     {
-        Vector3 aim = _input.AimDirection;
-        if (_input.HasAim && float.IsFinite(aim.X) && float.IsFinite(aim.Y) && float.IsFinite(aim.Z)
-            && aim.LengthSquared() > 1e-6f)
-            return Vector3.Normalize(aim);
         float facing = float.IsFinite(Player.Facing) ? Player.Facing : 0f;
-        return new Vector3(-MathF.Sin(facing), 0f, -MathF.Cos(facing));
+        return BowGeometry.HoldPoint(Player.Position, facing);
     }
 
-    private void Shoot(Vector3 direction, float draw)
+    /// <summary>The camera's ray through the crosshair when the input has a valid one, else the player's facing from the hold point.</summary>
+    private void AimRay(Vector3 hold, out Vector3 origin, out Vector3 direction)
+    {
+        Vector3 aim = _input.AimDirection, from = _input.AimOrigin;
+        if (_input.HasAim && float.IsFinite(aim.X) && float.IsFinite(aim.Y) && float.IsFinite(aim.Z)
+            && aim.LengthSquared() > 1e-6f && float.IsFinite(from.X) && float.IsFinite(from.Y) && float.IsFinite(from.Z))
+        {
+            origin = from;
+            direction = Vector3.Normalize(aim);
+            return;
+        }
+        float facing = float.IsFinite(Player.Facing) ? Player.Facing : 0f;
+        origin = hold;
+        direction = new Vector3(-MathF.Sin(facing), 0f, -MathF.Cos(facing));
+    }
+
+    /// <summary>
+    /// The first point along the ray (from <paramref name="origin"/>, unit <paramref name="direction"/>)
+    /// on a living monster's sphere, a solid obstacle (<c>Fungtopia.Map.Ground.Blocks</c>, up to
+    /// <see cref="TrunkHeight"/> above the ground) or the ground (<c>Fungtopia.Map.Ground.HeightAt</c>),
+    /// within <see cref="MaxAimDistance"/>; else the point that far along it. The ray is searched only
+    /// from abreast of <paramref name="hold"/> on, so nothing between the camera and the character counts.
+    /// </summary>
+    private Vector3 FindTarget(Vector3 origin, Vector3 direction, Vector3 hold)
+    {
+        float start = Math.Clamp(Vector3.Dot(hold - origin, direction), 0f, MaxAimDistance);
+        float end = MaxAimDistance;
+        for (int i = 0; i < _monsterCount; i++)
+        {
+            ref readonly MonsterState m = ref _monsters[i];
+            if (!m.Alive || !(m.Radius > 0f))
+                continue;
+            float t = RaySphere(origin, direction, m.Position + new Vector3(0f, m.Radius, 0f), m.Radius, start);
+            if (t < end)
+                end = t;
+        }
+
+        // March over the ground and obstacles up to the nearest monster, then refine the first solid step.
+        float prev = start;
+        if (Solid(origin + direction * start))
+            return origin + direction * start;
+        for (float t = start; t < end;)
+        {
+            t = MathF.Min(t + AimMarchStep, end);
+            if (Solid(origin + direction * t))
+            {
+                float lo = prev, hi = t;
+                for (int k = 0; k < 14; k++)
+                {
+                    float mid = 0.5f * (lo + hi);
+                    if (Solid(origin + direction * mid))
+                        hi = mid;
+                    else
+                        lo = mid;
+                }
+                return origin + direction * hi;
+            }
+            prev = t;
+        }
+        return origin + direction * end;
+    }
+
+    /// <summary>Whether a point is in the ground or in a solid obstacle's stem.</summary>
+    private static bool Solid(Vector3 p)
+    {
+        float ground = MapGround.HeightAt(p.X, p.Z);
+        return p.Y <= ground || (p.Y <= ground + TrunkHeight && MapGround.Blocks(p.X, p.Z));
+    }
+
+    /// <summary>Distance along the unit ray where it enters the sphere, from <paramref name="start"/> on, or +infinity.</summary>
+    private static float RaySphere(Vector3 origin, Vector3 direction, Vector3 center, float radius, float start)
+    {
+        Vector3 f = origin - center;
+        float b = Vector3.Dot(f, direction);
+        float c = f.LengthSquared() - radius * radius;
+        float disc = b * b - c;
+        if (disc < 0f)
+            return float.PositiveInfinity;
+        float root = MathF.Sqrt(disc);
+        float enter = -b - root, exit = -b + root;
+        if (exit < start)
+            return float.PositiveInfinity;
+        return MathF.Max(enter, start);
+    }
+
+    /// <summary>
+    /// The launch velocity (length <paramref name="speed"/>) from <paramref name="from"/> that brings
+    /// an arrow under this bow's gravity, moved in ticks of <paramref name="dt"/>, through
+    /// <paramref name="target"/>: aimed at the target raised by the fall over the flight time.
+    /// </summary>
+    public static Vector3 LaunchVelocity(Vector3 from, Vector3 target, float speed, float dt)
+    {
+        Vector3 d = target - from;
+        float distance = d.Length();
+        if (!(distance > 1e-4f) || !(speed > 0f))
+            return (distance > 1e-4f ? d / distance : -Vector3.UnitZ) * speed;
+        float flat = new Vector2(d.X, d.Z).Length();
+        float lift = 0f;
+        Vector3 dir = d / distance;
+        for (int i = 0; i < 6; i++)
+        {
+            dir = Vector3.Normalize(d + new Vector3(0f, lift, 0f));
+            float flatSpeed = speed * new Vector2(dir.X, dir.Z).Length();
+            // Ticks move by the velocity after gravity: after time t the fall is g/2 (t² + t dt).
+            float t = flatSpeed > 0.2f * speed ? flat / flatSpeed : distance / speed;
+            lift = MathF.Min(0.5f * Gravity * (t * t + t * dt), distance);
+        }
+        return Vector3.Normalize(d + new Vector3(0f, lift, 0f)) * speed;
+    }
+
+    private void Shoot(Vector3 start, Vector3 velocity, float draw)
     {
         int slot = FreeSlot();
-        // From the character's bow hand (the Player module draws the bow there).
-        float facing = float.IsFinite(Player.Facing) ? Player.Facing : 0f;
-        Vector3 start = BowGeometry.HoldPoint(Player.Position, facing);
+        Vector3 direction = Vector3.Normalize(velocity);
         _arrows[slot] = new Arrow
         {
             Phase = ArrowPhase.Flying,
             Position = start,
             PreviousPosition = start,
-            Velocity = direction * SpeedFor(draw),
+            Velocity = velocity,
             Direction = direction,
             Draw = draw,
             Shot = ++_shots,
