@@ -347,6 +347,139 @@ public class TownTests
         Assert.Equal(TownLayout.Count, a.Length);
     }
 
+    // ---- Standing on the ground ----
+
+    /// <summary>Ground under the footprint, densely: <paramref name="rings"/> rings of 64 points out to its edge, and the center.</summary>
+    private static IEnumerable<Vector2> DenseFootprint(TownPiece piece, float x, float z, float yaw, float width, float depth, int rings = 4)
+    {
+        yield return new Vector2(x, z);
+        float cy = MathF.Cos(yaw), sy = MathF.Sin(yaw);
+        bool boxy = TownGround.IsBoxy(piece);
+        for (int r = 1; r <= rings; r++)
+            for (int i = 0; i < 64; i++)
+            {
+                float a = i * MathF.Tau / 64f, c = MathF.Cos(a), s = MathF.Sin(a);
+                if (boxy)
+                {
+                    float m = MathF.Max(MathF.Abs(c), MathF.Abs(s));
+                    c /= m;
+                    s /= m;
+                }
+                float lx = c * width * 0.5f * r / rings, lz = s * depth * 0.5f * r / rings;
+                yield return new Vector2(x + lx * cy + lz * sy, z - lx * sy + lz * cy);
+            }
+    }
+
+    /// <summary>Points over the town, the roads and the rough Deep Forest, every few meters, walkable ones only.</summary>
+    private static IEnumerable<Vector2> SamplePositions()
+    {
+        foreach (var area in new[] { Areas.Town, Areas.DeepForest, Areas.Forest })
+            for (float x = area.MinX + 1.3f; x < area.MaxX; x += 3.7f)
+                for (float z = area.MinZ + 0.9f; z < area.MaxZ; z += 3.7f)
+                    if (Areas.Walkable(x, z, 0.5f))
+                        yield return new Vector2(x, z);
+        for (int i = 0; i < Areas.RoadPoints.Length; i++)
+            if (!float.IsNaN(Areas.RoadPoints[i].X))
+                yield return Areas.RoadPoints[i];
+    }
+
+    [Fact]
+    public void TheFootprintIsTheCenterAndAtLeastEightPointsOnItsEdge()
+    {
+        Assert.True(TownGround.EdgePoints >= 8);
+        var center = TownGround.FootprintPoint(TownPiece.StreetLamp, 10f, 200f, 0.7f, 0.8f, 0.8f, 0);
+        Assert.Equal(new Vector2(10f, 200f), center);
+        var angles = new HashSet<int>();
+        for (int k = 1; k <= TownGround.EdgePoints; k++)
+        {
+            var w = TownGround.FootprintPoint(TownPiece.StreetLamp, 10f, 200f, 0.7f, 0.8f, 0.8f, k);
+            Assert.Equal(0.4f, Vector2.Distance(w, center), 3);
+            angles.Add((int)MathF.Round(MathF.Atan2(w.Y - 200f, w.X - 10f) * 100f));
+        }
+        Assert.Equal(TownGround.EdgePoints, angles.Count);
+        // A box's edge points reach its corners.
+        var corner = TownGround.FootprintPoint(TownPiece.Crate, 0f, 0f, 0f, 2f, 1f, 1 + TownGround.EdgePoints / 8);
+        Assert.Equal(1f, MathF.Abs(corner.X), 3);
+        Assert.Equal(0.5f, MathF.Abs(corner.Y), 3);
+        Assert.Throws<ArgumentOutOfRangeException>(() => TownGround.FootprintPoint(TownPiece.Crate, 0f, 0f, 0f, 1f, 1f, TownGround.FootprintPoints));
+    }
+
+    [Fact]
+    public void StemsAnywhereSitInTheGroundNeverFloatingNorSunkDeep()
+    {
+        // Street lamps, planters and mushroom stems of the sizes Town draws, all over the walkable world.
+        var stems = new (TownPiece Piece, float Width, float Height)[]
+        {
+            (TownPiece.StreetLamp, 0.8f, 3.2f), (TownPiece.Planter, 1.2f, 0.7f), (TownPiece.StreetLamp, 0.6f, 2.5f),
+            (TownPiece.Crate, 0.71f, 0.8f), (TownPiece.Flowers, 0.5f, 0.35f),
+        };
+        int checkedCount = 0, sloped = 0;
+        foreach (var at in SamplePositions())
+            foreach (var (piece, width, height) in stems)
+            {
+                float yaw = at.X * 0.37f + at.Y * 0.11f;
+                var fit = TownGround.Fit(piece, at.X, at.Y, yaw, width, width, height);
+                string what = $"{piece} at ({at.X}, {at.Y})";
+                float high = float.MinValue, low = float.MaxValue;
+                foreach (var w in DenseFootprint(piece, at.X, at.Y, yaw, width, width))
+                {
+                    float h = Ground.HeightAt(w.X, w.Y);
+                    Assert.True(fit.Base <= h, $"{what}: base {fit.Base} floats over ground {h} at ({w.X}, {w.Y})");
+                    high = MathF.Max(high, h);
+                    low = MathF.Min(low, h);
+                }
+                // A stem (up to 0.8 m across) at most 0.3 m under its highest ground; wider pieces sink only by the drop under them.
+                if (width <= 0.8f)
+                    Assert.True(fit.Base >= high - 0.3f, $"{what}: base {fit.Base} sunk more than 0.3 m under the highest ground {high}");
+                Assert.True(fit.Base >= low - 0.2f, $"{what}: base {fit.Base} sunk more than 0.2 m under the lowest ground {low}");
+                Assert.Equal(height, fit.Top - fit.High, 3);
+                Assert.Equal(fit.Top - fit.Base, fit.DrawnHeight, 3);
+                checkedCount++;
+                if (fit.High - fit.Low > 0.02f)
+                    sloped++;
+            }
+        Assert.True(checkedCount > 2000, $"{checkedCount}");
+        Assert.True(sloped > 500, $"only {sloped} sample spots on sloped ground");
+    }
+
+    [Fact]
+    public void EveryPlacementStandsInTheGroundAndLooksAsTallAsItIs()
+    {
+        foreach (var p in TownLayout.All)
+        {
+            var fit = TownGround.Fit(p);
+            string what = $"{p.Piece} at ({p.X}, {p.Z})";
+            float low = float.MaxValue;
+            foreach (var w in DenseFootprint(p.Piece, p.X, p.Z, p.Yaw, p.Width, p.Depth, rings: 8))
+            {
+                float h = Ground.HeightAt(w.X, w.Y);
+                Assert.True(fit.Base <= h, $"{what}: base {fit.Base} floats over ground {h} at ({w.X}, {w.Y})");
+                low = MathF.Min(low, h);
+            }
+            for (int k = 0; k < TownGround.FootprintPoints; k++)
+            {
+                var w = TownGround.FootprintPoint(p, k);
+                Assert.True(fit.Base <= Ground.HeightAt(w.X, w.Y) - TownGround.SinkOf(p.Piece) + 1e-4f, what);
+            }
+            Assert.InRange(TownGround.SinkOf(p.Piece), 0.01f, 0.2f);
+            Assert.True(fit.Base >= low - 0.2f, $"{what}: sunk {low - fit.Base} m");
+            // Its stem reaches down; from the high side it is exactly as tall as the Map says.
+            Assert.Equal(p.Height, fit.Top - fit.High, 3);
+            Assert.True(fit.DrawnHeight >= p.Height + TownGround.SinkOf(p.Piece) - 1e-4f, what);
+            if (p.BuildingIndex < 0)
+                Assert.True(fit.Extra <= 0.3f, $"{what}: stem reaches {fit.Extra} m down");
+        }
+    }
+
+    [Fact]
+    public void BigStemsAndFoundationsFlareIntoTheGround()
+    {
+        foreach (var piece in new[] { TownPiece.PlayerHouse, TownPiece.MillieHouse, TownPiece.Clinic, TownPiece.House, TownPiece.ClothingShop, TownPiece.Fountain, TownPiece.StreetLamp, TownPiece.Planter })
+            Assert.True(TownGround.HasRootFlare(piece), piece.ToString());
+        foreach (var piece in new[] { TownPiece.Flowers, TownPiece.Fence, TownPiece.Bench, TownPiece.Crate })
+            Assert.False(TownGround.HasRootFlare(piece), piece.ToString());
+    }
+
     // ---- The module: lamps follow night ----
 
     [Fact]

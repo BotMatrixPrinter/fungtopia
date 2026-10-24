@@ -15,12 +15,12 @@ tall), which are walked over.
 
 - `Contract/` — `Fungtopia.Town.Contract` (namespace `Fungtopia.Town`): `TownLights`.
 - `Core/` — `Fungtopia.Town.Core`: `TownModule`, the module's one `IModule`; `TownLayout`, the
-  placement list.
+  placement list; `TownGround`, how each placement stands on the uneven ground.
 - `Godot/` — `Main.tscn` with `TownView` (draws the placements, lamps' lights), `TownModels`
   (loads `town.glb` at run time, toon materials); `Preview.tscn` with `TownPreview` (for
   screenshots); `Shaders/` (toon surface, ink outline).
 - `Models/` — `town.py`, the Blender script that builds and exports `town.glb` next to it.
-- `Tests/` — `TownTests.cs`: xUnit tests of `TownLayout` (its props are exactly the Map's Town props), of `town.glb` having an object for every placement, and of `TownModule` with a fake `IMessageBus`.
+- `Tests/` — `TownTests.cs`: xUnit tests of `TownLayout` (its props are exactly the Map's Town props), of `town.glb` having an object for every placement, of `TownGround` (bases never float over the ground nor sink deep, at many spots over the town, roads and the rough Deep Forest), and of `TownModule` with a fake `IMessageBus`.
 
 Test it with `./test.sh Town` from the repository root.
 
@@ -59,10 +59,20 @@ allocations per tick.
 
 ## View
 
-`TownView` puts one copy of a `town.glb` object at each placement (on the lowest ground under a
-building's footprint, its foundation reaching into the rest), turned by `Yaw` and scaled to the
-placement's size. While `LampsLit` the lamp bulbs and windows glow (fading over 1.5 s) and each
+`TownView` puts one copy of a `town.glb` object at each placement, turned by `Yaw` and scaled to the
+placement's size, standing where `TownGround.Fit` says (below). Big stems, foundations and basins
+(houses, the clinic, Abby's shop, the fountain, street lamps, planters: `HasRootFlare`) get a
+stone skirt from just above their highest ground widening down into the ground, so they look rooted. While `LampsLit` the lamp bulbs and windows glow (fading over 1.5 s) and each
 street lamp has a warm `OmniLight3D` at its bulb (0.8 of its height); by day they are off. The sky and sun are DayNight's.
+
+## Ground
+
+`TownGround.Fit(placement)` samples `Ground.HeightAt` at the footprint's center, 16 points on its
+edge (an ellipse, or a rectangle for the stall, benches, fences and crates, corners included) and
+8 halfway in (`FootprintPoint`). The base (`Base`) goes at the lowest of them minus `Sink` (0.15 m;
+flower clumps 0.05 m), and the top (`Top`) stays the placement's `Height` above the highest, so the
+stem reaches down by the difference (`DrawnHeight` = `Top` - `Base`; the view stretches the model
+to it) and looks as tall as it is from the high side. Nothing floats, no cap sinks.
 
 ## Models
 

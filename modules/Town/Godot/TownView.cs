@@ -38,16 +38,19 @@ public partial class TownView : Node3D, IModuleView
                 continue;
             var model = ModelSize(p.Piece);
             node.Name = $"{ModelName(p)}_{GetChildCount()}";
-            node.Position = new Vector3(p.X, BaseHeight(p), p.Z);
+            var fit = TownGround.Fit(p);
+            node.Position = new Vector3(p.X, fit.Base, p.Z);
             node.Rotation = new Vector3(0f, p.Yaw, 0f);
-            node.Scale = new Vector3(p.Width / model.X, p.Height / model.Y, p.Depth / model.Z);
+            node.Scale = new Vector3(p.Width / model.X, fit.DrawnHeight / model.Y, p.Depth / model.Z);
             AddChild(node);
+            if (TownGround.HasRootFlare(p.Piece))
+                AddChild(RootFlare(p, fit));
             if (p.Piece == TownPiece.StreetLamp)
             {
                 var light = new OmniLight3D
                 {
                     Name = $"LampLight_{_lights.Count}",
-                    Position = node.Position + new Vector3(0f, p.Height * LampLightHeight, 0f),
+                    Position = node.Position + new Vector3(0f, fit.DrawnHeight * LampLightHeight, 0f),
                     LightColor = new Color(1f, 0.78f, 0.45f),
                     OmniRange = 10f,
                     OmniAttenuation = 1.2f,
@@ -108,19 +111,40 @@ public partial class TownView : Node3D, IModuleView
 
     private static Vector3 Size(System.Numerics.Vector3 v) => new(v.X, v.Y, v.Z);
 
-    /// <summary>The lowest ground under a building's footprint (its foundation reaches down into higher ground), or under a prop's center.</summary>
-    private static float BaseHeight(in TownPlacement p)
+    /// <summary>
+    /// A stone skirt round the foot of a big stem, foundation or basin: as wide as its foot at the
+    /// highest ground (just above it), widening down into the ground under the lowest, so it looks
+    /// rooted however the ground falls away under it.
+    /// </summary>
+    private static MeshInstance3D RootFlare(in TownPlacement p, in GroundFit fit)
     {
-        if (p.BuildingIndex < 0)
-            return Ground.HeightAt(p.X, p.Z);
-        var b = Buildings.All[p.BuildingIndex];
-        float low = Ground.HeightAt(b.X, b.Z);
-        for (int i = -1; i <= 1; i++)
-        for (int j = -1; j <= 1; j++)
+        // The foot's radius (local X, Z) as town.py models it.
+        (float rx, float rz, float flare, float lift) = p.Piece switch
         {
-            var w = b.ToWorld(i * b.Width * 0.4f, j * b.Depth * 0.4f);
-            low = MathF.Min(low, Ground.HeightAt(w.X, w.Y));
-        }
-        return low;
+            TownPiece.StreetLamp => (p.Width * 0.4f, p.Depth * 0.4f, 1.45f, 0.05f),
+            TownPiece.Planter => (p.Width * 0.47f, p.Depth * 0.47f, 1.18f, 0.04f),
+            TownPiece.Fountain => (p.Width * 0.49f, p.Depth * 0.49f, 1.08f, 0.06f),
+            _ => (p.Width * 0.4f + 0.25f, p.Depth * 0.4f + 0.25f, 1.1f, 0.1f),
+        };
+        float bottom = fit.Base - 0.05f, top = fit.High + lift;
+        var mesh = new CylinderMesh
+        {
+            TopRadius = 1f,
+            BottomRadius = flare,
+            Height = 1f,
+            RadialSegments = 32,
+            Rings = 1,
+            CapTop = false,
+            CapBottom = false,
+        };
+        return new MeshInstance3D
+        {
+            Name = $"RootFlare_{p.Piece}",
+            Mesh = mesh,
+            MaterialOverride = TownModels.Surface("Stone"),
+            Position = new Vector3(p.X, (bottom + top) * 0.5f, p.Z),
+            Rotation = new Vector3(0f, p.Yaw, 0f),
+            Scale = new Vector3(rx, top - bottom, rz),
+        };
     }
 }

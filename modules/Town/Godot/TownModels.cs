@@ -27,6 +27,9 @@ public static class TownModels
     /// <summary>The windows' material (null until the model is loaded).</summary>
     public static ShaderMaterial? Window => s_materials.GetValueOrDefault("Window");
 
+    /// <summary>The toon material of surface <paramref name="name"/> of town.glb (null until the model is loaded, or when it has none).</summary>
+    public static ShaderMaterial? Surface(string name) => s_materials.GetValueOrDefault(name);
+
     /// <summary>A fresh copy of the object <paramref name="name"/> of town.glb (or null when missing), toon-shaded.</summary>
     public static Node3D? Instance(string name)
     {
