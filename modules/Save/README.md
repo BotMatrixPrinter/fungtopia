@@ -9,12 +9,13 @@ the in-game pause menu (Esc / Start): Resume, Save, Load, Quit to Title.
   the Map and Player Contracts (for `Area` and `CharacterKind`).
 - `Core/` — `Fungtopia.Save.Core`: `SaveModule`, the module's one `IModule`; `SaveFiles` (the
   files of one folder: paths, atomic write, read, delete, the JSON format) and `SaveData` (one
-  file). It reads the Input (`UiFocus`), StartScreen (`GameStart`, `StartScreenState`), Player
+  file); `PauseHints` (the pause menu's button hint line). It reads the Input (`UiFocus`,
+  `ActiveDevice`), StartScreen (`GameStart`, `StartScreenState`), Player
   (`PlayerState`), Wallet (`WalletState`) and DayNight (`TimeOfDay`) Contracts.
 - `Godot/` — `Main.tscn` with `SaveView` (a `CanvasLayer` on layer 60, over the HUD and the
   start screen), drawn by `PauseMenu` and `SaveToast`; `Preview.tscn` (`SavePreview`, for
   screenshots).
-- `Tests/` — `SaveModuleTests.cs`: xUnit tests of `SaveModule` and `SaveFiles` with a fake
+- `Tests/` — `SaveModuleTests.cs`: xUnit tests of `SaveModule`, `SaveFiles` and `PauseHints` with a fake
   synchronous `IMessageBus` and fake saving modules, on a temp folder.
 
 Test it with `./test.sh Save` from the repository root.
@@ -90,6 +91,10 @@ another module's tick.
   closes it. On the next tick the Core publishes `UiFocus(SaveModule.MenuOwner, true)` (false
   when it closes): the Input module then stops moving the player. `UiFocus` from `MenuOwner`
   does not count as another menu.
+- **Device.** `Device` is the latest `ActiveDevice.Kind` (keyboard and mouse until one arrives).
+  `PauseHints.Line(device, mainPage, iconSize)` is the hint line as RichTextLabel BBCode with that
+  device's icons only (`Prompts.Rich`): "[Up][Down] Move  [Confirm] Choose  [Pause] Resume" on the
+  Paused page, "... [Back] Back" on the Load pages.
 - The view also reads `Current`, `Started`, `MenuOpen`, `SaveCount` / `LastSaveOk` /
   `LastSaveAuto`, `LoadCount` / `LastLoadOk`, `PlaySeconds` and `Files`. `SaveFolder` is null
   until the view sets it (nothing is saved, every slot is empty). No allocations per tick except
@@ -108,6 +113,12 @@ module's menu is open (the Core says so).
 | Load a Game | three slot cards (character, day, coins, area, manual and auto times; "Empty" or "Unreadable"), Back |
 | Slot N | Manual save, Autosave (each with its day, coins and time; grey when it cannot be loaded), Back |
 
+Under the panel a cream bar shows the button hints (`PauseHints`) in a `RichTextLabel` with the
+icons of the device in use only: arrow keys, Enter and Esc on keyboard; D-pad, A and Menu / B on
+Xbox and other pads; D-pad, Cross and Options / Circle on PlayStation; Nintendo's own. It is rebuilt
+as soon as the device, the page or the screen size changes; text and icons scale with the screen
+and the bar fits around them.
+
 Up / Down (or Left / Right, the D-pad, the left stick) move the highlight; Enter, Space or A
 choose; Backspace or B go back; Esc or Start resume (or go back from the Load pages). The mouse
 is visible while it is open: hovering highlights, clicking chooses (the click is kept from the
@@ -124,4 +135,6 @@ the menu's `UiFocus` is open. A real pause needs a shell or per-module change.
 `./screenshot.sh modules/Save/Godot/Preview.tscn` shows the menu over a plain backdrop with
 made-up saves in a temp folder (slot 1 with both saves, slot 2 damaged, slot 3 empty); the
 environment variable `SAVE_PREVIEW` picks the page: `pause` (default), `saved` (with the
-"Saved!" toast), `slots` (the slot list) or `choice` (slot 1's manual save and autosave).
+"Saved!" toast), `slots` (the slot list) or `choice` (slot 1's manual save and autosave); `SAVE_DEVICE` picks the
+hints' device: `keyboard` (default), `xbox`, `playstation`, `nintendo` or `generic`. The preview has
+no Input view, so it makes the icons loadable itself (as the Input view does in the game).

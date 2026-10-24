@@ -1,3 +1,4 @@
+using Fungtopia.Input;
 using Fungtopia.Shell;
 using Godot;
 using GodotInput = Godot.Input;
@@ -18,6 +19,11 @@ public partial class SaveView : CanvasLayer, IModuleView
     private SaveModule? _save;
     private PauseMenu _menu = null!;
     private SaveToast _toast = null!;
+    private PanelContainer _hintBar = null!;
+    private RichTextLabel _hints = null!;
+    private DeviceKind _hintDevice;
+    private bool _hintMain;
+    private int _hintIcon = -1;
     private bool _shown;
     private float _appear;
     private int _seenSaves;
@@ -48,6 +54,29 @@ public partial class SaveView : CanvasLayer, IModuleView
         AddChild(_menu);
         _toast = new SaveToast();
         AddChild(_toast);
+
+        // The button hints under the panel: icons of the active device only, sized with the screen.
+        _hintBar = new PanelContainer { Visible = false, MouseFilter = Control.MouseFilterEnum.Ignore };
+        _hintBar.AddThemeStyleboxOverride("panel", new StyleBoxFlat
+        {
+            BgColor = PauseMenu.Cream, BorderColor = PauseMenu.Ink, CornerDetail = 12, AntiAliasing = true,
+            ContentMarginLeft = 28, ContentMarginRight = 28, ContentMarginTop = 6, ContentMarginBottom = 6,
+            BorderWidthLeft = 4, BorderWidthTop = 4, BorderWidthRight = 4, BorderWidthBottom = 4,
+            CornerRadiusTopLeft = 26, CornerRadiusTopRight = 26, CornerRadiusBottomLeft = 26, CornerRadiusBottomRight = 26,
+        });
+        _hints = new RichTextLabel
+        {
+            BbcodeEnabled = true,
+            FitContent = true,
+            AutowrapMode = TextServer.AutowrapMode.Off,
+            ScrollActive = false,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        _hints.AddThemeFontOverride("normal_font", PauseMenu.Font);
+        _hints.AddThemeColorOverride("default_color", PauseMenu.Ink);
+        _hintBar.AddChild(_hints);
+        AddChild(_hintBar);
     }
 
     public override void _Process(double delta)
@@ -74,6 +103,7 @@ public partial class SaveView : CanvasLayer, IModuleView
         {
             _shown = _save.MenuOpen;
             _menu.Visible = _shown;
+            _hintBar.Visible = _shown;
             _appear = 0f;
             if (_shown && !KeepPage)
             {
@@ -91,6 +121,33 @@ public partial class SaveView : CanvasLayer, IModuleView
         _menu.Appear = _appear;
         _menu.Slots = _save.Slots;
         _menu.CurrentSlot = _save.Current;
+        UpdateHints();
+    }
+
+    /// <summary>Rebuilds the hint line when the device, the page or the screen size changes.</summary>
+    private void UpdateHints()
+    {
+        var screen = GetViewport().GetVisibleRect().Size;
+        float scale = Mathf.Min(screen.X / 1920f, screen.Y / 1080f);
+        int fontSize = Mathf.Max(10, Mathf.RoundToInt(30f * scale));
+        int iconSize = Mathf.Max(14, Mathf.RoundToInt(46f * scale));
+        bool main = _menu.Page == MenuPage.Main;
+        var device = _save!.Device;
+        if (device == _hintDevice && main == _hintMain && iconSize == _hintIcon)
+            return;
+        _hintDevice = device;
+        _hintMain = main;
+        _hintIcon = iconSize;
+        _hints.AddThemeFontSizeOverride("normal_font_size", fontSize);
+        _hints.Text = PauseHints.Line(device, main, iconSize);
+        // Fit the bar around the line, centered at the bottom of the screen.
+        float width = _hints.GetContentWidth();
+        float height = Mathf.Max(_hints.GetContentHeight(), iconSize);
+        _hints.CustomMinimumSize = new Vector2(width, height);
+        _hintBar.ResetSize();
+        var bar = _hintBar.GetCombinedMinimumSize();
+        _hintBar.Size = bar;
+        _hintBar.Position = new Vector2((screen.X - bar.X) * 0.5f, screen.Y - bar.Y - 18f * scale);
     }
 
     public override void _Input(InputEvent e)

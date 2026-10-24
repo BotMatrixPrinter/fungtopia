@@ -642,8 +642,80 @@ public sealed class SaveModuleTests : IDisposable
         for (int i = 200; i < 2000; i++)
         {
             save.Handle(Player(Area.Town));
+            save.Handle(new ActiveDevice(i % 2 == 0 ? DeviceKind.Xbox : DeviceKind.KeyboardMouse));
             save.Tick(new TickContext(i, Step));
         }
         Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
+    }
+
+    // ---- Button hints ----
+
+    private static readonly string[] IconPrefixes = { "key_", "mouse_", "xbox_", "ps_", "ns_" };
+
+    private static string PrefixOf(DeviceKind device) => device switch
+    {
+        DeviceKind.KeyboardMouse => "key_",
+        DeviceKind.PlayStation => "ps_",
+        DeviceKind.Nintendo => "ns_",
+        _ => "xbox_", // Xbox and Generic pads
+    };
+
+    /// <summary>Every icon path in a hint line.</summary>
+    private static List<string> Icons(string line) =>
+        System.Text.RegularExpressions.Regex.Matches(line, @"\[img=(\d+)\](.*?)\[/img\]").Select(m => m.Groups[2].Value).ToList();
+
+    [Theory]
+    [InlineData(DeviceKind.KeyboardMouse, true, "key_up", "key_down", "key_enter", "key_esc")]
+    [InlineData(DeviceKind.KeyboardMouse, false, "key_up", "key_down", "key_enter", "key_esc")]
+    [InlineData(DeviceKind.Xbox, true, "xbox_dpad_up", "xbox_dpad_down", "xbox_a", "xbox_menu")]
+    [InlineData(DeviceKind.Xbox, false, "xbox_dpad_up", "xbox_dpad_down", "xbox_a", "xbox_b")]
+    [InlineData(DeviceKind.Generic, false, "xbox_dpad_up", "xbox_dpad_down", "xbox_a", "xbox_b")]
+    [InlineData(DeviceKind.PlayStation, true, "ps_dpad_up", "ps_dpad_down", "ps_cross", "ps_options")]
+    [InlineData(DeviceKind.PlayStation, false, "ps_dpad_up", "ps_dpad_down", "ps_cross", "ps_circle")]
+    [InlineData(DeviceKind.Nintendo, false, "ns_dpad_up", "ns_dpad_down", "ns_b", "ns_a")]
+    public void Hints_show_only_the_active_devices_icons(DeviceKind device, bool mainPage, string up, string down, string choose, string leave)
+    {
+        string line = PauseHints.Line(device, mainPage);
+        var icons = Icons(line);
+        Assert.Equal(
+            new[] { up, down, choose, leave }.Select(g => Prompts.GlyphDirectory + g + ".svg"),
+            icons);
+        Assert.All(icons, icon => Assert.StartsWith(Prompts.GlyphDirectory + PrefixOf(device), icon));
+        foreach (var prefix in IconPrefixes.Where(p => p != PrefixOf(device)))
+            Assert.DoesNotContain(Prompts.GlyphDirectory + prefix, line);
+
+        // Only icons and the words: no key names, no "E / X" or "(B)" text.
+        string words = System.Text.RegularExpressions.Regex.Replace(line, @"\[img=\d+\].*?\[/img\]", "").Trim();
+        Assert.Equal(mainPage ? new[] { "Move", "Choose", "Resume" } : new[] { "Move", "Choose", "Back" },
+            words.Split(' ', StringSplitOptions.RemoveEmptyEntries));
+        Assert.DoesNotContain("/", words);
+        Assert.DoesNotContain("(", words);
+    }
+
+    [Fact]
+    public void Hint_icons_take_the_size_asked_for()
+    {
+        string line = PauseHints.Line(DeviceKind.PlayStation, true, 52);
+        var sizes = System.Text.RegularExpressions.Regex.Matches(line, @"\[img=(\d+)\]").Select(m => m.Groups[1].Value).ToList();
+        Assert.Equal(4, sizes.Count);
+        Assert.All(sizes, size => Assert.Equal("52", size));
+        Assert.Contains(Prompts.Rich(PromptAction.Confirm, DeviceKind.PlayStation, 52), line);
+    }
+
+    [Fact]
+    public void Device_follows_ActiveDevice_so_the_hints_change_live()
+    {
+        var bus = new FakeBus();
+        var save = NewModule(bus);
+        Assert.Equal(DeviceKind.KeyboardMouse, save.Device);
+        bus.Publish(new ActiveDevice(DeviceKind.Xbox));
+        Assert.Equal(DeviceKind.Xbox, save.Device);
+        Assert.Contains("xbox_a", PauseHints.Line(save.Device, true));
+        bus.Publish(new ActiveDevice(DeviceKind.PlayStation));
+        Assert.Equal(DeviceKind.PlayStation, save.Device);
+        Assert.Contains("ps_cross", PauseHints.Line(save.Device, true));
+        bus.Publish(new ActiveDevice(DeviceKind.KeyboardMouse));
+        Assert.Equal(DeviceKind.KeyboardMouse, save.Device);
+        Assert.Contains("key_enter", PauseHints.Line(save.Device, true));
     }
 }

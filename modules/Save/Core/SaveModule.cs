@@ -19,7 +19,7 @@ namespace Fungtopia.Save;
 public sealed class SaveModule : IModule,
     IMessageHandler<SaveGame>, IMessageHandler<LoadGame>, IMessageHandler<DeleteSlot>, IMessageHandler<NewGameInSlot>,
     IMessageHandler<SavePart>, IMessageHandler<UiFocus>, IMessageHandler<StartScreenState>, IMessageHandler<GameStart>,
-    IMessageHandler<PlayerState>, IMessageHandler<WalletState>, IMessageHandler<TimeOfDay>
+    IMessageHandler<PlayerState>, IMessageHandler<WalletState>, IMessageHandler<TimeOfDay>, IMessageHandler<ActiveDevice>
 {
     /// <summary>The pause menu's <see cref="UiFocus.Owner"/> ("SAVE").</summary>
     public const int MenuOwner = 0x53415645;
@@ -125,6 +125,9 @@ public sealed class SaveModule : IModule,
 
     public long Ticks => _ticks;
 
+    /// <summary>The device the player used last (<see cref="ActiveDevice"/>); the pause menu's hints show its buttons.</summary>
+    public DeviceKind Device { get; private set; }
+
     public void Start(IMessageBus bus)
     {
         ArgumentNullException.ThrowIfNull(bus);
@@ -140,6 +143,7 @@ public sealed class SaveModule : IModule,
         bus.Subscribe<PlayerState>(this);
         bus.Subscribe<WalletState>(this);
         bus.Subscribe<TimeOfDay>(this);
+        bus.Subscribe<ActiveDevice>(this);
     }
 
     public void Handle(in SaveGame message) => Enqueue(Kind.Save, message.Slot, message.Auto);
@@ -212,6 +216,8 @@ public sealed class SaveModule : IModule,
     public void Handle(in WalletState message) => _coins = message.Coins;
 
     public void Handle(in TimeOfDay message) => _day = message.Day;
+
+    public void Handle(in ActiveDevice message) => Device = message.Kind;
 
     /// <summary>The pause menu's Save, Load and the like go through these (carried out next tick).</summary>
     public void RequestSave(int slot, bool auto) => Enqueue(Kind.Save, slot, auto);

@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Collections.Generic;
+using Fungtopia.Input;
 using Fungtopia.Map;
 using Fungtopia.Player;
 using Fungtopia.Shell;
@@ -13,7 +15,8 @@ namespace Fungtopia.Save.View;
 /// <c>./screenshot.sh modules/Save/Godot/Preview.tscn</c>. The environment variable
 /// SAVE_PREVIEW picks the page: "pause" (default), "saved" (with the "Saved!" toast), "slots"
 /// (the slot list: a game, a damaged file and an empty slot) or "choice" (slot 1's manual save
-/// and autosave). The saves are made up in a temp folder.
+/// and autosave). SAVE_DEVICE picks the device whose button icons the hints show: "keyboard"
+/// (default), "xbox", "playstation", "nintendo" or "generic". The saves are made up in a temp folder.
 /// </summary>
 public partial class SavePreview : Node
 {
@@ -26,6 +29,7 @@ public partial class SavePreview : Node
     }
 
     private readonly SaveModule _save = new();
+    private static readonly List<Texture2D> s_icons = new();
     private long _tick;
 
     public override void _Ready()
@@ -52,6 +56,15 @@ public partial class SavePreview : Node
         File.WriteAllText(_save.Files!.PathOf(2, false), "{ \"version\": 1, \"parts\": { \"Pl");
         _save.Handle(new StartScreenState(false));
         _save.Handle(new GameStart(GameStart.Girl, GameStart.Cat));
+        _save.Handle(new ActiveDevice(OS.GetEnvironment("SAVE_DEVICE").ToLowerInvariant() switch
+        {
+            "xbox" => DeviceKind.Xbox,
+            "playstation" or "ps" => DeviceKind.PlayStation,
+            "nintendo" => DeviceKind.Nintendo,
+            "generic" => DeviceKind.Generic,
+            _ => DeviceKind.KeyboardMouse,
+        }));
+        LoadIcons();
         _save.Tick(new TickContext(_tick++, 1.0 / 60.0));
 
         view.KeepPage = true;
@@ -72,6 +85,26 @@ public partial class SavePreview : Node
                 break;
         }
         _save.OpenMenu();
+    }
+
+    /// <summary>
+    /// In the game the Input view makes the icons loadable; this scene has no Input view, so it
+    /// rasterizes the icons Godot has not imported itself.
+    /// </summary>
+    private static void LoadIcons()
+    {
+        foreach (var file in DirAccess.GetFilesAt(Prompts.GlyphDirectory))
+        {
+            string path = Prompts.GlyphDirectory + file;
+            if (!file.EndsWith(".svg") || ResourceLoader.Exists(path))
+                continue;
+            var image = new Image();
+            if (image.LoadSvgFromString(Godot.FileAccess.GetFileAsString(path), 2f) != Error.Ok)
+                continue;
+            var texture = ImageTexture.CreateFromImage(image);
+            texture.TakeOverPath(path);
+            s_icons.Add(texture);
+        }
     }
 
     private void Write(SaveData data) => _save.Files!.Write(data);
