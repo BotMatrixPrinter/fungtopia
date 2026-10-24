@@ -5,8 +5,8 @@ namespace Fungtopia.Map;
 
 /// <summary>
 /// The Mushroom Forest exactly as modules/Forest/Contract defines it (copied, so the Map does not
-/// depend on the Forest module): its rolling-ground formula, paths, clearings and giant mushroom
-/// trunks. Heights, paths and trunks inside the forest square are unchanged.
+/// depend on the Forest module): its rolling-ground formula, paths, clearings, the overgrown trail
+/// from the west gap, and giant mushroom trunks. Heights, paths and trunks inside the forest square are unchanged.
 /// </summary>
 internal static class ForestFloor
 {
@@ -43,6 +43,17 @@ internal static class ForestFloor
 
     public static ReadOnlySpan<Vector2> PathPoints => s_paths;
 
+    /// <summary>Half the width of the overgrown trail (Forest's ForestProps.TrailHalfWidth).</summary>
+    public const float TrailHalfWidth = 1.1f;
+
+    // The Forest's overgrown trail from the west gap to its west path (Forest's ForestProps.TrailPoints).
+    private static readonly Vector2[] s_trail =
+    {
+        new(-100f, 0f), new(-94f, 0.8f), new(-89f, 4.5f), new(-84.5f, 11f), new(-81.5f, 19f), new(-80f, 26f),
+    };
+
+    public static ReadOnlySpan<Vector2> TrailPoints => s_trail;
+
     /// <summary>Horizontal distance from (x, z) to the nearest center line of a polyline set (NaN separates lines).</summary>
     public static float PolylineDistance(ReadOnlySpan<Vector2> points, float x, float z)
     {
@@ -60,6 +71,15 @@ internal static class ForestFloor
                 best = d;
         }
         return MathF.Sqrt(best);
+    }
+
+    /// <summary>Horizontal distance from (x, z) to the segment from (ax, az) to (bx, bz).</summary>
+    public static float SegmentDistance(float x, float z, float ax, float az, float bx, float bz)
+    {
+        float abx = bx - ax, abz = bz - az;
+        float t = Math.Clamp(((x - ax) * abx + (z - az) * abz) / (abx * abx + abz * abz), 0f, 1f);
+        float dx = x - (ax + abx * t), dz = z - (az + abz * t);
+        return MathF.Sqrt(dx * dx + dz * dz);
     }
 
     public static float ClearingDepth(float x, float z)

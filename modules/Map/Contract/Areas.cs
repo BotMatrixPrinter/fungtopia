@@ -128,6 +128,28 @@ public static class Areas
     /// <summary>Horizontal distance (meters) from (x, z) to the nearest road's center line.</summary>
     public static float RoadDistance(float x, float z) => ForestFloor.PolylineDistance(s_roads, x, z);
 
+    /// <summary>Half the width (meters) of Mushroom Town's little dirt paths (<see cref="TownPathDistance"/>).</summary>
+    public const float TownPathHalfWidth = 1.5f;
+
+    /// <summary>
+    /// Horizontal distance (meters) from (x, z) to the middle of Mushroom Town's dirt paths: the
+    /// street from the entrance to the square, and one from the square to 1 m in front of each
+    /// building (not the fountain).
+    /// </summary>
+    public static float TownPathDistance(float x, float z)
+    {
+        var square = Buildings.TownSquare;
+        float best = ForestFloor.SegmentDistance(x, z, 0f, Town.MinZ, square.X, square.Y);
+        foreach (var b in Buildings.All)
+        {
+            if (b.Area != Area.Town || b.Kind == BuildingKind.Fountain)
+                continue;
+            var front = b.Center + b.Front * (b.Depth * 0.5f + 1f);
+            best = MathF.Min(best, ForestFloor.SegmentDistance(x, z, square.X, square.Y, front.X, front.Y));
+        }
+        return best;
+    }
+
     /// <summary>
     /// Signed distance (meters) from (x, z) to the edge of the walkable ground: positive inside
     /// (how far a walker may lean), negative outside (how far beyond the edge). Allocation-free.

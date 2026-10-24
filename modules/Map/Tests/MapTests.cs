@@ -298,8 +298,9 @@ public class MapTests
     {
         var all = Ground.Obstacles;
         int deep = Ground.DeepForestTrunkCount, first = all.Length - deep;
-        for (int i = Ground.ForestTrunkCount; i < first; i++)
+        for (int i = Ground.ForestTrunkCount; i < Ground.PropCircleStart; i++)
             Assert.NotEqual(Area.DeepForest, Areas.At(all[i].X, all[i].Z)); // the buildings' circles come before
+        Assert.Equal(first, Ground.PropCircleStart + Ground.PropCircleCount); // then the props', then the Deep Forest's trunks
         float forestArea = 200f * 200f, deepArea = 170f * 180f;
         Assert.True(deep / deepArea > 1.2f * (Ground.ForestTrunkCount / forestArea), $"only {deep} Deep Forest mushrooms");
         float forestRadius = 0f, deepRadius = 0f;
@@ -590,20 +591,19 @@ public class MapTests
         Assert.True(Free(abby.X, abby.Y));
         Assert.True(Ground.Blocks(shop.X, shop.Z));
 
-        // Its obstacle circles come right after the other buildings' and before the Deep Forest's trunks.
+        // Its obstacle circles come right after the other buildings' and before the props' and the Deep Forest's trunks.
         var all = Ground.Obstacles;
-        int deepFirst = all.Length - Ground.DeepForestTrunkCount;
         bool found = false;
-        for (int i = Ground.ForestTrunkCount; i < deepFirst; i++)
+        for (int i = Ground.ForestTrunkCount; i < Ground.PropCircleStart; i++)
             found |= shop.Contains(all[i].X, all[i].Z);
         Assert.True(found, "no obstacle circle on the clothing shop");
-        Assert.True(shop.Contains(all[deepFirst - 1].X, all[deepFirst - 1].Z), "the shop's circles are not the last building circles");
+        Assert.True(shop.Contains(all[Ground.PropCircleStart - 1].X, all[Ground.PropCircleStart - 1].Z), "the shop's circles are not the last building circles");
     }
 
     [Fact]
     public void ObstaclesCoverEveryBuildingAndTheFountain()
     {
-        int circles = Ground.Obstacles.Length - Ground.ForestTrunkCount;
+        int circles = Ground.PropCircleStart - Ground.ForestTrunkCount;
         Assert.True(circles >= Buildings.Count);
         foreach (var b in Buildings.All)
         {
@@ -634,6 +634,264 @@ public class MapTests
         Assert.False(b.Contains(11.5f, 20f));
         Assert.True(Vector3.Distance(new Vector3(0f, 0f, -1f), new Place(Vector3.Zero, 0f).Facing) < 1e-6f);
     }
+
+    // Props
+
+    private static IEnumerable<(Prop Prop, Circle Circle)> PropCircles()
+    {
+        foreach (var p in Props.All.ToArray())
+            for (int k = 0; k < p.CircleCount; k++)
+                yield return (p, p.Circle(k));
+    }
+
+    private static int CountOf(Area area, PropKind kind)
+    {
+        int n = 0;
+        foreach (var p in Props.All)
+            n += p.Area == area && p.Kind == kind ? 1 : 0;
+        return n;
+    }
+
+    [Fact]
+    public void PropKindsAreAddedAtTheEnd()
+    {
+        Assert.Equal(
+            new[] { PropKind.MediumMushroom, PropKind.Lamp, PropKind.Bench, PropKind.FenceSegment, PropKind.Planter, PropKind.Crate, PropKind.Statue },
+            Enum.GetValues<PropKind>());
+        Assert.Equal(0, (int)PropKind.MediumMushroom);
+        Assert.Equal(6, (int)PropKind.Statue);
+    }
+
+    [Fact]
+    public void PropsAreInTheObstaclesInOrderAndBlockInsideThem()
+    {
+        // Every prop's circles, in order, between the buildings' and the Deep Forest's trunks.
+        var all = Ground.Obstacles;
+        int i = Ground.PropCircleStart;
+        foreach (var (_, c) in PropCircles())
+        {
+            Assert.Equal(c.X, all[i].X);
+            Assert.Equal(c.Z, all[i].Z);
+            Assert.Equal(c.Radius, all[i].Radius);
+            i++;
+        }
+        Assert.Equal(Ground.PropCircleStart + Ground.PropCircleCount, i);
+        Assert.Equal(all.Length - Ground.DeepForestTrunkCount, i);
+        // Solid: Blocks is true anywhere on a prop, and a walker cannot stand on it.
+        foreach (var p in Props.All)
+        {
+            string what = $"{p.Kind} at ({p.X}, {p.Z})";
+            Assert.True(Ground.Blocks(p.X, p.Z), what);
+            Assert.True(Ground.Blocks(p.X, p.Z, WalkerRadius), what);
+            if (p.Kind == PropKind.FenceSegment)
+            {
+                // Along its whole length, and no walker slips between its circles.
+                for (float t = -p.Radius + 0.05f; t <= p.Radius - 0.05f; t += 0.05f)
+                {
+                    var q = p.Center + p.Along * t;
+                    Assert.True(Ground.Blocks(q.X, q.Y, 0.05f), $"{what} open at {q}");
+                    Assert.True(Ground.Blocks(q.X, q.Y, 0.3f), $"{what} lets a walker through at {q}");
+                }
+                continue;
+            }
+            for (int a = 0; a < 8; a++)
+            {
+                float angle = a * MathF.Tau / 8f, d = 0.95f * p.Radius;
+                Assert.True(Ground.Blocks(p.X + MathF.Cos(angle) * d, p.Z + MathF.Sin(angle) * d), $"{what} open near its edge");
+            }
+            // ...and not much more: just past it is free of it.
+            Assert.False(Ground.Blocks(p.X + p.Radius + 0.05f, p.Z) && Ground.Blocks(p.X - p.Radius - 0.05f, p.Z)
+                         && Ground.Blocks(p.X, p.Z + p.Radius + 0.05f) && Ground.Blocks(p.X, p.Z - p.Radius - 0.05f), $"{what} blocks all around it");
+        }
+    }
+
+    [Fact]
+    public void PropsStandInsideTheirAreasOnWalkableGround()
+    {
+        foreach (var (p, c) in PropCircles())
+        {
+            string what = $"{p.Kind} at ({c.X}, {c.Z})";
+            Assert.Equal(p.Area, Areas.At(c.X, c.Z));
+            Assert.Equal(p.Area, Areas.At(p.X, p.Z));
+            if (p.Area == Area.Road)
+            {
+                // Lamps beside the roads, off the forest square and the towns.
+                Assert.Equal(PropKind.Lamp, p.Kind);
+                Assert.False(Areas.Forest.Contains(c.X, c.Z, -c.Radius), what);
+                Assert.True(Areas.RoadDistance(c.X, c.Z) < Areas.RoadHalfWidth + c.Radius + Props.Clearance + 1f, $"{what} far from the road");
+                continue;
+            }
+            Assert.True(Areas.Bounds(p.Area).Contains(c.X, c.Z, c.Radius + 2f), $"{what} too near its area's edge");
+            Assert.True(Areas.Walkable(c.X, c.Z, c.Radius + Props.Clearance), $"{what} off the walkable ground");
+            Assert.Equal(p.Kind == PropKind.MediumMushroom, p.Area is Area.Forest or Area.DeepForest);
+        }
+    }
+
+    [Fact]
+    public void PropsKeepPathsRoadsDoorsPlacesAndSpawnSpotsClear()
+    {
+        const float keep = Props.Clearance;
+        var spots = new List<Vector2>();
+        foreach (var place in TownAndCityPlaces())
+            spots.Add(new Vector2(place.Position.X, place.Position.Z));
+        foreach (var (p, c) in PropCircles())
+        {
+            string what = $"{p.Kind} at ({c.X}, {c.Z})";
+            var at = new Vector2(c.X, c.Z);
+            float r = c.Radius;
+            Assert.True(Areas.RoadDistance(c.X, c.Z) >= Areas.RoadHalfWidth + r + keep, $"{what} on a road");
+            foreach (var s in spots)
+                Assert.True(Vector2.Distance(at, s) >= r + keep + 0.5f, $"{what} by the place at {s}");
+            foreach (var s in DeepForestLayout.SpawnPoints)
+                Assert.True(Vector2.Distance(at, s) >= DeepForestLayout.ClearingRadius + r, $"{what} in the spawn clearing at {s}");
+            foreach (var b in Buildings.All)
+                Assert.False(b.Contains(c.X, c.Z, r + keep), $"{what} against {b.Kind} at ({b.X}, {b.Z})");
+            Assert.True(Vector2.Distance(at, new Vector2(Places.HomeDoor.Position.X, Places.HomeDoor.Position.Z)) >= r + keep + 0.5f);
+            switch (p.Area)
+            {
+                case Area.Forest:
+                    Assert.True(ForestFloor.PolylineDistance(ForestFloor.PathPoints, c.X, c.Z) >= ForestFloor.PathHalfWidth + r + keep, $"{what} on a forest path");
+                    Assert.True(ForestFloor.PolylineDistance(ForestFloor.TrailPoints, c.X, c.Z) >= ForestFloor.TrailHalfWidth + r + keep, $"{what} on the trail to the west gap");
+                    Assert.True(ForestFloor.ClearingDepth(c.X, c.Z) <= -(r + keep), $"{what} in a clearing");
+                    // The road gaps and 12 m in from them, the west gap and the Deep Forest path.
+                    Assert.False(MathF.Abs(c.X) < Areas.ForestGapHalfWidth + r + keep && MathF.Abs(c.Z) > Areas.ForestHalfSize - 12f, $"{what} in a road gap");
+                    Assert.True(Vector2.Distance(at, Areas.ForestGapWest) >= 12f + r, $"{what} in the west gap");
+                    break;
+                case Area.DeepForest:
+                    Assert.True(Areas.DeepForestPath.Depth(c.X, c.Z) <= -(r + keep), $"{what} on the overgrown path");
+                    Assert.True(Vector2.Distance(at, DeepForestLayout.Entrance) >= DeepForestLayout.ClearingRadius + 4f + r, $"{what} in the entrance");
+                    break;
+                case Area.Town:
+                    Assert.True(Areas.TownPathDistance(c.X, c.Z) >= Areas.TownPathHalfWidth + r + keep, $"{what} on a town path");
+                    break;
+                case Area.PetCity:
+                    Assert.True(Props.CityAvenueDistance(c.X, c.Z) >= Props.CityAvenueHalfWidth + r + keep, $"{what} on the avenue");
+                    Assert.True(Vector2.Distance(at, Buildings.CityPlaza) >= 10f + r, $"{what} in the plaza's middle");
+                    break;
+            }
+        }
+        // Between a prop and any other obstacle there is room to walk (a fence's own circles meet).
+        var all = Ground.Obstacles;
+        for (int i = Ground.PropCircleStart; i < Ground.PropCircleStart + Ground.PropCircleCount; i++)
+        for (int k = 0; k < all.Length; k++)
+        {
+            if (k == i)
+                continue;
+            var a = all[i];
+            var b = all[k];
+            if (a.Radius == Props.FencePostRadius && b.Radius == Props.FencePostRadius)
+                continue;
+            Assert.True(Vector2.Distance(a.Center, b.Center) >= a.Radius + b.Radius + keep - 0.001f,
+                $"prop circle at ({a.X}, {a.Z}) squeezes against the obstacle at ({b.X}, {b.Z})");
+        }
+        // The town square's middle, Pet City's avenue and the forest's start clearing stay open.
+        Assert.False(Ground.Blocks(0f, 84f, 8f));
+        for (float z = Areas.PetCity.MaxZ; z >= Places.LucySpot.Position.Z + 3f; z -= 0.5f) // up to the pet store
+            Assert.False(Ground.Blocks(0f, z, Props.CityAvenueHalfWidth), $"Pet City's avenue blocked at z {z}");
+        for (float z = Areas.Town.MinZ; z <= Buildings.TownSquare.Y - 8f; z += 0.5f)
+            Assert.False(Ground.Blocks(0f, z, Areas.TownPathHalfWidth), $"the town street blocked at z {z}");
+    }
+
+    [Fact]
+    public void PropsAreWhatEachAreaHas()
+    {
+        foreach (var p in Props.All)
+        {
+            // Solid things: taller than about 0.4 m or wider than about 0.6 m.
+            Assert.True(p.Height > 0.4f || p.Radius * 2f > 0.6f, $"{p.Kind} at ({p.X}, {p.Z}) is small decoration");
+            Assert.True(p.Radius > 0f && p.Radius <= 2f && p.Height <= 4f && float.IsFinite(p.Rotation));
+            if (p.Kind == PropKind.MediumMushroom)
+                Assert.InRange(p.Height, 0.8f, 2.5f);
+        }
+        // Mushroom Forest: medium mushroom clusters at about the density the Forest view scattered (~250).
+        int forest = CountOf(Area.Forest, PropKind.MediumMushroom), deep = CountOf(Area.DeepForest, PropKind.MediumMushroom);
+        Assert.InRange(forest, 150, 320);
+        // The Deep Forest: denser and a bit bigger.
+        Assert.True(deep / (170f * 180f) > 1.5f * forest / (200f * 200f), $"only {deep} Deep Forest mushrooms");
+        float forestHeight = 0f, deepHeight = 0f;
+        foreach (var p in Props.All)
+        {
+            if (p.Area == Area.Forest) forestHeight += p.Height / forest;
+            if (p.Area == Area.DeepForest) deepHeight += p.Height / deep;
+        }
+        Assert.True(deepHeight > forestHeight + 0.1f, $"Deep Forest mushrooms ({deepHeight} m) not bigger than the forest's ({forestHeight} m)");
+        // Mushroom Town: lamps along the street and around the square, benches, garden fences, planters.
+        Assert.True(CountOf(Area.Town, PropKind.Lamp) >= 10);
+        Assert.True(CountOf(Area.Town, PropKind.Bench) >= 4);
+        Assert.True(CountOf(Area.Town, PropKind.FenceSegment) >= 4 * 7, "fewer than four fenced gardens");
+        Assert.True(CountOf(Area.Town, PropKind.Planter) >= 4);
+        int streetLamps = 0;
+        foreach (var p in Props.All)
+            streetLamps += p.Area == Area.Town && p.Kind == PropKind.Lamp && Areas.TownPathDistance(p.X, p.Z) < 5f && MathF.Abs(p.X) < 5f ? 1 : 0;
+        Assert.True(streetLamps >= 4, "no lamps along the town street");
+        // Pet City: lamps, benches, planters and a statue.
+        Assert.True(CountOf(Area.PetCity, PropKind.Lamp) >= 8);
+        Assert.True(CountOf(Area.PetCity, PropKind.Bench) >= 4);
+        Assert.True(CountOf(Area.PetCity, PropKind.Planter) >= 4);
+        Assert.Equal(1, CountOf(Area.PetCity, PropKind.Statue));
+        // And lamps beside the roads.
+        Assert.True(CountOf(Area.Road, PropKind.Lamp) >= 4);
+    }
+
+    [Fact]
+    public void FenceSegmentsAreRowsOfSmallCircles()
+    {
+        var fence = new Prop(PropKind.FenceSegment, Area.Town, 10f, 20f, MathF.PI / 2f, 1.75f, 0.8f);
+        Assert.True(Vector2.Distance(new Vector2(0f, -1f), fence.Along) < 1e-5f); // turned a quarter: runs north-south
+        Assert.True(fence.CircleCount >= 2);
+        for (int k = 0; k < fence.CircleCount; k++)
+        {
+            var c = fence.Circle(k);
+            Assert.Equal(Props.FencePostRadius, c.Radius);
+            Assert.InRange(c.X, 10f - 1e-4f, 10f + 1e-4f);
+            if (k > 0)
+                Assert.True(Vector2.Distance(fence.Circle(k - 1).Center, c.Center) <= Props.FenceCircleSpacing + 1e-4f);
+        }
+        // From end to end of its length.
+        Assert.Equal(fence.Radius, MathF.Abs(fence.Circle(0).Z - 20f) + Props.FencePostRadius, 3);
+        Assert.Equal(fence.Radius, MathF.Abs(fence.Circle(fence.CircleCount - 1).Z - 20f) + Props.FencePostRadius, 3);
+        var lamp = new Prop(PropKind.Lamp, Area.Town, 1f, 2f, 0f, 0.3f, 2f);
+        Assert.Equal(1, lamp.CircleCount);
+        Assert.Equal((1f, 2f, 0.3f), (lamp.Circle(0).X, lamp.Circle(0).Z, lamp.Circle(0).Radius));
+        Assert.True(Vector2.Distance(new Vector2(0f, -1f), lamp.Front) < 1e-6f);
+    }
+
+    [Fact]
+    public void LoneGiantMushroomsStandInPropFreeGlades()
+    {
+        var all = Ground.Obstacles;
+        int lone = 0;
+        for (int i = 0; i < Ground.ForestTrunkCount; i++)
+        {
+            var o = all[i];
+            bool alone = true;
+            for (int k = 0; k < Ground.ForestTrunkCount && alone; k++)
+                alone = k == i || Vector2.Distance(o.Center, all[k].Center) >= o.Radius + all[k].Radius + Props.GladeRadius;
+            if (!alone)
+                continue;
+            lone++;
+            foreach (var p in Props.All)
+                Assert.True(Vector2.Distance(p.Center, o.Center) >= o.Radius + Props.GladeRadius + p.Radius, $"a prop in the glade at ({o.X}, {o.Z})");
+        }
+        Assert.True(lone >= 1);
+    }
+
+    [Fact]
+    public void PropsAreDeterministic()
+    {
+        // Fixed data: the same props every run (no seed, no clock).
+        Assert.Equal(Props.All.ToArray(), Props.All.ToArray());
+        Assert.Equal(PropCountPinned, Props.Count);
+        Assert.Equal(Props.Count, Props.All.Length);
+        var first = Props.All[0];
+        Assert.Equal(PropKind.MediumMushroom, first.Kind);
+        Assert.Equal(Area.Forest, first.Area);
+        Assert.Equal((first.X, first.Z), (Ground.Obstacles[Ground.PropCircleStart].X, Ground.Obstacles[Ground.PropCircleStart].Z));
+        Assert.Equal(PropKind.Lamp, Props.All[Props.Count - 1].Kind);
+        Assert.Equal(Area.Road, Props.All[Props.Count - 1].Area);
+    }
+
+    private const int PropCountPinned = 662;
 
     // Determinism and cost
 

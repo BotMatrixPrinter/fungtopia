@@ -80,29 +80,6 @@ public partial class MapView : Node3D, IModuleView
         return new Vector3(-dx, 2f * e, -dz).Normalized();
     }
 
-    private static float Segment(float x, float z, float ax, float az, float bx, float bz)
-    {
-        float abx = bx - ax, abz = bz - az;
-        float t = Math.Clamp(((x - ax) * abx + (z - az) * abz) / (abx * abx + abz * abz), 0f, 1f);
-        float dx = x - ax - abx * t, dz = z - az - abz * t;
-        return MathF.Sqrt(dx * dx + dz * dz);
-    }
-
-    /// <summary>Distance to the town's little dirt paths: the street in from the entrance and one from the square to each front door.</summary>
-    private static float TownPathDistance(float x, float z)
-    {
-        var square = Buildings.TownSquare;
-        float best = Segment(x, z, 0f, Areas.Town.MinZ, square.X, square.Y);
-        foreach (var b in Buildings.All)
-        {
-            if (b.Area != Area.Town || b.Kind == BuildingKind.Fountain)
-                continue;
-            var front = b.Center + b.Front * (b.Depth * 0.5f + 1f);
-            best = MathF.Min(best, Segment(x, z, square.X, square.Y, front.X, front.Y));
-        }
-        return best;
-    }
-
     private static Color GroundColor(float x, float z, Vector3 normal)
     {
         var grass = new Color(0.5f, 0.74f, 0.33f);
@@ -128,7 +105,7 @@ public partial class MapView : Node3D, IModuleView
         var city = Areas.PetCity;
         if (town.Depth(x, z) > -2f)
         {
-            float path = 1f - Mathf.SmoothStep(1.3f, 2f, TownPathDistance(x, z));
+            float path = 1f - Mathf.SmoothStep(1.3f, 2f, Areas.TownPathDistance(x, z));
             color = color.Lerp(dirt, path);
             float square = new System.Numerics.Vector2(x - Buildings.TownSquare.X, z - Buildings.TownSquare.Y).Length();
             color = color.Lerp(stone, 1f - Mathf.SmoothStep(12f, 13f, square));
@@ -366,42 +343,14 @@ public partial class MapView : Node3D, IModuleView
             Mushroom(x, z, r, 6f + r * 2.6f + 5f * Rand(k, 16), r * (2.4f + 1.2f * Rand(k, 17)), color, Rand(k, 18) < 0.12f ? 1.1f : 0f, look);
         }
 
-        // Little glowing mushroom lamps along the roads (alternating sides) and the town's street.
-        var roads = Areas.RoadPoints;
-        float travelled = 0f, next = 4f;
+        // Little glowing mushroom lamps beside the roads: the Map's road props, solid, exactly where
+        // and as tall as Props says (the towns' and forests' props are their modules' to draw).
         int lamp = 0;
-        void Lamp(float x, float z)
+        foreach (var p in Props.All)
         {
-            var color = LampColors[lamp % LampColors.Length];
-            Mushroom(x, z, 0.1f, 1.7f + 0.3f * Rand(lamp, 20), 0.42f, color, 1.4f, float.NaN);
-            lamp++;
-        }
-        for (int i = 0; i + 1 < roads.Length; i++)
-        {
-            var a = roads[i];
-            var b = roads[i + 1];
-            if (float.IsNaN(a.X) || float.IsNaN(b.X))
-            {
-                travelled = 0f;
-                next = 4f;
+            if (p.Area != Area.Road || p.Kind != PropKind.Lamp)
                 continue;
-            }
-            float length = System.Numerics.Vector2.Distance(a, b);
-            var dir = (b - a) / length;
-            while (next <= travelled + length)
-            {
-                var p = a + dir * (next - travelled);
-                float side = lamp % 2 == 0 ? 1f : -1f, offset = Areas.RoadHalfWidth + 0.5f;
-                if (!InForestSquare(p.X, p.Y))
-                    Lamp(p.X - dir.Y * side * offset, p.Y + dir.X * side * offset);
-                next += 12f;
-            }
-            travelled += length;
-        }
-        for (float z = Areas.Town.MinZ + 12f; z < Buildings.TownSquare.Y - 14f; z += 12f)
-        {
-            Lamp(2.6f, z);
-            Lamp(-2.6f, z + 6f);
+            Mushroom(p.X, p.Z, 0.1f, p.Height, p.Radius, LampColors[lamp++ % LampColors.Length], 1.4f, float.NaN);
         }
 
         AddChild(stems.Build("MushroomStems", MapMeshes.Stem(), Material("toon_color.gdshader", outline: true)));
