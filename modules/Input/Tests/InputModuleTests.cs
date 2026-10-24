@@ -69,6 +69,8 @@ public class InputModuleTests
         Assert.Equal(Vector2.Zero, msg.Look);
         Assert.False(msg.Jump);
         Assert.False(msg.Fire);
+        Assert.False(msg.Interact);
+        Assert.False(msg.OpenMap);
         Assert.False(msg.HasAim);
         Assert.Equal(Vector3.Zero, msg.AimDirection);
     }
@@ -271,6 +273,68 @@ public class InputModuleTests
         Assert.True(TickOnce(input, bus, 1).Fire);
     }
 
+    // --- interact and map ---
+
+    [Fact]
+    public void InteractIsTrueOnlyOnTheTickAfterThePress()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        input.PressInteract();
+        input.PressInteract();
+        var msg = TickOnce(input, bus);
+        Assert.True(msg.Interact);
+        Assert.False(msg.OpenMap);
+        Assert.False(msg.Jump);
+        Assert.False(TickOnce(input, bus, 1).Interact);
+    }
+
+    [Fact]
+    public void OpenMapIsTrueOnlyOnTheTickAfterThePress()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        input.PressOpenMap();
+        var msg = TickOnce(input, bus);
+        Assert.True(msg.OpenMap);
+        Assert.False(msg.Interact);
+        Assert.False(msg.Jump);
+        Assert.False(TickOnce(input, bus, 1).OpenMap);
+    }
+
+    [Fact]
+    public void LatestCarriesInteractAndOpenMap()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        input.PressInteract();
+        input.PressOpenMap();
+        TickOnce(input, bus);
+        Assert.True(input.Latest.Interact);
+        Assert.True(input.Latest.OpenMap);
+    }
+
+    [Fact]
+    public void OldConstructorLeavesInteractAndOpenMapFalse()
+    {
+        var msg = new PlayerInput(new Vector2(0, 1), Vector2.Zero, true, true, true, new Vector3(0, 0, -1));
+        Assert.True(msg.Jump);
+        Assert.True(msg.Fire);
+        Assert.False(msg.Interact);
+        Assert.False(msg.OpenMap);
+    }
+
+    [Fact]
+    public void FullConstructorSetsInteractAndOpenMap()
+    {
+        var msg = new PlayerInput(Vector2.Zero, Vector2.Zero, false, false, false, Vector3.Zero, interact: true, openMap: false);
+        Assert.True(msg.Interact);
+        Assert.False(msg.OpenMap);
+        msg = new PlayerInput(Vector2.Zero, Vector2.Zero, false, false, false, Vector3.Zero, interact: false, openMap: true);
+        Assert.False(msg.Interact);
+        Assert.True(msg.OpenMap);
+    }
+
     // --- aim ---
 
     [Fact]
@@ -341,6 +405,8 @@ public class InputModuleTests
         {
             input.AddMouseMotion(new Vector2(1, 1));
             input.PressJump();
+            input.PressInteract();
+            input.PressOpenMap();
             input.Tick(new TickContext(i, Step));
         }
         Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());

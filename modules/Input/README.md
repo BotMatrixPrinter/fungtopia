@@ -10,10 +10,13 @@ Other modules (player, camera, bow) read it from the bus.
   - `Look`: camera turn this tick in radians, x yaw right, y pitch up.
   - `Jump`: true on the one tick after a jump press.
   - `Fire`: true while fire is held.
+  - `Interact`: true on the one tick after an interact press (talk, signposts, doors).
+  - `OpenMap`: true on the one tick after a map press.
+  - The six-argument constructor still works and leaves `Interact` and `OpenMap` false.
   - `HasAim` / `AimDirection`: the world-space unit ray from the current 3D camera through the
     screen-center crosshair. When there is no camera, `HasAim` is false and `AimDirection` is zero.
 - `Core/`: `Fungtopia.Input.Core`, `InputModule`. It keeps the latest device state its view
-  reports. Mouse motion and jump presses that arrive between ticks are added up and handed out
+  reports. Mouse motion and jump, interact and map presses that arrive between ticks are added up and handed out
   once. Settings: `StickDeadZone` (0.2), `StickLookRadiansPerSecond` (3),
   `MouseRadiansPerPixel` (0.003), `TriggerThreshold` (0.5).
 - `Godot/`: `Main.tscn` with `InputView`, a full-screen `Control` that ignores the mouse. It
@@ -30,6 +33,8 @@ Other modules (player, camera, bow) read it from the bus.
 | Look | Mouse (when captured) | Right stick |
 | Jump | Space | A / Cross |
 | Fire (hold) | Left mouse button | Right trigger |
+| Interact | E (physical key) | X / Square |
+| Open map | M (physical key) | Back / Select or Touchpad |
 | Free the mouse | Esc | |
 | Capture the mouse again | Left click (this click does not fire) | |
 

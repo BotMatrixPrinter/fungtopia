@@ -55,6 +55,14 @@ public partial class InputView : Control, IModuleView
             case InputEventJoypadButton { ButtonIndex: JoyButton.A, Pressed: true }:
                 _input.PressJump();
                 break;
+            case InputEventKey { PhysicalKeycode: Key.E, Pressed: true, Echo: false }:
+            case InputEventJoypadButton { ButtonIndex: JoyButton.X, Pressed: true }:
+                _input.PressInteract();
+                break;
+            case InputEventKey { PhysicalKeycode: Key.M, Pressed: true, Echo: false }:
+            case InputEventJoypadButton { ButtonIndex: JoyButton.Back or JoyButton.Touchpad, Pressed: true }:
+                _input.PressOpenMap();
+                break;
         }
     }
 

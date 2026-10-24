@@ -6,7 +6,7 @@ namespace Fungtopia.Input;
 
 /// <summary>
 /// Keeps the latest device state reported by its Godot view and publishes one
-/// <see cref="PlayerInput"/> per tick. Mouse look and jump presses that arrive between ticks
+/// <see cref="PlayerInput"/> per tick. Mouse look and jump, interact and map presses that arrive between ticks
 /// are gathered and handed out once, on the next tick.
 /// </summary>
 public sealed class InputModule : IModule
@@ -29,6 +29,8 @@ public sealed class InputModule : IModule
     private Vector2 _lookStick;
     private Vector2 _mouseLook;
     private bool _jumpPressed;
+    private bool _interactPressed;
+    private bool _openMapPressed;
     private bool _fireButton;
     private float _fireTrigger;
     private bool _hasAim;
@@ -61,6 +63,12 @@ public sealed class InputModule : IModule
 
     /// <summary>A jump button went down; reported as Jump on the next tick only.</summary>
     public void PressJump() => _jumpPressed = true;
+
+    /// <summary>An interact button went down; reported as Interact on the next tick only.</summary>
+    public void PressInteract() => _interactPressed = true;
+
+    /// <summary>A map button went down; reported as OpenMap on the next tick only.</summary>
+    public void PressOpenMap() => _openMapPressed = true;
 
     /// <summary>Whether the fire button (left mouse) is held.</summary>
     public void SetFireButton(bool held) => _fireButton = held;
@@ -98,9 +106,11 @@ public sealed class InputModule : IModule
         Vector2 look = _mouseLook + ApplyDeadZone(_lookStick, StickDeadZone) * (StickLookRadiansPerSecond * (float)context.StepSeconds);
         bool fire = _fireButton || _fireTrigger >= TriggerThreshold;
 
-        Latest = new PlayerInput(move, look, _jumpPressed, fire, _hasAim, _aim);
+        Latest = new PlayerInput(move, look, _jumpPressed, fire, _hasAim, _aim, _interactPressed, _openMapPressed);
         _mouseLook = Vector2.Zero;
         _jumpPressed = false;
+        _interactPressed = false;
+        _openMapPressed = false;
         _bus.Publish(Latest);
     }
 

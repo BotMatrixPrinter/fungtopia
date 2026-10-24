@@ -19,6 +19,12 @@ public readonly struct PlayerInput
     /// <summary>Fire is held.</summary>
     public readonly bool Fire;
 
+    /// <summary>Interact was pressed during this tick (talk, use a signpost or door).</summary>
+    public readonly bool Interact;
+
+    /// <summary>Open map was pressed during this tick.</summary>
+    public readonly bool OpenMap;
+
     /// <summary>True when <see cref="AimDirection"/> is valid (a 3D camera exists).</summary>
     public readonly bool HasAim;
 
@@ -29,6 +35,12 @@ public readonly struct PlayerInput
     public readonly Vector3 AimDirection;
 
     public PlayerInput(Vector2 move, Vector2 look, bool jump, bool fire, bool hasAim, Vector3 aimDirection)
+        : this(move, look, jump, fire, hasAim, aimDirection, false, false)
+    {
+    }
+
+    public PlayerInput(Vector2 move, Vector2 look, bool jump, bool fire, bool hasAim, Vector3 aimDirection,
+        bool interact, bool openMap)
     {
         Move = move;
         Look = look;
@@ -36,5 +48,7 @@ public readonly struct PlayerInput
         Fire = fire;
         HasAim = hasAim;
         AimDirection = aimDirection;
+        Interact = interact;
+        OpenMap = openMap;
     }
 }
