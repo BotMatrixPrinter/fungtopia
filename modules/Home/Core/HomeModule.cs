@@ -5,6 +5,7 @@ using Fungtopia.Map;
 using Fungtopia.Pet;
 using Fungtopia.Player;
 using Fungtopia.Shell;
+using Fungtopia.StartScreen;
 using Fungtopia.Wallet;
 using Fungtopia.Wardrobe;
 
@@ -100,11 +101,13 @@ public struct HomePet
 /// The player's home: the house door (enter and leave by teleporting), the furniture shop in
 /// town (bought with <see cref="SpendCoins"/>), placing furniture on the home's floor grid, and
 /// the pets that stay at home, and the wardrobe that comes with the house (Interact publishes
-/// <see cref="OpenWardrobe"/>; nothing else is usable while a wardrobe screen is open). Publishes <see cref="HomeState"/> every tick. Kept for the session
+/// <see cref="OpenWardrobe"/>; nothing else is usable while a wardrobe screen is open, and
+/// nothing at all while the start screen is open). Publishes <see cref="HomeState"/> every tick. Kept for the session
 /// only (not saved to disk yet).
 /// </summary>
 public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessageHandler<PlayerInput>,
-    IMessageHandler<SpendResult>, IMessageHandler<WalletState>, IMessageHandler<OwnedPets>, IMessageHandler<WardrobeState>
+    IMessageHandler<SpendResult>, IMessageHandler<WalletState>, IMessageHandler<OwnedPets>, IMessageHandler<WardrobeState>,
+    IMessageHandler<StartScreenState>
 {
     /// <summary>How many pieces of furniture the player can own.</summary>
     public const int MaxItems = 64;
@@ -172,7 +175,7 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
     /// <summary>Cat, Dog and Crow at home (indexed by <see cref="PetKind"/>); only <see cref="HomePet.Present"/> ones are there.</summary>
     public ReadOnlySpan<HomePet> Pets => _pets;
 
-    /// <summary>What Interact would do now (nothing while the shop is open, while decorating, or while a wardrobe screen is open).</summary>
+    /// <summary>What Interact would do now (nothing while the shop is open, while decorating, or while a wardrobe screen or the start screen is open).</summary>
     public HomePrompt Prompt { get; private set; }
 
     /// <summary>The player is in the house (the latest <see cref="PlayerState.Area"/> is Home).</summary>
@@ -185,6 +188,9 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
 
     /// <summary>A Wardrobe screen is open (the latest <see cref="WardrobeState.Open"/>): no decorating, leaving or other Interact.</summary>
     public bool WardrobeOpen { get; private set; }
+
+    /// <summary>The start screen is showing (the latest <see cref="StartScreenState.Open"/>): no prompt, no shop, no decorating, Interact ignored.</summary>
+    public bool StartScreenOpen { get; private set; }
 
     // Shop
 
@@ -227,6 +233,7 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
         bus.Subscribe<WalletState>(this);
         bus.Subscribe<OwnedPets>(this);
         bus.Subscribe<WardrobeState>(this);
+        bus.Subscribe<StartScreenState>(this);
     }
 
     public void Tick(in TickContext context)
@@ -235,14 +242,15 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
             throw new InvalidOperationException("HomeModule.Tick before Start.");
         Ticks++;
         bool alive = _hasPlayer && _player.Alive;
-        if (ShopOpen && (!alive || Distance(_player.Position, Places.FurnitureShopSpot.Position) > ShopLeaveDistance))
+        bool screenOpen = WardrobeOpen || StartScreenOpen;
+        if (ShopOpen && (!alive || StartScreenOpen || Distance(_player.Position, Places.FurnitureShopSpot.Position) > ShopLeaveDistance))
             ShopOpen = false;
-        if (Decorating && (!alive || _player.Area != Area.Home || WardrobeOpen))
+        if (Decorating && (!alive || _player.Area != Area.Home || screenOpen))
             StopDecorating();
-        Prompt = ShopOpen || Decorating || WardrobeOpen || !alive ? HomePrompt.None : PromptAt(_player.Position);
+        Prompt = ShopOpen || Decorating || screenOpen || !alive ? HomePrompt.None : PromptAt(_player.Position);
 
-        // A press made while a wardrobe screen is open belongs to that screen.
-        if (WardrobeOpen)
+        // A press made while a wardrobe screen or the start screen is open belongs to that screen.
+        if (screenOpen)
             _interact = false;
         if (_interact)
         {
@@ -277,6 +285,8 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
     public void Handle(in WalletState message) => Coins = message.Coins;
 
     public void Handle(in WardrobeState message) => WardrobeOpen = message.Open;
+
+    public void Handle(in StartScreenState message) => StartScreenOpen = message.Open;
 
     public void Handle(in SpendResult message)
     {
@@ -426,10 +436,10 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
 
     // Decorating
 
-    /// <summary>Opens placement mode, holding the first furniture not yet placed (if any); not while a wardrobe screen is open.</summary>
+    /// <summary>Opens placement mode, holding the first furniture not yet placed (if any); not while a wardrobe screen or the start screen is open.</summary>
     public void StartDecorating()
     {
-        if (WardrobeOpen)
+        if (WardrobeOpen || StartScreenOpen)
             return;
         Decorating = true;
         Held = -1;

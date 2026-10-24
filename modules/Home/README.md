@@ -30,11 +30,17 @@ Test it with `./test.sh Home` from the repository root.
 ## Core
 
 `HomeModule` reads `Fungtopia.Player.PlayerState`, `Fungtopia.Input.PlayerInput` (`Interact`),
-`Fungtopia.Wallet.WalletState` and `SpendResult`, `Fungtopia.Pet.OwnedPets` and
-`Fungtopia.Wardrobe.WardrobeState`; it publishes `Fungtopia.Player.TeleportPlayer`,
+`Fungtopia.Wallet.WalletState` and `SpendResult`, `Fungtopia.Pet.OwnedPets`,
+`Fungtopia.Wardrobe.WardrobeState` and `Fungtopia.StartScreen.StartScreenState`; it publishes `Fungtopia.Player.TeleportPlayer`,
 `Fungtopia.Wallet.SpendCoins`, `Fungtopia.Wardrobe.OpenWardrobe` and `HomeState`, and takes the
 world's spots from the Map Contract (`Places`, `Areas`). An Interact press is acted on at the
-next tick, for whatever `Prompt` shows then (only while the player is alive):
+next tick, for whatever `Prompt` shows then (only while the player is alive, and never while
+the start screen is open, below):
+
+- **Start screen.** While `StartScreenState.Open` (`StartScreenOpen`, the character creator is
+  showing) there is no prompt and Interact does nothing (no door, shop, decorating or wardrobe;
+  a press made then is dropped, not acted on after "Start!"); `StartDecorating` is refused, and
+  the shop and placement mode close if they were open.
 
 - **Door.** Within 1.5 m of `Places.HomeDoor`: "E / X: Enter" teleports the player to
   `Places.HomeInterior`. Inside, within 1.2 m of `Places.HomeExit` (the spot by the door):

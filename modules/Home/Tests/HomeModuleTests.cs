@@ -6,6 +6,7 @@ using Fungtopia.Map;
 using Fungtopia.Pet;
 using Fungtopia.Player;
 using Fungtopia.Shell;
+using Fungtopia.StartScreen;
 using Fungtopia.Wallet;
 using Fungtopia.Wardrobe;
 using Xunit;
@@ -542,6 +543,96 @@ public class HomeModuleTests
         Assert.False(home.Decorating);
         Assert.Equal(-1, home.Held);
         Assert.False(home.Items[1].Placed); // the held lamp went back to the inventory
+        Assert.False(bus.States[^1].Decorating);
+    }
+
+    // The start screen
+
+    private static void StartScreen(FakeBus bus, bool open) => bus.Publish(new StartScreenState(open));
+
+    [Fact]
+    public void WhileTheStartScreenIsOpenThereAreNoPromptsAndInteractIsIgnored()
+    {
+        var (home, bus) = Started(coins: 1000);
+        StartScreen(bus, open: true);
+        Assert.True(home.StartScreenOpen);
+
+        // At the house door (the start screen's backdrop): no "Enter", and Interact does not teleport.
+        StandAt(bus, Places.HomeDoor.Position);
+        home.Tick(Step);
+        Assert.Equal(HomePrompt.None, home.Prompt);
+        PressInteract(bus);
+        home.Tick(Step);
+        Assert.Equal(HomePrompt.None, home.Prompt);
+        Assert.Empty(bus.Teleports);
+
+        // At the furniture shop: no "Shop", the catalog does not open and nothing is bought.
+        StandAt(bus, Places.FurnitureShopSpot.Position);
+        home.Tick(Step);
+        Assert.Equal(HomePrompt.None, home.Prompt);
+        PressInteract(bus);
+        home.Tick(Step);
+        Assert.False(home.ShopOpen);
+        Assert.Empty(bus.Spends);
+
+        // By the door inside, the catalog book and the wardrobe: no Leave, no Decorate, no Wardrobe.
+        StandAt(bus, Places.HomeExit.Position);
+        home.Tick(Step);
+        Assert.Equal(HomePrompt.None, home.Prompt);
+        PressInteract(bus);
+        home.Tick(Step);
+        Assert.Empty(bus.Teleports);
+        StandAt(bus, HomeRoom.BookPosition + new Vector3(0f, 0f, -0.8f));
+        home.Tick(Step);
+        Assert.Equal(HomePrompt.None, home.Prompt);
+        PressInteract(bus);
+        home.Tick(Step);
+        home.StartDecorating();
+        home.Tick(Step);
+        Assert.False(home.Decorating);
+        Assert.False(bus.States[^1].Decorating);
+        StandAt(bus, HomeRoom.WardrobeFront + new Vector3(0f, 0f, 0.5f));
+        home.Tick(Step);
+        Assert.Equal(HomePrompt.None, home.Prompt);
+        PressInteract(bus);
+        home.Tick(Step);
+        Assert.Equal(0, bus.OpenWardrobes);
+
+        // "Start!" pressed: a press made on the start screen is not acted on later, and all works again.
+        StandAt(bus, Places.HomeDoor.Position);
+        PressInteract(bus);
+        home.Tick(Step);
+        StartScreen(bus, open: false);
+        home.Tick(Step);
+        Assert.False(home.StartScreenOpen);
+        Assert.Equal(HomePrompt.Enter, home.Prompt);
+        Assert.Empty(bus.Teleports);
+        PressInteract(bus);
+        home.Tick(Step);
+        Assert.Single(bus.Teleports);
+    }
+
+    [Fact]
+    public void TheStartScreenClosesTheShopAndEndsDecorating()
+    {
+        var (home, bus) = Started(coins: 1000);
+        StandAt(bus, Places.FurnitureShopSpot.Position);
+        home.Tick(Step);
+        home.OpenShop();
+        StartScreen(bus, open: true);
+        home.Tick(Step);
+        Assert.False(home.ShopOpen);
+
+        StartScreen(bus, open: false);
+        home.Buy(FurnitureKind.Lamp);
+        Inside(home, bus);
+        home.StartDecorating();
+        Assert.Equal(1, home.Held);
+        StartScreen(bus, open: true);
+        home.Tick(Step);
+        Assert.False(home.Decorating);
+        Assert.Equal(-1, home.Held);
+        Assert.False(home.Items[1].Placed);
         Assert.False(bus.States[^1].Decorating);
     }
 
