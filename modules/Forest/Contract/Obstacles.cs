@@ -1,28 +1,30 @@
 using System;
+using System.Collections.Generic;
 
 namespace Fungtopia.Forest;
 
 /// <summary>
-/// The giant mushroom trunks inside <see cref="ForestBounds"/>: a fixed array of circles that
-/// walkers must not pass through. The same on every run; never on paths, clearings or the start.
-/// (The wall of giant mushrooms around the square stands outside it; walkers stay inside
-/// <see cref="ForestBounds"/> instead.) Forwards to the Map module, which owns the world's
-/// obstacles: these are the first <see cref="Fungtopia.Map.Ground.ForestTrunkCount"/> circles of
-/// <see cref="Fungtopia.Map.Ground.Obstacles"/>, in the same order.
+/// The obstacles inside <see cref="ForestBounds"/>: a fixed array of circles that walkers must not
+/// pass through. The same on every run. (The wall of giant mushrooms around the square stands
+/// outside it; walkers stay inside <see cref="ForestBounds"/> instead.) Forwards to the Map module,
+/// which owns the world's obstacles: these are every circle of
+/// <see cref="Fungtopia.Map.Ground.Obstacles"/> whose center is inside
+/// <see cref="Fungtopia.Map.Areas.Forest"/>, in the same order, whatever it is (today the giant
+/// mushroom trunks, first among them; any solid prop the Map adds there too).
 /// </summary>
 public static class Obstacles
 {
     private static readonly Obstacle[] s_all = Forward();
 
-    /// <summary>Every trunk.</summary>
+    /// <summary>Every obstacle in the forest.</summary>
     public static ReadOnlySpan<Obstacle> All => s_all;
 
-    /// <summary>Number of trunks.</summary>
+    /// <summary>Number of obstacles in the forest.</summary>
     public static int Count => s_all.Length;
 
     /// <summary>
-    /// Whether a walker of <paramref name="radius"/> standing at (x, z) overlaps a trunk (the
-    /// forest's only; <see cref="Fungtopia.Map.Ground.Blocks"/> also checks buildings).
+    /// Whether a walker of <paramref name="radius"/> standing at (x, z) overlaps an obstacle
+    /// in the forest (the forest's only; <see cref="Fungtopia.Map.Ground.Blocks"/> checks them all).
     /// </summary>
     public static bool Blocks(float x, float z, float radius = 0f)
     {
@@ -37,10 +39,10 @@ public static class Obstacles
 
     private static Obstacle[] Forward()
     {
-        var trunks = Fungtopia.Map.Ground.Obstacles.Slice(0, Fungtopia.Map.Ground.ForestTrunkCount);
-        var all = new Obstacle[trunks.Length];
-        for (int i = 0; i < trunks.Length; i++)
-            all[i] = new Obstacle(trunks[i].X, trunks[i].Z, trunks[i].Radius);
-        return all;
+        var all = new List<Obstacle>();
+        foreach (var o in Fungtopia.Map.Ground.Obstacles)
+            if (Fungtopia.Map.Areas.Forest.Contains(o.X, o.Z))
+                all.Add(new Obstacle(o.X, o.Z, o.Radius));
+        return all.ToArray();
     }
 }

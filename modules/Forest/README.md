@@ -15,7 +15,7 @@ whether it is night, for the glowing mushrooms.
   stand, the logs, the west gap's overgrown trail and dark mushrooms, and `ForestRandom`, the fixed
   hash the layout uses.
 - `Godot/` — `Main.tscn` with `ForestView`, which draws the forest from the Contract.
-- `Tests/` — `ForestTests.cs`: xUnit tests of the Contract (its forwarding values equal the Map's),
+- `Tests/` — `ForestTests.cs`: xUnit tests of the Contract (its forwarding values equal the Map's; `Obstacles` are exactly the Map's obstacles in the forest area),
   of `ForestRing` (it matches the Map's obstacles and walkable ground; it opens at the west gap just
   as wide as the Map's path and is closed along the rest of the strip), of `ForestProps` (no prop
   blocks the west gap or the trail) and of `ForestModule` with a fake `IMessageBus`.
@@ -34,9 +34,9 @@ references `Fungtopia.Map.Contract`; members marked *forwarding* just pass on th
 | `ForestBounds.HalfSize` | *Forwarding*: `Map.Areas.ForestHalfSize`, `100f`: the forest is the square \|x\| ≤ 100, \|z\| ≤ 100 (`Map.Areas.Forest`). Beyond it, walkable ground is the Map's (`Map.Areas.Walkable`). |
 | `ForestBounds.PlayerStart` | `Vector3` on the ground (`Y == Map.Ground.HeightAt(X, Z)`) in the start clearing near the south edge, (0, h, 84). At least 8 m from any trunk. Unchanged in value. |
 | `ForestBounds.Contains(x, z, margin = 0)` | *Forwarding* to `Map.Areas.Forest.Contains`: whether (x, z) is inside the square, `margin` meters from its edge. |
-| `Obstacles.All` | *Forwarding*: the Map's forest trunks, the first `Map.Ground.ForestTrunkCount` circles of `Map.Ground.Obstacles` in the same order, as `ReadOnlySpan<Obstacle>` (`X`, `Z`, `Radius`, `Center`). All inside the bounds, off paths and clearings, more than 1 m apart. |
-| `Obstacles.Count` | Number of trunks (235, `Map.Ground.ForestTrunkCount`). |
-| `Obstacles.Blocks(x, z, radius = 0)` | Whether a walker of `radius` at (x, z) overlaps a forest trunk (`Map.Ground.Blocks` also checks buildings and the Deep Forest). Allocation-free. |
+| `Obstacles.All` | *Forwarding*: every circle of `Map.Ground.Obstacles` whose center is inside `Map.Areas.Forest`, whatever it is, in the same order, as `ReadOnlySpan<Obstacle>` (`X`, `Z`, `Radius`, `Center`). Today exactly the forest trunks (the first `Map.Ground.ForestTrunkCount`): all inside the bounds, off paths and clearings, more than 1 m apart; any solid prop the Map adds in the forest joins them. |
+| `Obstacles.Count` | Number of them (today 235, `Map.Ground.ForestTrunkCount`). |
+| `Obstacles.Blocks(x, z, radius = 0)` | Whether a walker of `radius` at (x, z) overlaps one of `Obstacles.All` (`Map.Ground.Blocks` also checks buildings and the Deep Forest). Allocation-free. |
 | `ForestLayout.Clearings` | `ReadOnlySpan<Clearing>` (`X`, `Z`, `Radius`); the first holds the start. |
 | `ForestLayout.PathPoints`, `PathHalfWidth`, `PathDistance(x, z)`, `OnPath(x, z)` | The dirt paths: polylines of (x, z) points (NaN separates paths), 1.8 m half-width. |
 | `ForestLayout.ClearingDepth(x, z)` | Meters inside the nearest clearing (negative outside all). |

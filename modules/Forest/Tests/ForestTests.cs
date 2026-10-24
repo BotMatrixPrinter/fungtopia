@@ -48,19 +48,36 @@ public class ForestTests
     }
 
     [Fact]
-    public void ObstaclesAreTheMapForestTrunks()
+    public void ObstaclesAreTheMapObstaclesInTheForest()
     {
-        Assert.Equal(Ground.ForestTrunkCount, Obstacles.Count);
-        var map = Ground.Obstacles;
+        // Every Map obstacle whose center is in the forest area, whatever it is, in the Map's order.
+        var expected = new List<Circle>();
+        foreach (var c in Ground.Obstacles)
+            if (Areas.Forest.Contains(c.X, c.Z))
+                expected.Add(c);
+        Assert.True(expected.Count >= Ground.ForestTrunkCount);
+        Assert.Equal(expected.Count, Obstacles.Count);
         var forest = Obstacles.All;
+        Assert.Equal(expected.Count, forest.Length);
         for (int i = 0; i < forest.Length; i++)
         {
-            Assert.Equal(map[i].X, forest[i].X);
-            Assert.Equal(map[i].Z, forest[i].Z);
-            Assert.Equal(map[i].Radius, forest[i].Radius);
+            Assert.Equal(expected[i].X, forest[i].X);
+            Assert.Equal(expected[i].Z, forest[i].Z);
+            Assert.Equal(expected[i].Radius, forest[i].Radius);
         }
-        foreach (var (x, z) in Grid(step: 1.3f))
-            Assert.Equal(Obstacles.Blocks(x, z, 0.4f), Ground.Blocks(x, z, 0.4f));
+        // The forest trunks are among them, first.
+        for (int i = 0; i < Ground.ForestTrunkCount; i++)
+            Assert.Equal(Ground.Obstacles[i].X, forest[i].X);
+        foreach (var (x, z) in Grid(step: 1.3f, border: 20f))
+        {
+            bool blocked = false;
+            foreach (var c in expected)
+            {
+                float dx = x - c.X, dz = z - c.Z, r = c.Radius + 0.4f;
+                blocked |= dx * dx + dz * dz < r * r;
+            }
+            Assert.Equal(blocked, Obstacles.Blocks(x, z, 0.4f));
+        }
     }
 
     [Fact]
