@@ -22,8 +22,6 @@ namespace Fungtopia.StartScreen.View;
 public partial class StartScreenView : CanvasLayer, IModuleView
 {
     private const float FadeSeconds = 0.6f;
-    private const float StickOn = 0.6f;
-    private const float StickOff = 0.3f;
     private const int Pad = 0;
 
     private StartScreenModule? _screen;
@@ -52,8 +50,6 @@ public partial class StartScreenView : CanvasLayer, IModuleView
     private readonly PreviewStage[] _stages = new PreviewStage[4];
     private StartStep _shownStep = (StartStep)(-1);
     private int _hovered = -1;
-    private int _stick;
-    private int _stickY;
     private bool _dragging;
     private float _closing;
     private float _time;
@@ -522,62 +518,17 @@ public partial class StartScreenView : CanvasLayer, IModuleView
         {
             case InputEventKey { Pressed: true, Echo: false } key:
                 var code = key.PhysicalKeycode != Key.None ? key.PhysicalKeycode : key.Keycode;
-                if (code == Key.Left)
-                    _screen.Press(StartButton.Left);
-                else if (code == Key.Right)
-                    _screen.Press(StartButton.Right);
-                else if (code == Key.Up)
-                    _screen.Press(StartButton.Up);
-                else if (code == Key.Down)
-                    _screen.Press(StartButton.Down);
-                else if (code is Key.Enter or Key.KpEnter || (code == Key.E && _screen.Step != StartStep.Look))
+                // Directions come from the Input module's paced MenuNav, not from here.
+                if (code is Key.Enter or Key.KpEnter || (code == Key.E && _screen.Step != StartStep.Look))
                     _screen.Press(StartButton.Confirm); // on the look step E turns the character
                 else if (code is Key.Escape or Key.Backspace)
                     _screen.Press(StartButton.Back);
                 break;
             case InputEventJoypadButton { Pressed: true } button:
-                if (button.ButtonIndex == JoyButton.DpadLeft)
-                    _screen.Press(StartButton.Left);
-                else if (button.ButtonIndex == JoyButton.DpadRight)
-                    _screen.Press(StartButton.Right);
-                else if (button.ButtonIndex == JoyButton.DpadUp)
-                    _screen.Press(StartButton.Up);
-                else if (button.ButtonIndex == JoyButton.DpadDown)
-                    _screen.Press(StartButton.Down);
-                else if (button.ButtonIndex == JoyButton.A)
+                if (button.ButtonIndex == JoyButton.A)
                     _screen.Press(StartButton.Confirm);
                 else if (button.ButtonIndex == JoyButton.B)
                     _screen.Press(StartButton.Back);
-                break;
-            case InputEventJoypadMotion { Axis: JoyAxis.LeftX } motion:
-                // One press each time the stick is pushed past StickOn; it re-arms near the middle.
-                if (motion.AxisValue <= -StickOn && _stick != -1)
-                {
-                    _stick = -1;
-                    _screen.Press(StartButton.Left);
-                }
-                else if (motion.AxisValue >= StickOn && _stick != 1)
-                {
-                    _stick = 1;
-                    _screen.Press(StartButton.Right);
-                }
-                else if (Mathf.Abs(motion.AxisValue) < StickOff)
-                    _stick = 0;
-                break;
-            case InputEventJoypadMotion { Axis: JoyAxis.LeftY } motion:
-                // Up is negative on the stick's Y axis.
-                if (motion.AxisValue <= -StickOn && _stickY != -1)
-                {
-                    _stickY = -1;
-                    _screen.Press(StartButton.Up);
-                }
-                else if (motion.AxisValue >= StickOn && _stickY != 1)
-                {
-                    _stickY = 1;
-                    _screen.Press(StartButton.Down);
-                }
-                else if (Mathf.Abs(motion.AxisValue) < StickOff)
-                    _stickY = 0;
                 break;
             case InputEventMouseMotion motion:
                 if (_dragging)

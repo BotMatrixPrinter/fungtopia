@@ -74,13 +74,27 @@ public partial class StartScreenPreview : Node
         if (step is "menu" or "load" or "loadsave" or "newslot" or "overwrite")
             _screen.Handle(MadeUpSlots());
         foreach (var press in presses)
-            _screen.Press(press);
+        {
+            // Directions reach the screen only as MenuNav steps, as the Input module sends them.
+            if (press is StartButton.Confirm or StartButton.Back)
+                _screen.Press(press);
+            else
+                _screen.Handle(Nav(press));
+        }
         var view = GD.Load<PackedScene>("res://modules/StartScreen/Godot/Main.tscn").Instantiate<StartScreenView>();
         view.Bind(_screen);
         AddChild(view);
     }
 
-    private static SaveSlots MadeUpSlots()
+    private static MenuNav Nav(StartButton direction) => direction switch
+    {
+        StartButton.Up => new MenuNav(-1, 0),
+        StartButton.Down => new MenuNav(1, 0),
+        StartButton.Left => new MenuNav(0, -1),
+        _ => new MenuNav(0, 1),
+    };
+
+        private static SaveSlots MadeUpSlots()
     {
         var now = DateTime.UtcNow;
         var manual = new SaveInfo(SaveFileState.Ok, now.AddHours(-3), "Girl", CharacterKind.Girl, 4, 120, Area.Forest);

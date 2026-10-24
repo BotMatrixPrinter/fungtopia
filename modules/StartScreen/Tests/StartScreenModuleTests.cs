@@ -104,10 +104,46 @@ public class StartScreenModuleTests
         Assert.Equal(StartStep.Character, screen.Step);
     }
 
+    /// <summary>
+    /// Reports <paramref name="buttons"/> in order, then ticks: Confirm and Back as presses, the
+    /// directions as one MenuNav step each (the only way they reach the screen).
+    /// </summary>
     private void PressAndTick(StartScreenModule screen, params StartButton[] buttons)
     {
         foreach (var button in buttons)
-            screen.Press(button);
+        {
+            if (button is StartButton.Confirm or StartButton.Back)
+                screen.Press(button);
+            else
+                screen.Handle(Nav(button));
+        }
+        Tick(screen);
+    }
+
+    private static MenuNav Nav(StartButton direction) => direction switch
+    {
+        StartButton.Up => new MenuNav(-1, 0),
+        StartButton.Down => new MenuNav(1, 0),
+        StartButton.Left => new MenuNav(0, -1),
+        StartButton.Right => new MenuNav(0, 1),
+        _ => throw new ArgumentOutOfRangeException(nameof(direction)),
+    };
+
+    /// <summary>Ticks per MenuNav repeat while a direction is held: 0.2 s at 60 ticks a second.</summary>
+    private const int RepeatTicks = 12;
+
+    /// <summary>
+    /// The MenuNav the Input module publishes on tick <paramref name="tick"/> (from 0) of a push in
+    /// <paramref name="nav"/>'s direction held for <paramref name="heldTicks"/> ticks: the step on the
+    /// first tick, then one every 0.2 s while held, nothing in between or after.
+    /// </summary>
+    private static MenuNav HeldNav(MenuNav nav, int tick, int heldTicks) =>
+        tick < heldTicks && tick % RepeatTicks == 0 ? nav : default;
+
+    /// <summary>Publishes <paramref name="nav"/> to the screen, as the Input module does every tick, then ticks.</summary>
+    private void NavAndTick(StartScreenModule screen, MenuNav nav)
+    {
+        screen.Handle(nav);
         Tick(screen);
     }
 
@@ -362,11 +398,144 @@ public class StartScreenModuleTests
     }
 
     [Fact]
+    public void StartListensForMenuNav()
+    {
+        var bus = new FakeBus();
+        Started(bus);
+        Assert.Contains(typeof(MenuNav), bus.Subscribed);
+    }
+
+    [Fact]
+    public void DirectionPressesAreIgnoredOnlyMenuNavMoves()
+    {
+        var screen = Started(new FakeBus());
+        ToCharacter(screen);
+        PressAndTick(screen, StartButton.Back);
+        Assert.Equal(StartStep.NewSlot, screen.Step);
+        Assert.Equal(0, screen.Highlight);
+        foreach (var direction in new[] { StartButton.Down, StartButton.Right, StartButton.Up, StartButton.Left })
+        {
+            screen.Press(direction);
+            Tick(screen);
+            Assert.Equal(0, screen.Highlight);
+        }
+
+        NavAndTick(screen, new MenuNav(1, 0));
+        Assert.Equal(1, screen.Highlight);
+        PressAndTick(screen, StartButton.Back, StartButton.Confirm, StartButton.Confirm);
+        Assert.Equal(StartStep.Character, screen.Step);
+        screen.Press(StartButton.Right);
+        Tick(screen);
+        Assert.Equal(GameStart.Girl, screen.Character);
+        NavAndTick(screen, new MenuNav(0, 1));
+        Assert.Equal(GameStart.Boy, screen.Character);
+    }
+
+    [Fact]
+    public void ANavWithNoStepMovesNothing()
+    {
+        var bus = new FakeBus();
+        var screen = OnLookStep(bus);
+        for (int i = 0; i < 30; i++)
+            NavAndTick(screen, default);
+        Assert.Equal(LookRow.Skin, screen.Row);
+        Assert.Equal(0, screen.Skin);
+        Assert.Empty(bus.SetLooks);
+    }
+
+    [Fact]
+    public void AHeldDirectionMovesTheMenuOneItemPerFifthOfASecond()
+    {
+        var screen = Started(new FakeBus());
+        ToCharacter(screen);
+        PressAndTick(screen, StartButton.Back);
+        Assert.Equal(StartStep.NewSlot, screen.Step);
+        Assert.Equal(0, screen.Highlight);
+
+        // Down held for 0.5 s: steps on ticks 0, 12 and 24 (0 s, 0.2 s, 0.4 s); the menu stops at slot 3.
+        var down = new MenuNav(1, 0);
+        for (int tick = 0; tick < 30; tick++)
+        {
+            NavAndTick(screen, HeldNav(down, tick, 30));
+            Assert.Equal(tick < RepeatTicks ? 1 : 2, screen.Highlight);
+        }
+
+        // Up held for 0.3 s: back one item at once, the next only 0.2 s later.
+        var up = new MenuNav(-1, 0);
+        for (int tick = 0; tick < 18; tick++)
+        {
+            NavAndTick(screen, HeldNav(up, tick, 18));
+            Assert.Equal(tick < RepeatTicks ? 1 : 0, screen.Highlight);
+        }
+    }
+
+    [Fact]
+    public void AHeldDirectionCyclesALookValueOnePerFifthOfASecond()
+    {
+        var bus = new FakeBus();
+        var screen = OnLookStep(bus);
+        int count = StartScreenModule.LookCount(LookRow.Skin);
+        Assert.True(count >= 6);
+
+        // Right held for one second (60 ticks): five steps, at 0, 0.2, 0.4, 0.6 and 0.8 s.
+        var right = new MenuNav(0, 1);
+        for (int tick = 0; tick < 60; tick++)
+        {
+            NavAndTick(screen, HeldNav(right, tick, 60));
+            Assert.Equal(tick / RepeatTicks + 1, screen.Skin);
+        }
+        Assert.Equal(5, bus.SetLooks.Count);
+        // Released: nothing more.
+        for (int tick = 0; tick < 30; tick++)
+            NavAndTick(screen, default);
+        Assert.Equal(5, screen.Skin);
+        Assert.Equal(LookRow.Skin, screen.Row);
+
+        // Down held for 0.5 s: the row moves three times (0, 0.2, 0.4 s; Skin to EyeColor), not once a tick.
+        var down = new MenuNav(1, 0);
+        for (int tick = 0; tick < 30; tick++)
+            NavAndTick(screen, HeldNav(down, tick, 30));
+        Assert.Equal(LookRow.EyeColor, screen.Row);
+    }
+
+    [Fact]
+    public void AShortFlickMovesExactlyOneItem()
+    {
+        var bus = new FakeBus();
+        var screen = OnLookStep(bus);
+
+        // A flick of a few ticks: the Input module sends one step, then nothing.
+        var right = new MenuNav(0, 1);
+        for (int tick = 0; tick < 40; tick++)
+            NavAndTick(screen, HeldNav(right, tick, 4));
+        Assert.Equal(1, screen.Skin);
+        Assert.Single(bus.SetLooks);
+
+        var down = new MenuNav(1, 0);
+        for (int tick = 0; tick < 40; tick++)
+            NavAndTick(screen, HeldNav(down, tick, 3));
+        Assert.Equal(LookRow.HairStyle, screen.Row);
+
+        // On a menu too: one flick down on the slots highlights the next slot only.
+        PressAndTick(screen, StartButton.Back, StartButton.Back);
+        Assert.Equal(StartStep.NewSlot, screen.Step);
+        Assert.Equal(0, screen.Highlight);
+        for (int tick = 0; tick < 40; tick++)
+            NavAndTick(screen, HeldNav(down, tick, 5));
+        Assert.Equal(1, screen.Highlight);
+    }
+
+    [Fact]
     public void TooManyPressesInOneFrameAreDropped()
     {
         var screen = Started(new FakeBus());
         for (int i = 0; i < StartScreenModule.MaxQueued + 10; i++)
-            screen.Press(i < StartScreenModule.MaxQueued ? StartButton.Left : StartButton.Confirm);
+        {
+            if (i < StartScreenModule.MaxQueued)
+                screen.Handle(new MenuNav(0, -1));
+            else
+                screen.Press(StartButton.Confirm);
+        }
         Tick(screen);
         Assert.Equal(StartStep.Title, screen.Step);
     }

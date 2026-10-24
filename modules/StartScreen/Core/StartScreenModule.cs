@@ -11,7 +11,8 @@ namespace Fungtopia.StartScreen;
 /// The start screen's flow: the title's Continue / Load / New Game; Load picks a slot, then its
 /// manual save or autosave; New Game picks a slot (asking "Overwrite?" when it is taken), then
 /// the character, then "Make your look", then the starter pet, then "Start!". It keeps the
-/// latest <see cref="SaveSlots"/> for the slot info. The view reports presses between ticks (<see cref="Press"/>,
+/// latest <see cref="SaveSlots"/> for the slot info. Every highlight, row and value moves only by the
+/// Input module's paced <see cref="MenuNav"/> steps (one press each). The view reports presses between ticks (<see cref="Press"/>,
 /// <see cref="Point"/>, <see cref="Pick"/>); each tick applies them in order, sends the look as
 /// <see cref="SetLook"/> and the outfit as <see cref="Equip"/>s on the tick they change,
 /// publishes <see cref="PreviewYaw"/> every tick of the look step (the character turned by the
@@ -21,7 +22,7 @@ namespace Fungtopia.StartScreen;
 /// <see cref="StartScreenState"/> every tick. It keeps the latest <see cref="ActiveDevice"/> so the
 /// view shows the hints (<see cref="StartPrompts"/>) for that device only.
 /// </summary>
-public sealed class StartScreenModule : IModule, IMessageHandler<SaveSlots>, IMessageHandler<ActiveDevice>
+public sealed class StartScreenModule : IModule, IMessageHandler<SaveSlots>, IMessageHandler<ActiveDevice>, IMessageHandler<MenuNav>
 {
     /// <summary>The <see cref="UiFocus.Owner"/> of the start screen ("STRT").</summary>
     public const int FocusOwner = 0x5354_5254;
@@ -140,11 +141,25 @@ public sealed class StartScreenModule : IModule, IMessageHandler<SaveSlots>, IMe
         _bus = bus;
         bus.Subscribe<SaveSlots>(this);
         bus.Subscribe<ActiveDevice>(this);
+        bus.Subscribe<MenuNav>(this);
     }
 
     public void Handle(in SaveSlots message) => _slots = message;
 
     public void Handle(in ActiveDevice message) => Device = message.Kind;
+
+    /// <summary>
+    /// A paced menu step from the Input module: Up / Down for <see cref="MenuNav.Vertical"/> -1 / +1,
+    /// Left / Right for <see cref="MenuNav.Horizontal"/>, applied on the next tick like a press.
+    /// This is the only way a direction reaches the screen.
+    /// </summary>
+    public void Handle(in MenuNav message)
+    {
+        if (message.Vertical != 0)
+            Enqueue(message.Vertical < 0 ? StartButton.Up : StartButton.Down, -1, -1);
+        else if (message.Horizontal != 0)
+            Enqueue(message.Horizontal < 0 ? StartButton.Left : StartButton.Right, -1, -1);
+    }
 
     /// <summary>How many items the menu of <paramref name="step"/> has (0 when it is not a menu).</summary>
     public static int ItemCount(StartStep step) => step switch
@@ -196,8 +211,15 @@ public sealed class StartScreenModule : IModule, IMessageHandler<SaveSlots>, IMe
     public bool OutfitFits(int outfit) =>
         (uint)outfit < (uint)Catalog.StarterOutfits.Length && Fits.Matches(Catalog.StarterOutfits[outfit].Fit, Character);
 
-    /// <summary>Reports a button press; applied on the next tick.</summary>
-    public void Press(StartButton button) => Enqueue(button, -1, -1);
+    /// <summary>
+    /// Reports a <see cref="StartButton.Confirm"/> or <see cref="StartButton.Back"/> press; applied on
+    /// the next tick. Directions are ignored here: they come only from <see cref="MenuNav"/>.
+    /// </summary>
+    public void Press(StartButton button)
+    {
+        if (button is StartButton.Confirm or StartButton.Back)
+            Enqueue(button, -1, -1);
+    }
 
     /// <summary>
     /// Reports the mouse over choice <paramref name="option"/> (0 left, 1 right) of the current

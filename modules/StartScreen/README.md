@@ -17,7 +17,7 @@ publishes the character and pet once when Start is pressed.
   hints). It references the Wardrobe
   Contract (`Fungtopia.Wardrobe`: `Looks`, `Catalog`, `SetLook`, `Equip`, `PreviewYaw`), the Save
   Contract (`Fungtopia.Save`: `SaveSlots`, `LoadGame`, `NewGameInSlot`; it brings the Map and
-  Player Contracts) and the Input Contract (`Fungtopia.Input.UiFocus`, `ActiveDevice`, `Prompts`).
+  Player Contracts) and the Input Contract (`Fungtopia.Input.UiFocus`, `ActiveDevice`, `MenuNav`, `Prompts`).
 - `Godot/` — `Main.tscn` with `StartScreenView` (a `CanvasLayer` on layer 50, over the HUD),
   built in code from `MushroomLogo`, `ChoiceCard`, `SlotCard`, `CapButton`, `LookPanel` and
   `PreviewStage`;
@@ -37,7 +37,8 @@ Test it with `./test.sh StartScreen` from the repository root.
 | `StartScreenState` | StartScreen, once every tick | `Open`: true from the first tick until "Start!" is pressed or a save is loaded, false after. |
 
 It reads the Save module's `Fungtopia.Save.SaveSlots` and the Input module's
-`Fungtopia.Input.ActiveDevice` (each kept, the latest one) and sends:
+`Fungtopia.Input.ActiveDevice` (each kept, the latest one) and the Input module's
+`Fungtopia.Input.MenuNav` (each step one direction press, see Core) and sends:
 
 | Message | When | What |
 | --- | --- | --- |
@@ -66,6 +67,14 @@ slot in use), `Character`, `Look`, `Pet`, `Ready`, then `Started` (closed for go
 `Title`, `Load`, `LoadSave`, `Started`, or straight from `Title` to `Started` with Continue. The
 view reports presses between ticks, and each tick applies them in order (up to 32 a tick; more
 are dropped).
+
+**Directions come only from `MenuNav`.** Every highlight, choice, row and value below moves by
+the Input module's paced `MenuNav` steps (one step when a direction is first pushed, then at most
+one per 0.2 s while it is held, from the left stick, D-pad, arrow keys and W A S D alike): a
+`Vertical` step of -1 / +1 is one Up / Down press, a `Horizontal` step one Left / Right, applied
+on the next tick like the other presses; a `MenuNav` with no step does nothing. So a held
+direction moves one item per 0.2 s and a short flick exactly one. `Press(StartButton)` takes only
+`Confirm` and `Back`; the directions given to it are ignored.
 
 **Menus.** `Title`, `Load`, `LoadSave`, `NewSlot` and `Overwrite` are menus (`ItemCount(step)`):
 `Highlight` is the highlighted item and `ItemEnabled(item)` says whether it can be chosen.
@@ -99,12 +108,12 @@ are dropped).
 
 - `Press(StartButton.Confirm)` goes to the next step; on `Ready` it presses "Start!".
 - `Press(StartButton.Back)` goes one step back (from `Character` to `NewSlot`); the choices are kept.
-- `Press(StartButton.Left)` / `Right` highlight the left (Girl, Cat) or right (Boy, Dog) choice
+- Left / Right (`MenuNav.Horizontal`) highlight the left (Girl, Cat) or right (Boy, Dog) choice
   on the `Character` and `Pet` steps; on the `Look` step they change the highlighted row's value
   to the previous / next one, wrapping round (outfits that do not fit the character, the
   Mushroom Dress for the Boy, are skipped); on menus they move the highlight; on `Ready`
   they do nothing.
-- `Press(StartButton.Up)` / `Down` highlight the row above / below on the `Look` step (`Skin`,
+- Up / Down (`MenuNav.Vertical`) highlight the row above / below on the `Look` step (`Skin`,
   `HairStyle`, `HairColor`, `EyeColor`, `Outfit`; they stop at the ends); on menus they move
   the highlight; elsewhere nothing.
 - `Pick(row, value)` (a click on a swatch or pill) highlights that row and gives it that value,
@@ -148,13 +157,17 @@ and Circle (L1, R1, right stick), on Nintendo the D-pad, B and A (L, R, right st
 
 | Action | Mouse | Keyboard | Gamepad |
 | --- | --- | --- | --- |
-| Highlight a choice | Hover its card | Left / Right arrows | Left stick or D-pad left / right |
-| Look: pick a row | Click a value in it | Up / Down arrows | Left stick or D-pad up / down |
-| Look: change a value | Click a swatch or pill | Left / Right arrows | Left stick or D-pad left / right |
+| Highlight a choice | Hover its card | Left / Right arrows, A / D | Left stick or D-pad left / right |
+| Look: pick a row | Click a value in it | Up / Down arrows, W / S | Left stick or D-pad up / down |
+| Look: change a value | Click a swatch or pill | Left / Right arrows, A / D | Left stick or D-pad left / right |
 | Look: turn the character | Drag on the left half | Q / E (held) | Right stick, LB / RB (held) |
-| Highlight a menu item (title button, slot, save, Yes / No) | Hover it | Arrows | Left stick or D-pad |
+| Highlight a menu item (title button, slot, save, Yes / No) | Hover it | Arrows, W A S D | Left stick or D-pad |
 | OK, next, "Start!" | Click (a card, a menu item, "Next", "Start!") | Enter, or E (not on the look step, where E turns) | A |
 | Back | The "Back" button | Esc or Backspace | B |
+
+The view does not read the arrows, W A S D, the D-pad or the left stick itself: those reach the
+Core only as the Input module's `MenuNav` steps (held: one step per 0.2 s). It reports Enter / E /
+A, Esc / Backspace / B and the mouse.
 
 The hint at the bottom (`StartPrompts`, in a `RichTextLabel`) shows only the active device's
 buttons as icons and changes as soon as the player switches device; it is rebuilt only when the

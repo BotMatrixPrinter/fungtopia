@@ -54,19 +54,23 @@ public enum LookRow
     Outfit,
 }
 
-/// <summary>What the view reports from mouse, keyboard and gamepad.</summary>
+/// <summary>
+/// The presses the screen applies: <see cref="Confirm"/> and <see cref="Back"/> from the view
+/// (<see cref="StartScreenModule.Press"/>), the four directions from the Input module's
+/// <c>Fungtopia.Input.MenuNav</c> steps only.
+/// </summary>
 public enum StartButton
 {
-    /// <summary>Arrow left, stick or D-pad left: the left choice (Girl, Cat), the previous value of a look row, or the previous menu item.</summary>
+    /// <summary>A MenuNav step left: the left choice (Girl, Cat), the previous value of a look row, or the previous menu item.</summary>
     Left,
-    /// <summary>Arrow right, stick or D-pad right: the right choice (Boy, Dog), the next value of a look row, or the next menu item.</summary>
+    /// <summary>A MenuNav step right: the right choice (Boy, Dog), the next value of a look row, or the next menu item.</summary>
     Right,
     /// <summary>Enter, E, gamepad A or a click: go on with the highlighted choice.</summary>
     Confirm,
     /// <summary>Esc, Backspace, gamepad B or the back arrow: one step back.</summary>
     Back,
-    /// <summary>Arrow up, stick or D-pad up: the look row above, or the previous menu item.</summary>
+    /// <summary>A MenuNav step up: the look row above, or the previous menu item.</summary>
     Up,
-    /// <summary>Arrow down, stick or D-pad down: the look row below, or the next menu item.</summary>
+    /// <summary>A MenuNav step down: the look row below, or the next menu item.</summary>
     Down,
 }
