@@ -627,7 +627,7 @@ public class NPCsModuleTests
         foreach (var (kind, word) in new[]
         {
             (NPCsModule.PromptKind.Talk, "Talk"), (NPCsModule.PromptKind.Food, "Food"),
-            (NPCsModule.PromptKind.Buy, "Buy the Mushroom Crow (3,000 M¢)"),
+            (NPCsModule.PromptKind.Buy, "Buy the Mushroom Crow (1,500 M¢)"),
         })
         {
             string text = NPCsModule.PromptBbcode(kind, device);
@@ -711,25 +711,26 @@ public class NPCsModuleTests
         Assert.Equal("Lucy", rig.Shown.Speaker);
         Assert.Equal(Voices.Deadpan, rig.Shown.Voice);
         var texts = rig.ReadAll();
-        Assert.Contains(texts, t => t.Contains("Mushroom Crow") && t.Contains("3,000 M¢"));
+        Assert.Contains(texts, t => t.Contains("Mushroom Crow") && t.Contains("1,500 M¢"));
         Assert.Equal("Ask me again to buy it.", texts[^1]);
         rig.Tick();
         Assert.True(rig.Npcs.OfferingCrow);
         Assert.Equal(Lucy, rig.Npcs.PromptNpc);
         Assert.Equal(NPCsModule.PromptKind.Buy, rig.Npcs.Prompt);
-        Assert.Equal("[img=36]res://modules/Input/Glyphs/key_e.svg[/img] Buy the Mushroom Crow (3,000 M¢)", rig.Npcs.PromptText);
+        Assert.Equal("[img=36]res://modules/Input/Glyphs/key_e.svg[/img] Buy the Mushroom Crow (1,500 M¢)", rig.Npcs.PromptText);
         Assert.Equal(spends, rig.Bus.All<SpendCoins>().Count);
     }
 
     [Fact]
     public void BuyingTheCrowSpendsCoinsAdoptsItAndLucyCongratulates()
     {
-        var rig = new Rig(Near(Lucy)) { Coins = 3200 };
+        var rig = new Rig(Near(Lucy)) { Coins = 1700 };
         HearTheOffer(rig);
 
         rig.Tick(interact: true);
         var spend = Assert.Single(rig.Bus.All<SpendCoins>());
-        Assert.Equal(3000, spend.Amount);
+        Assert.Equal(1500, spend.Amount);
+        Assert.Equal(1500, NPCsModule.CrowPrice);
         rig.Tick();
         Assert.Equal(200, rig.Coins);
         var adopt = Assert.Single(rig.Bus.All<AdoptPet>());
@@ -753,20 +754,20 @@ public class NPCsModuleTests
     [Fact]
     public void NotEnoughCoinsMeansComeBackLater()
     {
-        var rig = new Rig(Near(Lucy)) { Coins = 2999 };
+        var rig = new Rig(Near(Lucy)) { Coins = 1499 };
         HearTheOffer(rig);
         rig.Press();
         Assert.Single(rig.Bus.All<SpendCoins>());
         Assert.Empty(rig.Bus.All<AdoptPet>());
-        Assert.Equal(2999, rig.Coins);
-        Assert.Equal("Come back with 3,000 M¢.", rig.Shown.Text);
+        Assert.Equal(1499, rig.Coins);
+        Assert.Equal("Come back with 1,500 M¢.", rig.Shown.Text);
         Assert.True(rig.Shown.Last);
         rig.ReadAll();
         rig.Tick();
         Assert.False(rig.Npcs.OfferingCrow);
 
         // Later, with the coins, the offer and the purchase work.
-        rig.Coins = 3000;
+        rig.Coins = 1500;
         HearTheOffer(rig);
         rig.Press();
         Assert.Single(rig.Bus.All<AdoptPet>());
@@ -818,7 +819,7 @@ public class NPCsModuleTests
     /// <summary>A rig that has finished two quests (the second gave the flower clip), counts 50 / 500 M¢ on the third and bought the crow.</summary>
     private static Rig PlayedRig()
     {
-        var rig = new Rig(Near(Millie)) { Coins = 3000 };
+        var rig = new Rig(Near(Millie)) { Coins = 1500 };
         rig.Press();
         rig.ReadAll();
         Kill(rig, MonsterKind.Caterpillar, 5);

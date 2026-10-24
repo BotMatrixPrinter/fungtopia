@@ -61,7 +61,7 @@ Each tick:
   `PromptKind.Talk`, `Food` for Pip, or `Buy` while Lucy offers the crow. `Device` is the latest
   `ActiveDevice`'s `Kind`, and `PromptText` the prompt as RichTextLabel BBCode for it:
   `Prompts.Rich(Interact, Device, PromptIconSize)` (36 px) and "Talk", "Food" or "Buy the Mushroom Crow
-  (3,000 M¢)" (`PromptBbcode(kind, device)`; every prompt for every device is built once at startup).
+  (1,500 M¢)" (`PromptBbcode(kind, device)`; every prompt for every device is built once at startup).
 - **Talking.** `Interact` with the prompt showing starts that NPC's conversation: its lines go out
   one `SayLine` at a time, the next on its `DialogueAdvanced`, the last one with `Last` set. The
   press that dismisses a last line (`DialogueClosed` that tick) never starts a new talk. `Talking`
@@ -81,12 +81,12 @@ Each tick:
   quest also gives the Flower Clip and the fourth the Mushroom Backpack (`GrantItem`, "Millie's
   quest"; `QuestItem(n)`, first round only), and she says so.
 - **Lucy.** If the player does not own the Mushroom Crow (from `OwnedPets`), talking to her
-  offers it for 3,000 M¢, ending with "Ask me again to buy it." (the speech bubbles are plain text, so lines name no
+  offers it for 1,500 M¢, ending with "Ask me again to buy it." (the speech bubbles are plain text, so lines name no
   buttons; the buy prompt then shows the icon). Once that line is dismissed she
   is `OfferingCrow`: Interact near her says yes and publishes `SpendCoins` (request ids from
   71000 up, "Mushroom Crow"); walking out of the prompt radius says no. On its `SpendResult`:
   `Ok` publishes `AdoptPet(Crow)` and she says "Congrats. It bites."; otherwise "Come back with
-  3,000 M¢." When the crow is owned she just says so.
+  1,500 M¢." When the crow is owned she just says so.
 - **Abby.** Talking to her says "Ooh, you'd look so cute in something new!"; once that line is
   dismissed she publishes `OpenShop` (the Wardrobe module shows the shop).
 - **Pip.** Talking to Pip says one short greeting (`PipGreetings`, a different one each talk, in

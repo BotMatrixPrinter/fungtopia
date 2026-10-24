@@ -60,19 +60,19 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
 
     public const string TalkWord = "Talk";
     public const string FoodWord = "Food";
-    public const string BuyWord = "Buy the Mushroom Crow (3,000 M¢)";
+    public const string BuyWord = "Buy the Mushroom Crow (1,500 M¢)";
 
     /// <summary>The prompt's icon size in pixels, next to its 26-pixel text.</summary>
     public const int PromptIconSize = 36;
 
-    public const int CrowPrice = 3000;
+    public const int CrowPrice = 1500;
 
     /// <summary>The <see cref="SpendCoins.RequestId"/> of the first purchase; each one after counts up.</summary>
     public const int FirstRequestId = 71_000;
 
     public const string WakeGreeting = "Good morning! You fainted in the forest, but you're all patched up now.";
     public const string CrowCongrats = "Congrats. It bites.";
-    public const string CrowTooPoor = "Come back with 3,000 M¢.";
+    public const string CrowTooPoor = "Come back with 1,500 M¢.";
     public const string CrowAskAgain = "Ask me again to buy it.";
     public const string AbbyGreeting = "Ooh, you'd look so cute in something new!";
 
@@ -624,7 +624,7 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
             return;
         }
         Begin(Lucy, "Welcome to Lucy's Pet Store. Yay.",
-            "That's the Mushroom Crow. 3,000 M¢. Want it?", CrowAskAgain);
+            "That's the Mushroom Crow. 1,500 M¢. Want it?", CrowAskAgain);
         _offerOnClose = true;
     }
 
