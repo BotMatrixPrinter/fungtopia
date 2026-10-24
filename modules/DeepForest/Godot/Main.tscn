@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://modules/DeepForest/Godot/DeepForestView.cs" id="1_deepforest"]
+
+[node name="DeepForestView" type="Node3D"]
+script = ExtResource("1_deepforest")
