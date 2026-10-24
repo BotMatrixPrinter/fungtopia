@@ -4,11 +4,13 @@ using Fungtopia.Map;
 using Fungtopia.Monsters;
 using Fungtopia.Player;
 using Fungtopia.Shell;
+using Fungtopia.StartScreen;
 
 namespace Fungtopia.Pet;
 
 /// <summary>
-/// The player's pets: the starter (a Mushroom Cat or a Mushroom Dog) and any adopted with
+/// The player's pets: the starter (a Mushroom Cat or a Mushroom Dog, chosen on the start screen
+/// and given by <see cref="GameStart"/>; no pet before it) and any adopted with
 /// <see cref="AdoptPet"/> (the Mushroom Crow). Only the active pet is out with the player: it
 /// follows them at about 2 m (the Crow hovers about 2 m up beside them), catches up when far and
 /// appears beside them when over 30 m away or when they are teleported; goes for the nearest
@@ -18,7 +20,8 @@ namespace Fungtopia.Pet;
 /// <see cref="HitMonster"/> for each bite or peck.
 /// </summary>
 public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageHandler<MonsterState>,
-    IMessageHandler<TeleportPlayer>, IMessageHandler<AdoptPet>, IMessageHandler<SetActivePet>
+    IMessageHandler<TeleportPlayer>, IMessageHandler<AdoptPet>, IMessageHandler<SetActivePet>,
+    IMessageHandler<GameStart>
 {
     /// <summary>How far from the player the pet waits, meters.</summary>
     public const float FollowDistance = 2f;
@@ -81,8 +84,7 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
     private bool _following;
     private int _avoidIndex = -1;
     private float _avoidSide;
-    private PetKind _starter = PetKind.Cat;
-    private bool _ownsCat = true, _ownsDog, _ownsCrow;
+    private bool _ownsCat, _ownsDog, _ownsCrow;
     private Vector2 _xz;
     /// <summary>Appeared beside the player between ticks (a teleport, a pet switch): the next tick reports it.</summary>
     private bool _teleportPending;
@@ -96,26 +98,10 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
     }
 
     /// <summary>
-    /// The starter pet setting (Cat by default): the player owns only it, and it is active.
-    /// Set it before the game starts; later pets come with <see cref="AdoptPet"/>.
+    /// Whether the game has started (<see cref="GameStart"/> came): before it the player owns no
+    /// pet, none is out and nothing is published.
     /// </summary>
-    public PetKind Starter
-    {
-        get => _starter;
-        set
-        {
-            if (!Defined(value))
-                return;
-            _starter = value;
-            _ownsCat = value == PetKind.Cat;
-            _ownsDog = value == PetKind.Dog;
-            _ownsCrow = value == PetKind.Crow;
-            Kind = value;
-            Altitude = value == PetKind.Crow ? HoverHeight : 0f;
-            SetPosition();
-            State = MakeState();
-        }
-    }
+    public bool Started { get; private set; }
 
     /// <summary>The active pet: the one that follows the player and fights.</summary>
     public PetKind Kind { get; private set; } = PetKind.Cat;
@@ -167,6 +153,7 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
         bus.Subscribe<TeleportPlayer>(this);
         bus.Subscribe<AdoptPet>(this);
         bus.Subscribe<SetActivePet>(this);
+        bus.Subscribe<GameStart>(this);
         State = MakeState();
     }
 
@@ -207,6 +194,8 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
         _playerFacing = message.Facing;
         _playerAlive = true;
         _hasPlayer = true;
+        if (!Started)
+            return;
         TargetId = -1;
         Sitting = false;
         TeleportBeside(_playerPosition);
@@ -214,9 +203,34 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
         State = MakeState();
     }
 
+    /// <summary>
+    /// The game starts: the player owns only the chosen starter (<see cref="GameStart.Dog"/> is the
+    /// Dog, anything else the Cat), which comes out beside them. Only the first one counts.
+    /// </summary>
+    public void Handle(in GameStart message)
+    {
+        if (Started)
+            return;
+        Started = true;
+        var kind = message.StarterPet == GameStart.Dog ? PetKind.Dog : PetKind.Cat;
+        _ownsCat = kind == PetKind.Cat;
+        _ownsDog = kind == PetKind.Dog;
+        _ownsCrow = false;
+        Kind = kind;
+        Altitude = 0f;
+        if (_hasPlayer)
+        {
+            TeleportBeside(_playerPosition);
+            _teleportPending = true;
+        }
+        else
+            SetPosition();
+        State = MakeState();
+    }
+
     public void Handle(in AdoptPet message)
     {
-        if (!Defined(message.Kind))
+        if (!Started || !Defined(message.Kind))
             return;
         switch (message.Kind)
         {
@@ -262,6 +276,11 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
         Ticks++;
         Teleported = _teleportPending;
         _teleportPending = false;
+        if (!Started)
+        {
+            _monsterCount = 0;
+            return;
+        }
         SinceBite += dt;
         if (_biteCooldown > 0f)
             _biteCooldown -= dt;

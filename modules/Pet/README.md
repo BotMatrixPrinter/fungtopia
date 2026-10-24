@@ -1,7 +1,7 @@
 # Pet module
 
-The player's pets: the starter, a Mushroom Cat (default) or a Mushroom Dog, and the Mushroom Crow
-adopted in Pet City. The active pet follows the player everywhere on the Map's walkable ground
+The player's pets: the starter, a Mushroom Cat or a Mushroom Dog chosen on the start screen, and
+the Mushroom Crow adopted in Pet City. The active pet follows the player everywhere on the Map's walkable ground
 (the forest, the roads, Mushroom Town, Pet City, into the house with them), runs off to bite cute
 mushroom monsters near the player (the Crow flies about 2 m up beside the player and swoops down
 to peck them), comes back, steers around giant mushroom trunks and buildings, follows the ground,
@@ -26,21 +26,26 @@ positive turns left; the direction of yaw `a` is `(-sin a, 0, -cos a)`.
 | Type | Who publishes it | What it is |
 | --- | --- | --- |
 | `PetKind` | | `Cat`, `Dog` (the starter pets), `Crow` (3,000 M¢ in Pet City). |
-| `PetState` | Pet, once every tick | The active pet: `Kind`, `Position` (feet: on the ground, in the air while the Crow flies), `Facing` (yaw), `Attacking` (has a monster target: going to it or biting/pecking it). |
-| `OwnedPets` | Pet, once every tick | `Cat`, `Dog`, `Crow` (owned or not), `Active` (the pet out with the player); helpers `Owns(kind)`, `AtHome(kind)` (owned and not active: the Home module shows it). |
+| `PetState` | Pet, once every tick from `GameStart` on | The active pet: `Kind`, `Position` (feet: on the ground, in the air while the Crow flies), `Facing` (yaw), `Attacking` (has a monster target: going to it or biting/pecking it). |
+| `OwnedPets` | Pet, once every tick from `GameStart` on | `Cat`, `Dog`, `Crow` (owned or not), `Active` (the pet out with the player); helpers `Owns(kind)`, `AtHome(kind)` (owned and not active: the Home module shows it). |
 | `AdoptPet` | whoever gives pets (Lucy's Pet Store) | `Kind`: the player now owns it (no change if they already did) and it becomes active. |
 | `SetActivePet` | anyone (the Home module, a menu) | `Kind`: makes an owned pet active; ignored for one not owned. |
 
 ## Core
 
 `PetModule` reads `Fungtopia.Player.PlayerState` and `TeleportPlayer` (Player Contract),
-`Fungtopia.Monsters.MonsterState`, `AdoptPet` and `SetActivePet`, publishes
+`Fungtopia.Monsters.MonsterState`, `Fungtopia.StartScreen.GameStart` (StartScreen Contract),
+`AdoptPet` and `SetActivePet`, publishes
 `Fungtopia.Monsters.HitMonster` (Monsters Contract), and uses the Map's `Ground` (height,
 obstacles) and `Areas` (walkable ground) (Map Contract). Until the first `PlayerState` it waits
 beside `Places.HomeDoor`.
 
-- **Owning.** The player starts owning only the starter (the `Starter` setting, Cat by default),
-  which is active. `AdoptPet` adds a pet and makes it active; `SetActivePet` switches to an owned
+- **Starting.** Before `GameStart` the player owns no pet and none is out: the module publishes
+  nothing (no `PetState`, `OwnedPets` or bites), ignores `AdoptPet` and `SetActivePet`, and only
+  notes where `TeleportPlayer` puts the player. On the first `GameStart` the player owns only its `StarterPet`
+  (`GameStart.Dog` is the Dog, anything else the Cat), which is active and appears beside the
+  player (or beside the home door if no `PlayerState` came yet); later ones are ignored.
+- **Owning.** `AdoptPet` adds a pet and makes it active; `SetActivePet` switches to an owned
   one. Only the active pet is out: it follows, fights and is in `PetState`; a newly active pet
   appears beside the player (the other one went home). `OwnedPets` is published every tick,
   after `PetState`.
@@ -75,7 +80,7 @@ Each tick, for the active pet:
 - **Defeated player.** While `PlayerState.Alive` is false it drops its target, goes to 1.1 m
   from the player and sits there (`Sitting`; the Crow lands) until they come back.
 
-Settings and helpers: `Starter` (the starter setting), `Kind` (the active pet), `Owned`,
+Helpers: `Started` (`GameStart` came), `Kind` (the active pet), `Owned`,
 `Owns(kind)`, `PlaceAt(feet, facing)` puts the pet somewhere (on the ground, the Crow hovering).
 The view also reads `Velocity`, `Altitude`, `Sitting`, `SinceBite`, `Teleported` (also set on
 the tick after a teleport or switch between ticks) and `Ticks`; tests also read `TargetId`. No
@@ -83,9 +88,7 @@ allocations per tick (it keeps up to 128 `MonsterState`s a tick in a fixed array
 
 ## View
 
-`PetView` sets the Core's `Starter` from its exported `Pet` property (`"Cat"` in `Main.tscn`),
-which the user argument `--pet=dog` overrides (for example `godot --path . -- --pet=dog`;
-`--pet=crow` starts with the Crow, for trying it out). It draws the active pet, swapping the
+`PetView` draws nothing until the game starts (`Started`); then it draws the active pet, swapping the
 model when it changes, placed between the last two ticks
 (`Engine.GetPhysicsInterpolationFraction`), turned to `Facing`; a teleport pops instead of gliding.
 

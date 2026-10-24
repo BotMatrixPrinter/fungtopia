@@ -7,16 +7,11 @@ namespace Fungtopia.Pet.View;
 /// <summary>
 /// Draws the pet: the chosen pet's model placed between the last two fixed ticks, turned to face
 /// <see cref="PetState.Facing"/>, and animated from its motion, bites, flight and sitting; the
-/// model changes when another owned pet becomes active. The starter pet setting is
-/// <see cref="Pet"/> ("Cat" or "Dog"), which the command-line user argument <c>--pet=dog</c>
-/// (after <c>--</c>) overrides (<c>--pet=crow</c> starts with the Crow, for trying it out).
+/// model changes when another owned pet becomes active. Nothing is drawn before the game starts
+/// (the starter pet comes from the start screen).
 /// </summary>
 public partial class PetView : Node3D, IModuleView
 {
-    /// <summary>The starter pet setting: "Cat" (default) or "Dog".</summary>
-    [Export]
-    public string Pet { get; set; } = "Cat";
-
     private PetModule? _pet;
     private PetModel? _model;
     private PetState _previous;
@@ -30,35 +25,29 @@ public partial class PetView : Node3D, IModuleView
     {
         if (_pet == null)
             return;
-        _pet.Starter = ChosenPet();
         _current = _previous = _pet.State;
         _seenTicks = _pet.Ticks;
-        ShowModel(_pet.Kind);
     }
 
-    private PetKind ChosenPet()
-    {
-        string setting = Pet;
-        foreach (var arg in OS.GetCmdlineUserArgs())
-            if (arg.StartsWith("--pet=", StringComparison.OrdinalIgnoreCase))
-                setting = arg.Substring("--pet=".Length);
-        if (setting.Equals("dog", StringComparison.OrdinalIgnoreCase))
-            return PetKind.Dog;
-        return setting.Equals("crow", StringComparison.OrdinalIgnoreCase) ? PetKind.Crow : PetKind.Cat;
-    }
-
-    private void ShowModel(PetKind kind)
+    private PetModel ShowModel(PetKind kind)
     {
         _model?.QueueFree();
         _model = PetModel.Create(kind);
         AddChild(_model);
+        return _model;
     }
 
     public override void _Process(double delta)
     {
-        if (_pet == null || _model == null)
+        if (_pet == null || !_pet.Started)
             return;
-        if (_pet.Ticks != _seenTicks)
+        if (_model == null)
+        {
+            // The game has just started: the starter appears where it is, no glide.
+            _current = _previous = _pet.State;
+            _seenTicks = _pet.Ticks;
+        }
+        else if (_pet.Ticks != _seenTicks)
         {
             // More than one tick since the last frame: start from the newest only.
             _previous = _pet.Ticks == _seenTicks + 1 ? _current : _pet.State;
@@ -66,8 +55,7 @@ public partial class PetView : Node3D, IModuleView
             _jumped = _pet.Teleported;
             _seenTicks = _pet.Ticks;
         }
-        if (_current.Kind != _model.Kind)
-            ShowModel(_current.Kind);
+        var model = _model == null || _model.Kind != _current.Kind ? ShowModel(_current.Kind) : _model;
 
         float alpha = (float)Engine.GetPhysicsInterpolationFraction();
         var from = ToGodot(_previous.Position);
@@ -75,11 +63,11 @@ public partial class PetView : Node3D, IModuleView
         // Appearing beside the player is a pop, not a glide across the forest.
         var position = _jumped ? to : from.Lerp(to, alpha);
         float facing = Mathf.LerpAngle(_previous.Facing, _current.Facing, alpha);
-        _model.Transform = new Transform3D(new Basis(Vector3.Up, facing), position);
+        model.Transform = new Transform3D(new Basis(Vector3.Up, facing), position);
 
         var velocity = _pet.Velocity;
         float speed = MathF.Sqrt(velocity.X * velocity.X + velocity.Z * velocity.Z);
-        _model.Animate((float)delta, speed, _pet.Sitting, _pet.SinceBite, _current.Attacking, _pet.Altitude);
+        model.Animate((float)delta, speed, _pet.Sitting, _pet.SinceBite, _current.Attacking, _pet.Altitude);
     }
 
     private static Vector3 ToGodot(System.Numerics.Vector3 v) => new(v.X, v.Y, v.Z);

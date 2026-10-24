@@ -5,6 +5,7 @@ using Fungtopia.Map;
 using Fungtopia.Monsters;
 using Fungtopia.Player;
 using Fungtopia.Shell;
+using Fungtopia.StartScreen;
 using Xunit;
 
 namespace Fungtopia.Pet.Tests;
@@ -62,6 +63,7 @@ public class PetModuleTests
     public PetModuleTests()
     {
         _pet.Start(_bus);
+        _bus.Publish(new GameStart(GameStart.Girl, GameStart.Cat));
         _player = PlayerAt(Middle);
     }
 
@@ -110,27 +112,85 @@ public class PetModuleTests
 
     // ---- Start, settings and state ----
 
-    [Fact]
-    public void IsACatByDefault()
+    [Theory]
+    [InlineData(GameStart.Cat, PetKind.Cat)]
+    [InlineData(GameStart.Dog, PetKind.Dog)]
+    public void TheChosenStarterIsOwnedAndActive(int starter, PetKind kind)
     {
-        Assert.Equal(PetKind.Cat, new PetModule().Kind);
-        TickOnce();
-        Assert.Equal(PetKind.Cat, _bus.States[^1].Kind);
+        var pet = new PetModule();
+        var bus = new FakeBus();
+        pet.Start(bus);
+        bus.Publish(_player);
+        bus.Publish(new GameStart(GameStart.Boy, starter));
+        Assert.True(pet.Started);
+        Assert.Equal(kind, pet.Kind);
+        pet.Tick(new TickContext(0, Step));
+        var owned = bus.Owned[^1];
+        Assert.True(owned.Owns(kind));
+        Assert.Equal(kind, owned.Active);
+        Assert.False(owned.AtHome(kind));
+        Assert.False(owned.Owns(kind == PetKind.Cat ? PetKind.Dog : PetKind.Cat));
+        Assert.False(owned.Crow);
+        Assert.Equal(kind, bus.States[^1].Kind);
+        // It comes out beside the player, at once.
+        Assert.True(pet.Teleported);
+        Assert.InRange(Flat(pet.Position, _player.Position), 1f, 2.5f);
     }
 
     [Fact]
-    public void TheSettingPicksTheDog()
+    public void NoPetBeforeTheGameStarts()
     {
-        _pet.Starter = PetKind.Dog;
+        var pet = new PetModule();
+        var bus = new FakeBus();
+        pet.Start(bus);
+        Assert.False(pet.Started);
+        Assert.False(pet.Owned.Cat || pet.Owned.Dog || pet.Owned.Crow);
+        var start = pet.Position;
+        for (int i = 0; i < 60; i++)
+        {
+            bus.Publish(_player);
+            bus.Publish(Monster(1, Middle + new Vector3(1f, 0f, 0f)));
+            bus.Publish(new AdoptPet(PetKind.Crow));
+            bus.Publish(new SetActivePet(PetKind.Dog));
+            bus.Publish(new TeleportPlayer(OnGround(Middle), 0f));
+            pet.Tick(new TickContext(i, Step));
+        }
+        Assert.Empty(bus.States);
+        Assert.Empty(bus.Owned);
+        Assert.Empty(bus.Hits);
+        Assert.Equal(start, pet.Position);
+        Assert.False(pet.Owned.Cat || pet.Owned.Dog || pet.Owned.Crow);
+
+        // Then the start screen's choice comes: only it is owned.
+        bus.Publish(new GameStart(GameStart.Girl, GameStart.Dog));
+        pet.Tick(new TickContext(60, Step));
+        Assert.Equal(new OwnedPets(false, true, false, PetKind.Dog), bus.Owned[^1]);
+        Assert.Single(bus.States);
+    }
+
+    [Fact]
+    public void OnlyTheFirstGameStartCounts()
+    {
+        _bus.Publish(new GameStart(GameStart.Girl, GameStart.Dog));
         TickOnce();
-        Assert.Equal(PetKind.Dog, _bus.States[^1].Kind);
-        Assert.Equal(PetKind.Dog, _bus.Owned[^1].Active);
+        Assert.Equal(new OwnedPets(true, false, false, PetKind.Cat), _bus.Owned[^1]);
+    }
+
+    [Fact]
+    public void AnUnknownStarterIsTheCat()
+    {
+        var pet = new PetModule();
+        pet.Start(new FakeBus());
+        pet.Handle(new GameStart(GameStart.Girl, 7));
+        Assert.Equal(new OwnedPets(true, false, false, PetKind.Cat), pet.Owned);
     }
 
     [Fact]
     public void WaitsBesideTheHomeDoorBeforeThePlayerIsKnown()
     {
         var pet = new PetModule();
+        pet.Start(new NullBus());
+        pet.Handle(new GameStart(GameStart.Girl, GameStart.Cat));
         var door = Places.HomeDoor.Position;
         Assert.InRange(Flat(pet.Position, door), 1f, 5f);
         Assert.True(Areas.Walkable(pet.Position.X, pet.Position.Z, PetModule.Radius));
@@ -162,6 +222,7 @@ public class PetModuleTests
         var pet = new PetModule();
         var bus = new FakeBus();
         pet.Start(bus);
+        bus.Publish(new GameStart(GameStart.Girl, GameStart.Cat));
         var start = pet.Position;
         for (int i = 0; i < 60; i++)
             pet.Tick(new TickContext(i, Step));
@@ -606,9 +667,6 @@ public class PetModuleTests
         Assert.False(owned.Dog);
         Assert.False(owned.Crow);
         Assert.Equal(PetKind.Cat, owned.Active);
-
-        var pet = new PetModule { Starter = PetKind.Dog };
-        Assert.Equal(new OwnedPets(false, true, false, PetKind.Dog), pet.Owned);
     }
 
     [Fact]
@@ -777,7 +835,7 @@ public class PetModuleTests
     {
         _pet.PlaceAt(Middle + new Vector3(6f, 0f, 0f));
         Run(2.0, () => Assert.Equal(0f, Height, 3));
-        _pet.Starter = PetKind.Dog;
+        _bus.Publish(new AdoptPet(PetKind.Dog));
         Run(2.0, () => Assert.Equal(0f, Height, 3));
     }
 
@@ -890,8 +948,11 @@ public class PetModuleTests
     [InlineData(PetKind.Crow)]
     public void DoesNotAllocatePerTick(PetKind kind)
     {
-        var pet = new PetModule { Starter = kind };
+        var pet = new PetModule();
         pet.Start(new NullBus());
+        pet.Handle(new GameStart(GameStart.Girl, GameStart.Cat));
+        if (kind != PetKind.Cat)
+            pet.Handle(new AdoptPet(kind));
         var player = PlayerAt(Middle);
         var monsters = new MonsterState[12];
         for (int i = 0; i < monsters.Length; i++)
