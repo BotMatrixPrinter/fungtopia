@@ -5,6 +5,8 @@
 # Shapes are built in Godot's axes (meters, Y up, -Z forward) and converted for the glTF export.
 # Every object is a unit shape the game scales per instance (MultiMesh), no eyes or faces:
 #   Stem    an old gnarled giant mushroom stem: radius 1 (flaring to ~1.45 at the foot), height 1.
+#   Skirt   a giant stem's root flare: radius 1 at its top (y = 1), widening with root buttresses to
+#           about 1.18 at its foot (y = 0); the game sinks its foot into the ground.
 #   Cap     a broad old cap with a wavy, drooping rim: radius 1, top at y = 1, rim near y = 0;
 #           UV.y is 1 on the top, 0 on the gills underneath.
 #   Shelf   a bracket fungus shelf sticking out along +X from a stem's surface, about 1 m wide.
@@ -144,6 +146,24 @@ def stem():
     return b.build("Stem", (0.45, 0.38, 0.4))
 
 
+def skirt():
+    b = Builder()
+    rows = 8
+    profile = [(0.0, 1.0, 1.0)]
+    for k in range(rows + 1):
+        t = 1.0 - k / rows  # 1 at the top, 0 at the foot
+        profile.append((1.0 + 0.12 * (1.0 - t) ** 2, t, t))
+    profile.append((0.0, 0.0, 0.0))
+
+    def buttress(a, y, r):
+        # Root buttresses fanning into the ground: lobes that bulge more the lower they are.
+        lobes = max(0.0, math.cos(7.0 * a + 0.6 * math.sin(3.0 * a))) ** 2
+        return r * (1.0 + 0.06 * (1.0 - y) ** 1.5 * lobes - 0.015 * y)
+
+    b.lathe(profile, 28, buttress)
+    return b.build("Skirt", (0.42, 0.33, 0.32))
+
+
 def cap():
     b = Builder()
     profile = [(0.0, 1.0, 1.0)]
@@ -277,7 +297,7 @@ def fern():
 
 def main():
     bpy.ops.wm.read_factory_settings(use_empty=True)
-    for make in (stem, cap, shelf, glow, web, root, fern):
+    for make in (stem, skirt, cap, shelf, glow, web, root, fern):
         make()
     out = os.path.join(HERE, "deep_forest.glb")
     bpy.ops.export_scene.gltf(filepath=out, export_format="GLB", export_apply=True,

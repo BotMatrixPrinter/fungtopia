@@ -78,11 +78,10 @@ public class DeepForestTests
             Assert.Equal(o, stems[i].Owner);
             Assert.Equal(c.X, stems[i].Position.X);
             Assert.Equal(c.Z, stems[i].Position.Z);
-            // The stem's radius is the obstacle's, its foot sunk a little into the ground.
+            // The stem's radius is the obstacle's, its foot planted under its whole flared footprint.
             Assert.Equal(c.Radius, stems[i].Scale.X);
             Assert.Equal(c.Radius, stems[i].Scale.Z);
-            float ground = Ground.HeightAt(c.X, c.Z);
-            Assert.InRange(stems[i].Position.Y, ground - 1f, ground);
+            AssertPlanted(stems[i].Position, c.Radius * DeepForestScenery.FootRadius, DeepForestScenery.BaseSink);
             // Huge and old: well over the player's head, caps far wider than the stem.
             Assert.InRange(stems[i].Scale.Y, 12f, 30f);
             Assert.Equal(o, caps[i].Owner);
@@ -96,7 +95,7 @@ public class DeepForestTests
     public void NoGiantMushroomOrStemPropStandsOutsideTheMapsObstacles()
     {
         // Everything that is part of a giant mushroom grows from one of the Deep Forest's obstacle circles.
-        foreach (var kind in new[] { PropKind.GiantStem, PropKind.GiantCap, PropKind.BranchStem, PropKind.Shelf, PropKind.Root })
+        foreach (var kind in new[] { PropKind.GiantStem, PropKind.Skirt, PropKind.GiantCap, PropKind.BranchStem, PropKind.Shelf, PropKind.Root })
         {
             foreach (var p in Scenery.Of(kind))
             {
@@ -111,6 +110,130 @@ public class DeepForestTests
         // Branch caps sit at the tip of their own trunk's side stems, high in the canopy.
         foreach (var p in Scenery.Of(PropKind.BranchCap))
             Assert.True(p.Position.Y - Ground.HeightAt(p.Position.X, p.Position.Z) > 6f, $"branch cap at {p.Position} is too low");
+    }
+
+    // ---- Planted on the uneven ground: no base floats where the ground drops away
+
+    /// <summary>The lowest and highest ground on a dense check of a round footprint (the center, 48 points on each of 6 rings).</summary>
+    private static (float Low, float High) DenseGround(float x, float z, float radius)
+    {
+        float low = Ground.HeightAt(x, z), high = low;
+        for (int ring = 1; ring <= 6; ring++)
+        for (int i = 0; i < 48; i++)
+        {
+            float a = i * MathF.Tau / 48f, d = radius * ring / 6f;
+            float h = Ground.HeightAt(x + d * MathF.Cos(a), z + d * MathF.Sin(a));
+            low = MathF.Min(low, h);
+            high = MathF.Max(high, h);
+        }
+        return (low, high);
+    }
+
+    /// <summary>A base at <paramref name="at"/> is at or below the ground everywhere under a foot of <paramref name="radius"/>, and at most about 0.3 m below its lowest point.</summary>
+    private static void AssertPlanted(Vector3 at, float radius, float sink)
+    {
+        var (low, _) = DenseGround(at.X, at.Z, radius);
+        Assert.True(at.Y <= low, $"base at {at} (radius {radius}) floats {at.Y - low:F3} m over the ground under its foot");
+        Assert.True(at.Y >= low - 0.3f, $"base at {at} (radius {radius}) is {low - at.Y:F3} m under the lowest ground of its foot");
+        Assert.True(at.Y <= low - sink * 0.5f, $"base at {at} (radius {radius}) is barely in the ground");
+    }
+
+    [Fact]
+    public void BaseHeightIsUnderTheWholeFootprintAndOnlyALittleUnderItsLowestPoint()
+    {
+        // Many spots over the Deep Forest's rough ground, its path and the slopes toward its cliffs, small feet and giant ones.
+        int sloped = 0;
+        var b = DeepForestLayout.Bounds;
+        for (int k = 0; k < 600; k++)
+        {
+            float x = b.MinX - 4f + (b.MaxX - b.MinX + 20f) * DeepForestScenery.Rand(k, 900);
+            float z = b.MinZ - 4f + (b.MaxZ - b.MinZ + 8f) * DeepForestScenery.Rand(k, 901);
+            float radius = k % 3 == 0 ? 0.1f + 0.3f * DeepForestScenery.Rand(k, 902) : 1.3f * (1f + DeepForestScenery.Rand(k, 903) * 2f) * DeepForestScenery.FootRadius;
+            var (low, high) = DeepForestScenery.GroundUnder(x, z, radius);
+            Assert.True(low <= high);
+            Assert.True(low <= Ground.HeightAt(x, z) && high >= Ground.HeightAt(x, z));
+            float baseY = DeepForestScenery.BaseHeight(x, z, radius);
+            Assert.Equal(low - DeepForestScenery.BaseSink, baseY);
+            AssertPlanted(new Vector3(x, baseY, z), radius, DeepForestScenery.BaseSink);
+            Assert.True(high - baseY < high - DenseGround(x, z, radius).Low + 0.3f);
+            if (high - low > 0.3f)
+                sloped++;
+        }
+        Assert.True(sloped > 50, $"only {sloped} sloped footprints sampled");
+        // The sink is about 0.1-0.2 m.
+        Assert.InRange(DeepForestScenery.BaseSink, 0.1f, 0.2f);
+        Assert.InRange(DeepForestScenery.SmallSink, 0.1f, 0.2f);
+    }
+
+    [Fact]
+    public void GiantStemsAreExtendedDownBySlopeAndFlaredIntoTheGround()
+    {
+        var stems = Scenery.Of(PropKind.GiantStem);
+        var caps = Scenery.Of(PropKind.GiantCap);
+        var skirts = Scenery.Of(PropKind.Skirt);
+        Assert.Equal(stems.Length, skirts.Length);
+        int sloped = 0;
+        for (int i = 0; i < stems.Length; i++)
+        {
+            var s = stems[i];
+            var c = Ground.Obstacles[s.Owner];
+            var (low, high) = DenseGround(c.X, c.Z, c.Radius * DeepForestScenery.FootRadius);
+            if (high - low > 0.3f)
+                sloped++;
+            // Still well over the high side: the stem's top (and its cap) never sink because the foot went down.
+            float top = s.Position.Y + s.Scale.Y;
+            Assert.True(top - high >= 10f + 3f * c.Radius - 0.05f, $"stem {i} stands only {top - high:F2} m over its high side");
+            Assert.True(caps[i].Position.Y + caps[i].Scale.Y * 0.5f > high + 8f, $"cap {i} sinks");
+            // Its skirt: from the same base, reaching over the high side, wider at the foot than the stem's radius, its top inside the stem.
+            var k = skirts[i];
+            Assert.Equal(s.Owner, k.Owner);
+            Assert.Equal(s.Position, k.Position);
+            Assert.True(k.Position.Y + k.Scale.Y > high + 0.5f, $"skirt {i} is buried");
+            Assert.True(k.Scale.Y < 3f + (high - low) + 0.5f, $"skirt {i} is {k.Scale.Y} m tall");
+            float flareTop = k.Scale.X, stemThere = c.Radius * DeepForestScenery.StemProfile(k.Scale.Y / s.Scale.Y);
+            Assert.InRange(flareTop, stemThere * 0.9f, stemThere);
+            Assert.True(flareTop * 1.12f > c.Radius * 1.3f, $"skirt {i} does not flare");
+        }
+        Assert.True(sloped > stems.Length / 4, $"only {sloped} giant stems on sloped ground");
+    }
+
+    [Fact]
+    public void RootsLieInTheGroundAlongTheirWholeLength()
+    {
+        Assert.True(Scenery.Of(PropKind.Root).Length > 0);
+        foreach (var p in Scenery.Of(PropKind.Root))
+        {
+            // The root's line in the world: from its position along its turned +X, length Scale.X.
+            var along = Vector3.Transform(Vector3.UnitX, p.Rotation);
+            var flat = Vector3.Normalize(new Vector3(along.X, 0f, along.Z));
+            float length = p.Scale.X;
+            for (int i = 0; i <= 20; i++)
+            {
+                var q = p.Position + along * (length * i / 20f);
+                Assert.True(q.Y <= Ground.HeightAt(q.X, q.Z) + 0.01f, $"root at {p.Position} floats at {q}");
+                var side = new Vector3(-flat.Z, 0f, flat.X) * (0.26f * p.Scale.Y);
+                Assert.True(q.Y <= Ground.HeightAt(q.X + side.X, q.Z + side.Z) + 0.03f, $"root at {p.Position} floats beside {q}");
+                Assert.True(q.Y <= Ground.HeightAt(q.X - side.X, q.Z - side.Z) + 0.03f, $"root at {p.Position} floats beside {q}");
+            }
+            Assert.True(p.Position.Y >= Ground.HeightAt(p.Position.X, p.Position.Z) - 0.8f, $"root at {p.Position} is buried");
+        }
+    }
+
+    [Fact]
+    public void SmallPropsKeepTheirHeightAboveTheHighSide()
+    {
+        foreach (var p in Scenery.Of(PropKind.Toadstool))
+        {
+            var (_, high) = DeepForestScenery.GroundUnder(p.Position.X, p.Position.Z, p.Scale.X * DeepForestScenery.ToadstoolFoot);
+            float stemTop = p.Position.Y + DeepForestScenery.ToadstoolStem * p.Scale.Y;
+            Assert.True(MathF.Abs(stemTop - high - DeepForestScenery.ToadstoolStem * p.Scale.X) < 0.001f, $"toadstool at {p.Position}");
+        }
+        foreach (var p in Scenery.Of(PropKind.Glow))
+        {
+            var (_, high) = DeepForestScenery.GroundUnder(p.Position.X, p.Position.Z, p.Scale.X * DeepForestScenery.GlowFoot);
+            float top = p.Position.Y + DeepForestScenery.GlowHeight * p.Scale.Y;
+            Assert.True(MathF.Abs(top - high - DeepForestScenery.GlowHeight * p.Scale.X) < 0.001f, $"glowing mushroom at {p.Position}");
+        }
     }
 
     // ---- Everything inside the area
@@ -143,7 +266,13 @@ public class DeepForestTests
             {
                 float x = p.Position.X, z = p.Position.Z;
                 Assert.Equal(-1, p.Owner);
-                Assert.InRange(p.Position.Y, Ground.HeightAt(x, z) - 0.1f, Ground.HeightAt(x, z));
+                float foot = kind switch
+                {
+                    PropKind.Glow => DeepForestScenery.GlowFoot,
+                    PropKind.Toadstool => DeepForestScenery.ToadstoolFoot,
+                    _ => DeepForestScenery.FernFoot,
+                } * p.Scale.X;
+                AssertPlanted(p.Position, foot, DeepForestScenery.SmallSink);
                 Assert.False(Ground.Blocks(x, z, DeepForestScenery.StemClearance), $"{kind} at {p.Position} is inside a stem");
                 if (Areas.DeepForestPath.Contains(x, z))
                     Assert.True(MathF.Abs(z) >= DeepForestScenery.PathClearHalfWidth, $"{kind} at {p.Position} blocks the path's middle");

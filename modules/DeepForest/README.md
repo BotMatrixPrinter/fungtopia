@@ -38,9 +38,19 @@ props of each kind (`Prop`: `Position`, `Rotation`, `Scale` for the unit models,
 `Glow`, `Owner`, the index in `Map.Ground.Obstacles` of the giant mushroom it grows on or -1),
 `Fog` (`FogPatch`: box or ellipsoid, center, size, density) and `Lights` (`GlowLight`).
 
-- `GiantStem`, `GiantCap`: one per Deep Forest obstacle (the last `Ground.DeepForestTrunkCount`
-  circles), in order, the stem exactly the circle (radius, center), 12-30 m tall, the cap 2.5-4.4
-  times the stem's radius plus 2 m.
+- `GiantStem`, `GiantCap`, `Skirt`: one per Deep Forest obstacle (the last `Ground.DeepForestTrunkCount`
+  circles), in order, the stem exactly the circle (radius, center), 12-30 m tall over the high side
+  of its foot, the cap 2.5-4.4 times the stem's radius plus 2 m; the skirt is its root flare, from
+  the stem's base to a little over the high side, widening into the ground.
+- Planting: everything standing on the uneven ground has its base at `BaseHeight(x, z, radius,
+  sink)`: the lowest `Ground.HeightAt` under its round footprint (`GroundUnder`: the center and
+  rings out to the rim, samples at most `FootprintSpacing` 0.5 m apart) minus a sink (`BaseSink`
+  0.15 m for giant stems, skirts and roots, `SmallSink` 0.1 m for glowing mushrooms, toadstools and
+  ferns), so no base floats where the ground drops away. Giant stems' footprints are `FootRadius`
+  (1.7) stem radii (their flared foot); stems, glowing mushrooms and toadstools are extended down by
+  the drop (`Scale.Y`) so their height over the high side stays the same, and caps, side stems,
+  shelves and webs hang off the high side. Roots (`PlantRoot`) are pitched to follow the ground
+  from start to tip and lowered until their whole length is in it.
 - `BranchStem`, `BranchCap`: one to four side stems leaning out from high on each giant stem, each
   with a cap: the lower canopy. Deep inside at least 85% of the ground is under a cap; at the
   entrance much less.
@@ -49,7 +59,8 @@ props of each kind (`Prop`: `Position`, `Rotation`, `Scale` for the unit models,
   sometimes a low one between the roots); never on a monster spawn spot.
 - `Glow`, `Toadstool`, `Fern`: on the open ground only (`OpenGround`: in the area, at least
   `StemClearance` 0.3 m off every obstacle, and off the path's middle, `PathClearHalfWidth` 1.4 m
-  each side), standing on `Ground.HeightAt`. Glowing mushrooms huddle at some stem feet and in
+  each side), planted on `Ground.HeightAt` (footprints `GlowFoot`, `ToadstoolFoot`, `FernFoot` times
+  their scale; a toadstool's stem is `ToadstoolStem * Scale.Y` tall). Glowing mushrooms huddle at some stem feet and in
   clusters on the ground and the path's edges; ferns are thickest along the path and at the
   entrance.
 - `Spore`, `Mist`: billboards 0.3-6.5 m above the ground; spores gather near glowing clusters,
@@ -63,8 +74,8 @@ props of each kind (`Prop`: `Position`, `Rotation`, `Scale` for the unit models,
 
 `DeepForestView` loads `Models/deep_forest.glb` at run time with `GltfDocument` from the file's
 bytes (so a fresh checkout runs without an editor import) and draws each kind as one
-`MultiMeshInstance3D` from its unit mesh (`Stem`, `Cap`, `Shelf`, `Glow`, `Web`, `Root`, `Fern`;
-spores and mist are quads); toadstools reuse the stem and cap meshes. Stems, caps, shelves,
+`MultiMeshInstance3D` from its unit mesh (`Stem`, `Skirt`, `Cap`, `Shelf`, `Glow`, `Web`, `Root`, `Fern`;
+spores and mist are quads); toadstools reuse the stem and cap meshes. Stems, skirts, caps, shelves,
 roots and glowing mushrooms have ink outlines; stems, caps, shelves and roots cast shadows. Its
 own props take less ambient light the deeper in the gloom (`DeepForestGloom`'s ramp in the
 shaders). The fog is `FogVolume` nodes with a lavender `FogMaterial`: DayNight turns volumetric
@@ -74,7 +85,8 @@ and its low roots are the Map's; sun, sky and environment are DayNight's.
 
 ## Screenshots
 
-`DEEPFOREST_PREVIEW=inside` (deep in, at a spawn clearing) or `DEEPFOREST_PREVIEW=entrance` (on
-the path at the forest's west gap, looking in) makes a preview camera current and hides the
+`DEEPFOREST_PREVIEW=inside` (deep in, at a spawn clearing), `DEEPFOREST_PREVIEW=entrance` (on
+the path at the forest's west gap, looking in) or `DEEPFOREST_PREVIEW=foot` (close to the foot of the
+giant stem on the most sloped ground, from its low side) makes a preview camera current and hides the
 screens drawn over the world, for example
 `DEEPFOREST_PREVIEW=inside DAYNIGHT_HOUR=12 ./screenshot.sh "" deepforest_inside.png`.

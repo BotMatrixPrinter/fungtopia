@@ -154,12 +154,18 @@ public partial class DeepForestView : Node3D, IModuleView
         {
             var t = Placed(p);
             float s = p.Scale.X;
-            var stemBasis = t.Basis.Orthonormalized() * Basis.FromScale(new Godot.Vector3(0.055f, 0.42f, 0.055f) * s);
+            // Its stem is ToadstoolStem * Scale.Y tall: reaching down to its base where the ground drops away.
+            float stem = DeepForestScenery.ToadstoolStem * p.Scale.Y;
+            var stemBasis = t.Basis.Orthonormalized() * Basis.FromScale(new Godot.Vector3(0.055f * s, stem, 0.055f * s));
             stems.Add(new Transform3D(stemBasis, t.Origin), new Color(0.62f, 0.58f, 0.56f));
             var capBasis = t.Basis.Orthonormalized() * Basis.FromScale(new Godot.Vector3(0.24f, 0.16f, 0.24f) * s);
-            caps.Add(new Transform3D(capBasis, t.Origin + Godot.Vector3.Up * (0.42f * s - 0.03f * s)), C(p.Color), new Color(p.Seed, 0.8f, 0f, 0f));
+            caps.Add(new Transform3D(capBasis, t.Origin + Godot.Vector3.Up * (stem - 0.03f * s)), C(p.Color), new Color(p.Seed, 0.8f, 0f, 0f));
         }
         AddChild(stems.Build("Stems", MeshOf(meshes, "Stem"), Material("toon_color.gdshader", outline: true)));
+        var skirts = new Instances();
+        foreach (var p in scenery.Of(PropKind.Skirt))
+            skirts.Add(Placed(p), C(p.Color));
+        AddChild(skirts.Build("Skirts", MeshOf(meshes, "Skirt"), Material("toon_color.gdshader", outline: true)));
         AddChild(caps.Build("Caps", MeshOf(meshes, "Cap"), Material("cap.gdshader", outline: true)));
     }
 
@@ -250,6 +256,10 @@ public partial class DeepForestView : Node3D, IModuleView
                 eye = OnGround(-90f, 1.5f) + Godot.Vector3.Up * 2.2f;
                 target = OnGround(-130f, -2f) + Godot.Vector3.Up * 3f;
                 break;
+            case "foot":
+                // Close to the foot of the giant stem on the most sloped ground, from its low side.
+                (eye, target) = SlopedFootView();
+                break;
             default:
                 return;
         }
@@ -257,6 +267,34 @@ public partial class DeepForestView : Node3D, IModuleView
         AddChild(_preview);
         _preview.LookAtFromPosition(eye, target, Godot.Vector3.Up);
         _preview.MakeCurrent();
+    }
+
+    private (Godot.Vector3 Eye, Godot.Vector3 Target) SlopedFootView()
+    {
+        var obstacles = Ground.Obstacles;
+        float best = -1f;
+        Godot.Vector3 eye = default, target = default;
+        foreach (var s in (_module?.Scenery ?? DeepForestScenery.Create()).Of(PropKind.GiantStem))
+        {
+            var c = obstacles[s.Owner];
+            float reach = c.Radius * DeepForestScenery.FootRadius;
+            // The lowest side of the foot: look up the slope at it from a few meters beyond.
+            float lowA = 0f, lowH = float.MaxValue, highH = float.MinValue;
+            for (int i = 0; i < 16; i++)
+            {
+                float a = i * Mathf.Tau / 16f, h = Ground.HeightAt(c.X + reach * MathF.Cos(a), c.Z + reach * MathF.Sin(a));
+                if (h < lowH)
+                    (lowH, lowA) = (h, a);
+                highH = MathF.Max(highH, h);
+            }
+            float ex = c.X + (reach + 5f) * MathF.Cos(lowA), ez = c.Z + (reach + 5f) * MathF.Sin(lowA);
+            if (highH - lowH <= best || !DeepForestGloom.InArea(ex, ez, 1f) || Ground.Blocks(ex, ez, 0.5f))
+                continue;
+            best = highH - lowH;
+            eye = OnGround(ex, ez) + Godot.Vector3.Up * 1.6f;
+            target = OnGround(c.X, c.Z) + Godot.Vector3.Up * 1.2f;
+        }
+        return (eye, target);
     }
 
     private static Godot.Vector3 OnGround(float x, float z) => new(x, Ground.HeightAt(x, z), z);
