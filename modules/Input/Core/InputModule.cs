@@ -9,7 +9,7 @@ namespace Fungtopia.Input;
 /// <see cref="PlayerInput"/> per tick. Mouse look and jump, interact and map presses that arrive between ticks
 /// are gathered and handed out once, on the next tick.
 /// </summary>
-public sealed class InputModule : IModule
+public sealed class InputModule : IModule, IMessageHandler<UiFocus>
 {
     /// <summary>Stick deflection below this is ignored; the rest is rescaled to 0..1.</summary>
     public float StickDeadZone { get; set; } = 0.2f;
@@ -36,6 +36,8 @@ public sealed class InputModule : IModule
     private bool _hasAim;
     private Vector3 _aim;
     private Vector3 _aimOrigin;
+    private int[] _openOwners = new int[8];
+    private int _openCount;
 
     /// <summary>The input published on the latest tick.</summary>
     public PlayerInput Latest { get; private set; }
@@ -44,6 +46,30 @@ public sealed class InputModule : IModule
     {
         ArgumentNullException.ThrowIfNull(bus);
         _bus = bus;
+        bus.Subscribe<UiFocus>(this);
+    }
+
+    /// <summary>True while at least one <see cref="UiFocus"/> owner is open.</summary>
+    public bool MenuOpen => _openCount > 0;
+
+    /// <summary>
+    /// Tracks open menus per owner: opening an owner already open, or closing one not open, changes nothing.
+    /// </summary>
+    public void Handle(in UiFocus message)
+    {
+        int index = Array.IndexOf(_openOwners, message.Owner, 0, _openCount);
+        if (message.Open)
+        {
+            if (index >= 0)
+                return;
+            if (_openCount == _openOwners.Length)
+                Array.Resize(ref _openOwners, _openOwners.Length * 2);
+            _openOwners[_openCount++] = message.Owner;
+        }
+        else if (index >= 0)
+        {
+            _openOwners[index] = _openOwners[--_openCount];
+        }
     }
 
     /// <summary>Keyboard move: x right, y forward, each -1, 0 or 1 (for example from WASD).</summary>
@@ -112,8 +138,16 @@ public sealed class InputModule : IModule
         move = ClampLength(move);
         Vector2 look = _mouseLook + ApplyDeadZone(_lookStick, StickDeadZone) * (StickLookRadiansPerSecond * (float)context.StepSeconds);
         bool fire = _fireButton || _fireTrigger >= TriggerThreshold;
+        bool jump = _jumpPressed;
+        if (MenuOpen)
+        {
+            move = Vector2.Zero;
+            look = Vector2.Zero;
+            jump = false;
+            fire = false;
+        }
 
-        Latest = new PlayerInput(move, look, _jumpPressed, fire, _hasAim, _aim, _interactPressed, _openMapPressed, _aimOrigin);
+        Latest = new PlayerInput(move, look, jump, fire, _hasAim, _aim, _interactPressed, _openMapPressed, _aimOrigin);
         _mouseLook = Vector2.Zero;
         _jumpPressed = false;
         _interactPressed = false;

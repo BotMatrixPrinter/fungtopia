@@ -10,21 +10,34 @@ public class InputModuleTests
 {
     private const double Step = 1.0 / 60;
 
-    /// <summary>Fake of the shell's bus: records every PlayerInput published.</summary>
+    /// <summary>
+    /// Fake of the shell's bus: records every PlayerInput published and delivers UiFocus to its
+    /// subscribers.
+    /// </summary>
     private sealed class FakeBus : IMessageBus
     {
         public readonly List<PlayerInput> Published = new();
+        public readonly List<IMessageHandler<UiFocus>> FocusHandlers = new();
         public int OtherMessages;
 
-        public void Subscribe<T>(IMessageHandler<T> handler) where T : struct { }
+        public void Subscribe<T>(IMessageHandler<T> handler) where T : struct
+        {
+            if (handler is IMessageHandler<UiFocus> focus)
+                FocusHandlers.Add(focus);
+        }
 
         public void Publish<T>(in T message) where T : struct
         {
             if (message is PlayerInput input)
                 Published.Add(input);
+            else if (message is UiFocus focus)
+                foreach (var handler in FocusHandlers)
+                    handler.Handle(focus);
             else
                 OtherMessages++;
         }
+
+        public void Focus(int owner, bool open) => Publish(new UiFocus(owner, open));
     }
 
     private static InputModule Started(FakeBus bus)
@@ -499,5 +512,161 @@ public class InputModuleTests
     {
         public void Subscribe<T>(IMessageHandler<T> handler) where T : struct { }
         public void Publish<T>(in T message) where T : struct { }
+    }
+
+    // --- UiFocus: open menus take the controls away from walking ---
+
+    private const int ShopMenu = 101;
+    private const int Dialogue = 202;
+
+    /// <summary>Holds every input and presses every button, then ticks once.</summary>
+    private static PlayerInput TickWithEverything(InputModule input, FakeBus bus)
+    {
+        input.SetKeyboardMove(new Vector2(0, 1));
+        input.SetLookStick(new Vector2(1, 0));
+        input.AddMouseMotion(new Vector2(10, 0));
+        input.SetFireButton(true);
+        input.PressJump();
+        input.PressInteract();
+        input.PressOpenMap();
+        return TickOnce(input, bus);
+    }
+
+    private static void AssertSuppressed(PlayerInput msg)
+    {
+        Assert.Equal(Vector2.Zero, msg.Move);
+        Assert.Equal(Vector2.Zero, msg.Look);
+        Assert.False(msg.Jump);
+        Assert.False(msg.Fire);
+        Assert.True(msg.Interact);
+        Assert.True(msg.OpenMap);
+    }
+
+    private static void AssertLive(PlayerInput msg)
+    {
+        AssertNear(new Vector2(0, 1), msg.Move);
+        Assert.True(msg.Look.X > 0);
+        Assert.True(msg.Jump);
+        Assert.True(msg.Fire);
+        Assert.True(msg.Interact);
+        Assert.True(msg.OpenMap);
+    }
+
+    [Fact]
+    public void SubscribesToUiFocusOnStart()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        Assert.Contains(input, bus.FocusHandlers);
+    }
+
+    [Fact]
+    public void NoMenuOpenLeavesInputsAsTheyAre()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        Assert.False(input.MenuOpen);
+        AssertLive(TickWithEverything(input, bus));
+    }
+
+    [Fact]
+    public void OneOpenMenuSuppressesMovementButNotInteractOrMap()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        bus.Focus(ShopMenu, true);
+        Assert.True(input.MenuOpen);
+        var msg = TickWithEverything(input, bus);
+        AssertSuppressed(msg);
+        Assert.Equal(msg.Move, input.Latest.Move);
+    }
+
+    [Fact]
+    public void ClosingTheMenuGivesTheControlsBack()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        bus.Focus(ShopMenu, true);
+        AssertSuppressed(TickWithEverything(input, bus));
+        bus.Focus(ShopMenu, false);
+        Assert.False(input.MenuOpen);
+        AssertLive(TickWithEverything(input, bus));
+    }
+
+    [Fact]
+    public void JumpPressedWhileMenuOpenIsNotReportedAfterItCloses()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        bus.Focus(ShopMenu, true);
+        input.PressJump();
+        Assert.False(TickOnce(input, bus).Jump);
+        bus.Focus(ShopMenu, false);
+        Assert.False(TickOnce(input, bus).Jump);
+    }
+
+    [Fact]
+    public void TwoMenusStaySuppressedUntilBothClose()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        bus.Focus(ShopMenu, true);
+        bus.Focus(Dialogue, true);
+        AssertSuppressed(TickWithEverything(input, bus));
+        bus.Focus(ShopMenu, false);
+        AssertSuppressed(TickWithEverything(input, bus));
+        bus.Focus(Dialogue, false);
+        AssertLive(TickWithEverything(input, bus));
+    }
+
+    [Fact]
+    public void TwoMenusCanCloseInEitherOrder()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        bus.Focus(ShopMenu, true);
+        bus.Focus(Dialogue, true);
+        bus.Focus(Dialogue, false);
+        AssertSuppressed(TickWithEverything(input, bus));
+        bus.Focus(ShopMenu, false);
+        AssertLive(TickWithEverything(input, bus));
+    }
+
+    [Fact]
+    public void AnOwnerThatOpensTwiceNeedsOneClose()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        bus.Focus(ShopMenu, true);
+        bus.Focus(ShopMenu, true);
+        AssertSuppressed(TickWithEverything(input, bus));
+        bus.Focus(ShopMenu, false);
+        AssertLive(TickWithEverything(input, bus));
+    }
+
+    [Fact]
+    public void ClosingAnOwnerThatIsNotOpenChangesNothing()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        bus.Focus(Dialogue, false);
+        AssertLive(TickWithEverything(input, bus));
+        bus.Focus(ShopMenu, true);
+        bus.Focus(Dialogue, false);
+        AssertSuppressed(TickWithEverything(input, bus));
+    }
+
+    [Fact]
+    public void ManyMenusOpenAtOnceAllNeedClosing()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        for (int owner = 0; owner < 20; owner++)
+            bus.Focus(owner, true);
+        for (int owner = 0; owner < 19; owner++)
+            bus.Focus(owner, false);
+        AssertSuppressed(TickWithEverything(input, bus));
+        bus.Focus(19, false);
+        AssertLive(TickWithEverything(input, bus));
     }
 }

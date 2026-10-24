@@ -18,9 +18,16 @@ Other modules (player, camera, bow) read it from the bus.
   - `AimOrigin`: the world-space start of that ray, the current 3D camera's position, published with
     `AimDirection` (zero when `HasAim` is false). The nine-argument constructor sets it; the older
     constructors leave it zero.
+- `Contract/` also has `UiFocus` (`int Owner`, `bool Open`): a module publishes `Open` true while one
+  of its menus is open and false when it closes (`Owner` is any number unique to that menu, for
+  example a hash of its name). While any owner is open, `PlayerInput` has `Move` and `Look` zero and
+  `Jump` and `Fire` false; `Interact` and `OpenMap` are still reported, so menus and dialogue can use
+  them. Owners are tracked one by one: an owner that opens twice needs one close, closing an owner
+  that is not open changes nothing, and the controls come back when the last open owner closes.
 - `Core/`: `Fungtopia.Input.Core`, `InputModule`. It keeps the latest device state its view
   reports. Mouse motion and jump, interact and map presses that arrive between ticks are added up and handed out
-  once. `SetAim(origin, direction)` takes the camera ray (a non-finite origin or a zero or
+  once (presses made while a menu is open are dropped, not saved for later). `MenuOpen` is true while
+  any `UiFocus` owner is open. `SetAim(origin, direction)` takes the camera ray (a non-finite origin or a zero or
   non-finite direction means no aim). Settings: `StickDeadZone` (0.2), `StickLookRadiansPerSecond` (3),
   `MouseRadiansPerPixel` (0.003), `TriggerThreshold` (0.5).
 - `Godot/`: `Main.tscn` with `InputView`, a full-screen `Control` that ignores the mouse. It
