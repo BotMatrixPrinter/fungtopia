@@ -8,26 +8,27 @@ using Fungtopia.Shell;
 namespace Fungtopia.Monsters;
 
 /// <summary>
-/// The mushroom monsters: keeps 6 caterpillars and 6 ants spread over Mushroom Forest, away from
-/// its entrances, and 4 tarantulas and 4 ladybugs at the Deep Forest's spawn spots
-/// (<see cref="DeepForestLayout.SpawnPoints"/>), each kind in its own area, on the world's
+/// The mushroom monsters: keeps 12 caterpillars and 12 ants spread over Mushroom Forest, away from
+/// its entrances, and 8 tarantulas and 8 ladybugs at the Deep Forest's spawn spots
+/// (<see cref="DeepForestLayout.SpawnPoints"/>) and, when those are taken, free spots between its
+/// trunks, each kind in its own area, on the world's
 /// <see cref="Ground"/> and around its obstacles. They wander slowly and chase the alive player
 /// within their <see cref="KindStats.ChaseRange"/>. Caterpillars and ants bite in
 /// <see cref="AttackReach"/> every <see cref="AttackInterval"/>; the tarantula crouches and
 /// pounces, the ladybug curls up and rolls into a charge that knocks the player back
 /// (<see cref="KnockBackPlayer"/>) and takes half damage from the front of its shell.
 /// <see cref="HitMonster"/> hurts them at once and poisons them; at 0 health they publish
-/// <see cref="MonsterKilled"/> once and a new one of the same kind comes <see cref="RespawnDelay"/>
-/// later somewhere free in its area, away from the player. Publishes one <see cref="MonsterState"/>
+/// <see cref="MonsterKilled"/> once and a new one of the same kind comes <see cref="RespawnDelayOf"/>
+/// later (8 s, hard ones 15 s) somewhere free in its area, away from the player. Publishes one <see cref="MonsterState"/>
 /// per monster every tick. Random choices come from <see cref="Seed"/>.
 /// </summary>
 public sealed class MonstersModule : IModule, IMessageHandler<PlayerState>, IMessageHandler<PetState>,
     IMessageHandler<HitMonster>
 {
-    public const int CaterpillarCount = 6;
-    public const int AntCount = 6;
-    public const int TarantulaCount = 4;
-    public const int LadybugCount = 4;
+    public const int CaterpillarCount = 12;
+    public const int AntCount = 12;
+    public const int TarantulaCount = 8;
+    public const int LadybugCount = 8;
     public const int NormalCount = CaterpillarCount + AntCount;
     public const int HardCount = TarantulaCount + LadybugCount;
     public const int Count = NormalCount + HardCount;
@@ -36,8 +37,10 @@ public sealed class MonstersModule : IModule, IMessageHandler<PlayerState>, IMes
     public const float AttackReach = 1.5f;
     /// <summary>Seconds between two bites of one monster.</summary>
     public const float AttackInterval = 1.2f;
-    /// <summary>Seconds from a defeat until a new monster of that kind appears.</summary>
-    public const float RespawnDelay = 20f;
+    /// <summary>Seconds from the defeat of a caterpillar or an ant until a new one appears.</summary>
+    public const float NormalRespawnDelay = 8f;
+    /// <summary>Seconds from the defeat of a tarantula or a ladybug until a new one appears.</summary>
+    public const float HardRespawnDelay = 15f;
     /// <summary>No caterpillar or ant ever appears closer than this to one of the forest's entrances.</summary>
     public const float SpawnAwayFromStart = 30f;
     /// <summary>A respawned monster appears at least this far from the player.</summary>
@@ -113,6 +116,10 @@ public sealed class MonstersModule : IModule, IMessageHandler<PlayerState>, IMes
             Home = home;
         }
     }
+
+    /// <summary>Seconds from a defeat of <paramref name="kind"/> until a new one appears.</summary>
+    public static float RespawnDelayOf(MonsterKind kind) =>
+        MonsterRewards.IsHard(kind) ? HardRespawnDelay : NormalRespawnDelay;
 
     public static KindStats StatsOf(MonsterKind kind) => kind switch
     {
@@ -278,7 +285,7 @@ public sealed class MonstersModule : IModule, IMessageHandler<PlayerState>, IMes
             if (!m.Alive)
             {
                 m.DeadSeconds += dt;
-                if (m.DeadSeconds >= RespawnDelay)
+                if (m.DeadSeconds >= RespawnDelayOf(m.Kind) - 1e-3f) // 1/60 s steps add up a hair short
                     Spawn(m, playerAt);
                 continue;
             }
@@ -641,17 +648,18 @@ public sealed class MonstersModule : IModule, IMessageHandler<PlayerState>, IMes
 
     /// <summary>
     /// Gives the slot a new monster of its kind at a free spot of its area, away from
-    /// <paramref name="avoid"/> (the player; NaN when there is none yet): caterpillars and ants
-    /// anywhere in the forest away from its entrances, tarantulas and ladybugs at one of the Deep
-    /// Forest's spawn spots.
+    /// <paramref name="avoid"/> (the player; NaN when there is none yet) and other monsters:
+    /// caterpillars and ants anywhere in the forest away from its entrances, tarantulas and
+    /// ladybugs at one of the Deep Forest's spawn spots or, when those are taken or too near the
+    /// player, anywhere free in the Deep Forest away from its entrance.
     /// </summary>
     private void Spawn(Monster m, Vector3 avoid)
     {
         var stats = StatsOf(m.Kind);
         float x = 0f, z = 0f;
         bool found = stats.Home == Area.DeepForest
-            ? SpawnSpot(m, avoid, out x, out z)
-            : ForestSpot(m, stats, avoid, out x, out z);
+            ? SpawnSpot(m, avoid, SpawnSpacing, out x, out z) || FreeSpot(m, stats, avoid, out x, out z)
+            : FreeSpot(m, stats, avoid, out x, out z);
         if (!found)
             return; // try again next tick (the area is never this full for long)
         m.Id = _nextId++;
@@ -674,52 +682,58 @@ public sealed class MonstersModule : IModule, IMessageHandler<PlayerState>, IMes
         m.Chasing = false;
     }
 
-    private bool ForestSpot(Monster m, in KindStats stats, Vector3 avoid, out float x, out float z)
+    /// <summary>
+    /// A random spot of the monster's area: walkable, clear of obstacles, away from the area's
+    /// entrances and the player, and <see cref="SpawnSpacing"/> from other monsters (relaxed after
+    /// many tries in a crowded area; in the Deep Forest a taken spawn spot is the last resort).
+    /// </summary>
+    private bool FreeSpot(Monster m, in KindStats stats, Vector3 avoid, out float x, out float z)
     {
-        var b = Areas.Forest;
+        var b = Areas.Bounds(stats.Home);
         float margin = EdgeMargin + 2f;
         x = z = 0f;
         for (int attempt = 0; attempt < 600; attempt++)
         {
             x = b.MinX + margin + _rng.NextFloat() * (b.MaxX - b.MinX - 2f * margin);
             z = b.MinZ + margin + _rng.NextFloat() * (b.MaxZ - b.MinZ - 2f * margin);
-            // After many tries in a crowded forest the wanted spacing gives way.
             float spacing = attempt < 300 ? SpawnSpacing : attempt < 500 ? SpawnSpacing * 0.5f : 0f;
             if (!Ground.Blocks(x, z, stats.Radius + 0.5f)
                 && Areas.Walkable(x, z, stats.Radius)
-                && AwayFromEntrances(x, z)
+                && Areas.At(x, z) == stats.Home
+                && AwayFromEntrances(stats.Home, x, z)
                 && !(HorizontalDistance(x, z, avoid) < SpawnAwayFromPlayer)
                 && !NearOtherMonster(m, x, z, spacing))
                 return true;
         }
-        return false;
+        return stats.Home == Area.DeepForest && SpawnSpot(m, avoid, 0f, out x, out z);
     }
 
-    private static bool AwayFromEntrances(float x, float z)
+    private static bool AwayFromEntrances(Area home, float x, float z)
     {
+        if (home == Area.DeepForest)
+            return Vector2.Distance(new Vector2(x, z), DeepForestLayout.Entrance) >= DeepForestLayout.SpawnMinEntranceDistance;
         foreach (var e in s_forestEntrances)
             if (Vector2.Distance(new Vector2(x, z), e) < SpawnAwayFromStart)
                 return false;
         return true;
     }
 
-    /// <summary>A Deep Forest spawn spot away from the player and, if possible, from other monsters (tried from a random one).</summary>
-    private bool SpawnSpot(Monster m, Vector3 avoid, out float x, out float z)
+    /// <summary>
+    /// A Deep Forest spawn spot away from the player and <paramref name="spacing"/> from other
+    /// monsters (tried from a random one).
+    /// </summary>
+    private bool SpawnSpot(Monster m, Vector3 avoid, float spacing, out float x, out float z)
     {
         var spots = DeepForestLayout.SpawnPoints;
         int first = (int)(_rng.NextFloat() * spots.Length);
-        for (int pass = 0; pass < 3; pass++)
+        for (int k = 0; k < spots.Length; k++)
         {
-            float spacing = pass == 0 ? SpawnSpacing : pass == 1 ? SpawnSpacing * 0.5f : 0f;
-            for (int k = 0; k < spots.Length; k++)
+            var s = spots[(first + k) % spots.Length];
+            if (!(HorizontalDistance(s.X, s.Y, avoid) < SpawnAwayFromPlayer) && !NearOtherMonster(m, s.X, s.Y, spacing))
             {
-                var s = spots[(first + k) % spots.Length];
-                if (!(HorizontalDistance(s.X, s.Y, avoid) < SpawnAwayFromPlayer) && !NearOtherMonster(m, s.X, s.Y, spacing))
-                {
-                    x = s.X;
-                    z = s.Y;
-                    return true;
-                }
+                x = s.X;
+                z = s.Y;
+                return true;
             }
         }
         x = z = 0f;

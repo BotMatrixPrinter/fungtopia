@@ -1,10 +1,10 @@
 # Monsters module
 
-The cute mushroom monsters: 6 Mushroom Caterpillars and 6 Mushroom Ants wander Mushroom Forest,
-and the hard ones, 4 Mushroom Tarantulas and 4 Mushroom Ladybugs (200 M¢ each), the darker Deep
-Forest. They chase the player when near and bite (the tarantula pounces, the ladybug rolls into a
+The cute mushroom monsters: 12 Mushroom Caterpillars and 12 Mushroom Ants (50 M¢ each) wander
+Mushroom Forest, and the hard ones, 8 Mushroom Tarantulas and 8 Mushroom Ladybugs (200 M¢ each), the
+darker Deep Forest. They chase the player when near and bite (the tarantula pounces, the ladybug rolls into a
 charge), get hit and poisoned by mushroom-tipped arrows (and the pet), pop into a puff of spores
-when defeated, and come back 20 s later.
+when defeated, and come back 8 s later (the hard ones 15 s).
 
 - `Contract/` — `Fungtopia.Monsters.Contract` (namespace `Fungtopia.Monsters`), see below.
 - `Core/` — `Fungtopia.Monsters.Core`: `MonstersModule`, the module's one `IModule`, and
@@ -42,7 +42,8 @@ Contract); it uses the world's `Ground.HeightAt`, `Ground.Obstacles`/`Blocks`, `
 | | Caterpillar | Ant | Tarantula | Ladybug |
 | --- | --- | --- | --- | --- |
 | Lives in | Mushroom Forest | Mushroom Forest | Deep Forest | Deep Forest |
-| Count | 6 | 6 | 4 | 4 |
+| Count | 12 | 12 | 8 | 8 |
+| Respawns after | 8 s | 8 s | 15 s | 15 s |
 | Health | 8 | 5 | 18 | 25 |
 | Attack | bite 1 | bite 2 | pounce 3 | charge 2 + knockback |
 | Wander speed | 0.5 m/s | 0.9 m/s | 1.2 m/s | 0.4 m/s |
@@ -54,9 +55,12 @@ Contract); it uses the world's `Ground.HeightAt`, `Ground.Obstacles`/`Blocks`, `
 - **Spawning.** Each kind keeps to its area (`Areas.Forest` or `Areas.DeepForest`, 3 m from its
   edge). At start the caterpillars and ants (kinds alternating) get random free spots in the
   forest: walkable, off every obstacle, at least 30 m from each of the forest's three entrances
-  (south, north, west gaps) and 18 m apart (relaxed only if no spot is found). The tarantulas and
-  ladybugs (alternating) each take one of the ten `DeepForestLayout.SpawnPoints`, tried from a
-  random one, 18 m from other monsters. A respawn also keeps 25 m from the player.
+  (south, north, west gaps) and 18 m (`SpawnSpacing`) from other monsters (relaxed to 9 m, then
+  none, only if 300 random tries find no spot). The tarantulas and ladybugs (alternating) take the
+  ten `DeepForestLayout.SpawnPoints` first, tried from a random one, 18 m from other monsters; when
+  none is free (sixteen are more than ten spots) they get random free spots of the Deep Forest the
+  same way, at least `SpawnMinEntranceDistance` (40 m) from its entrance, a taken spawn spot being
+  the last resort. A respawn also keeps 25 m (`SpawnAwayFromPlayer`) from the player.
 - **Wandering.** Caterpillars and ants take a random heading (or a rest) every 2–5 s at wander
   speed. Tarantulas and ladybugs roam the whole Deep Forest: each walks toward a goal, a free spot
   20–60 m away (`RoamMinDistance`, `RoamMaxDistance`), re-aiming at it (a little off) every 3–6 s
@@ -83,8 +87,10 @@ Contract); it uses the world's `Ground.HeightAt`, `Ground.Obstacles`/`Blocks`, `
   `PoisonSeconds` in whole points as it adds up, for every kind. A new poison while poisoned
   restarts the duration with the new `PoisonSeconds` but keeps the rate it had.
 - **Defeat.** At 0 health: one `MonsterKilled` with `MonsterRewards.For(kind)`, right away for a
-  hit, on the tick for poison. Further hits are ignored. 20 s later a new monster of the same
-  kind (new `MonsterId`, full health) appears at a free spot of its area away from the player.
+  hit, on the tick for poison. Further hits are ignored. `NormalRespawnDelay` (8 s) later for a
+  caterpillar or an ant, `HardRespawnDelay` (15 s) for a tarantula or a ladybug
+  (`RespawnDelayOf(kind)`), a new monster of the same kind (new `MonsterId`, full health) appears
+  at a free spot of its area away from the player and the other monsters, as at the start.
 - Overlapping monsters push each other apart. All randomness comes from `Seed` (set before
   `Start`), so a run is repeatable. No allocations per tick.
 
@@ -132,6 +138,6 @@ ant, a poisoned caterpillar and a hurt ant with health bars, and an ant's defeat
 `MONSTERS_PREVIEW=close` shows a caterpillar and an ant up close; `MONSTERS_PREVIEW=hard` the Deep
 Forest's monsters in gloom (a tarantula skittering, one mid-pounce, a ladybug waddling, one rolling
 in a charge, a hurt poisoned ladybug); `MONSTERS_PREVIEW=hardclose` a tarantula and a ladybug up
-close. `MONSTERS_FOLLOW=<slot>` (0..19; 12..15 tarantulas, 16..19 ladybugs) in the game makes a
+close. `MONSTERS_FOLLOW=<slot>` (0..39; 24..31 tarantulas, 32..39 ladybugs) in the game makes a
 camera follow that monster and hides the screens over the world, for example
-`MONSTERS_FOLLOW=16 DAYNIGHT_HOUR=12 ./screenshot.sh "" ladybug.png`.
+`MONSTERS_FOLLOW=32 DAYNIGHT_HOUR=12 ./screenshot.sh "" ladybug.png`.

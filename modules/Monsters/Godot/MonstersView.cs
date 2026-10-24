@@ -48,7 +48,7 @@ public partial class MonstersView : Node3D, IModuleView
     }
 
     /// <summary>
-    /// Screenshots only: MONSTERS_FOLLOW=&lt;slot&gt; (0..19, 12..19 the hard ones) makes a camera current
+    /// Screenshots only: MONSTERS_FOLLOW=&lt;slot&gt; (0..39, 24..39 the hard ones) makes a camera current
     /// that looks at that monster from a few meters away, wherever it wanders.
     /// </summary>
     private void BuildPreviewCamera()
