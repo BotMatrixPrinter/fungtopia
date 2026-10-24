@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Numerics;
 using Fungtopia.Forest;
 using Fungtopia.Input;
+using Fungtopia.Map;
 using Fungtopia.Player;
 using Fungtopia.Shell;
 using Fungtopia.StartScreen;
@@ -372,8 +373,50 @@ public class CameraModuleTests
     private const float Facing = 0.8f;
     private static readonly int TransitionTicks = (int)MathF.Ceiling(CameraModule.TransitionSeconds * 60f);
 
+    /// <summary>Where <paramref name="point"/> shows on a 1920 x 1080 screen at 70 degrees: x -1 left edge .. 1 right edge, y -1 bottom .. 1 top.</summary>
+    private static Vector2 OnScreenNormalized(CameraPose pose, Vector3 point)
+    {
+        var s = OnScreen(pose, point);
+        Assert.True(s.Z > 0.5f, $"{point} is not in front of the camera");
+        float tanHalf = MathF.Tan(35f * Degree);
+        return new Vector2(s.X / (tanHalf * 16f / 9f), s.Y / tanHalf);
+    }
+
+    /// <summary>
+    /// The whole character (feet to the top of the big head and hat, 1.7 m, and 0.45 m to each
+    /// side across the view) shows in the left half of the screen, top to bottom, the chest near
+    /// the middle of that half.
+    /// </summary>
+    private static void AssertFramedInTheLeftHalf(CameraPose pose, Vector3 feet)
+    {
+        var chest = OnScreenNormalized(pose, feet + new Vector3(0f, CameraModule.ChestHeight, 0f));
+        Assert.InRange(chest.X, -0.65f, -0.35f);
+        Vector3 across = Vector3.Transform(Vector3.UnitX, pose.Orientation);
+        across = Vector3.Normalize(new Vector3(across.X, 0f, across.Z)) * 0.45f;
+        foreach (float h in new[] { 0f, CameraModule.ChestHeight, 1.7f })
+        {
+            foreach (float side in new[] { -1f, 1f })
+            {
+                var p = OnScreenNormalized(pose, feet + new Vector3(0f, h, 0f) + across * side);
+                Assert.True(p.X > -0.98f && p.X < -0.02f, $"height {h}, side {side}: x {p.X} not in the left half");
+                Assert.True(p.Y > -0.98f && p.Y < 0.98f, $"height {h}, side {side}: y {p.Y} off the screen");
+            }
+        }
+    }
+
+    /// <summary>The camera keeps <see cref="CameraModule.Clearance"/> inside the home room's walls, floor and ceiling.</summary>
+    private static void AssertInsideTheRoom(Vector3 p, string what)
+    {
+        var room = Areas.Home;
+        float c = CameraModule.Clearance - 0.01f;
+        Assert.True(room.Contains(p.X, p.Z, c), $"{what}: camera at {p} outside the walls");
+        Assert.InRange(p.Y, Areas.HomeFloorY + c, Areas.HomeFloorY + CameraModule.RoomHeight - c);
+    }
+
+    private static Vector3 HomeFeet(float x, float z) => new(x, Areas.HomeFloorY, z);
+
     [Fact]
-    public void FramesTheFrontOfThePlayerWhileTheWardrobeIsOpen()
+    public void FramesThePlayerFullBodyFromTheFrontInTheLeftHalfWhileTheWardrobeIsOpen()
     {
         var (camera, bus) = Started();
         var feet = ForestBounds.PlayerStart;
@@ -385,27 +428,21 @@ public class CameraModuleTests
         var chest = feet + new Vector3(0f, CameraModule.ChestHeight, 0f);
         Vector3 facingDir = CameraModule.Forward(Facing);
         Vector3 offset = pose.Position - chest;
-        // About 2.5 m in front of the player, at chest height.
-        Assert.InRange(Vector3.Dot(offset, facingDir), 2.2f, 2.6f);
+        // Straight in front of the player, 2.5..3 m from the chest, at chest height.
+        Assert.InRange(Vector3.Dot(offset, facingDir), 2.5f, 3f);
+        Assert.InRange(offset.Length(), 2.5f, 3f);
+        Assert.Equal(0f, Vector3.Dot(offset, CameraModule.Right(Facing)), 3);
         Assert.Equal(0f, offset.Y, 3);
-        Assert.InRange(new Vector2(offset.X, offset.Z).Length(), 2.4f, 2.7f);
-        // Level, upright, looking back at the player.
+        // Level and upright, turned so the player stands in the left half (the panel is on the right).
         Vector3 look = Vector3.Transform(-Vector3.UnitZ, pose.Orientation);
         Assert.Equal(0f, look.Y, 4);
-        Assert.True(Vector3.Dot(look, -facingDir) > 0.95f, $"looks along {look}");
         Assert.True(Vector3.Transform(Vector3.UnitY, pose.Orientation).Y > 0.99f);
-        // The chest shows a little right of the screen center, at the center's height.
-        var onScreen = OnScreen(pose, chest);
-        Assert.InRange(onScreen.X, 0.15f, 0.35f);
-        Assert.Equal(0f, onScreen.Y, 3);
-        Assert.InRange(onScreen.Z, 2.4f, 2.6f);
-        // The whole character (feet to the top of the big head, about 1.5 m) is in view at 70 degrees.
-        float halfHeight = MathF.Tan(35f * Degree);
-        Assert.InRange(OnScreen(pose, feet).Y, -halfHeight, 0f);
-        Assert.InRange(OnScreen(pose, feet + new Vector3(0f, 1.5f, 0f)).Y, 0f, halfHeight);
-        // The published pose's yaw is the front view's.
-        Assert.Equal(CameraModule.FrontYaw(Facing, camera.OrbitSeconds), pose.Yaw, 4);
-        Assert.True(Vector3.Distance(CameraModule.FrontView(feet, Facing, camera.OrbitSeconds).Position, pose.Position) < 1e-3f);
+        AssertFramedInTheLeftHalf(pose, feet);
+        // The published pose's yaw is the view's.
+        Assert.Equal(CameraModule.ChooseFrontYaw(feet, Facing), camera.FrontYaw, 5);
+        Assert.Equal(MathF.Atan2(-look.X, -look.Z), pose.Yaw, 4);
+        Assert.True(Vector3.Distance(CameraModule.FrontView(feet, camera.FrontYaw).Position, pose.Position) < 1e-3f);
+        Assert.Equal(CameraModule.FrontView(feet, camera.FrontYaw).Yaw, pose.Yaw, 4);
     }
 
     [Fact]
@@ -417,10 +454,39 @@ public class CameraModuleTests
         Assert.True(camera.FrontViewWanted);
         Assert.Equal(1f, camera.Framing);
         var pose = bus.Poses[^1];
-        Assert.True(Vector3.Distance(CameraModule.FrontView(feet, 0f, camera.OrbitSeconds).Position, pose.Position) < 1e-3f);
+        Assert.True(Vector3.Distance(CameraModule.FrontView(feet, MathF.PI).Position, pose.Position) < 1e-3f);
         // Facing north (-Z): the camera is north of the player, looking south.
-        Assert.True(pose.Position.Z < feet.Z - 2f);
-        Assert.True(Vector3.Transform(-Vector3.UnitZ, pose.Orientation).Z > 0.95f);
+        Assert.True(pose.Position.Z < feet.Z - 2.4f);
+        Assert.True(Vector3.Transform(-Vector3.UnitZ, pose.Orientation).Z > 0.8f);
+        AssertFramedInTheLeftHalf(pose, feet);
+    }
+
+    [Fact]
+    public void StaysStillWhileOpenWhenThePlayerTurnsTheCharacter()
+    {
+        var (camera, bus) = Started();
+        var feet = ForestBounds.PlayerStart;
+        RunScreens(camera, bus, feet, Facing, true, false, TransitionTicks + 1);
+        var framed = bus.Poses[^1];
+        // No slow orbit: the camera holds still, even while the character is turned round (PreviewYaw).
+        for (int i = 0; i < 20 * 60; i++)
+        {
+            RunScreens(camera, bus, feet, Facing + MathF.Sin(i * 0.01f) * 2f, true, false, 1);
+            var pose = bus.Poses[^1];
+            Assert.True(Vector3.Distance(framed.Position, pose.Position) < 1e-4f, $"tick {i}: moved");
+            Assert.True(MathF.Abs(Quaternion.Dot(framed.Orientation, pose.Orientation)) > 0.999999f, $"tick {i}: turned");
+        }
+    }
+
+    [Fact]
+    public void ATeleportWhileOpenFramesThePlayerWhereTheyLand()
+    {
+        var (camera, bus) = Started();
+        RunScreens(camera, bus, OnGround(0f, 70f), 1f, false, true, TransitionTicks + 1);
+        var feet = ForestBounds.PlayerStart;
+        RunScreens(camera, bus, feet, 0f, false, true, 2);
+        Assert.Equal(MathF.PI, MathF.Abs(camera.FrontYaw), 4);
+        Assert.True(Vector3.Distance(CameraModule.FrontView(feet, MathF.PI).Position, bus.Poses[^1].Position) < 1e-3f);
     }
 
     [Fact]
@@ -430,13 +496,16 @@ public class CameraModuleTests
         var feet = ForestBounds.PlayerStart;
         RunScreens(camera, bus, feet, Facing, false, false, 30);
         var chest = feet + new Vector3(0f, CameraModule.ChestHeight, 0f);
-        var front = CameraModule.FrontView(feet, Facing, 0f).Position;
+        var front = CameraModule.FrontView(feet, CameraModule.ChooseFrontYaw(feet, Facing)).Position;
         Vector3 last = bus.Poses[^1].Position;
         Quaternion lastTurn = bus.Poses[^1].Orientation;
+        float firstStep = -1f;
         for (int i = 1; i <= TransitionTicks; i++)
         {
             RunScreens(camera, bus, feet, Facing, true, false, 1);
             var pose = bus.Poses[^1];
+            if (i == 1)
+                firstStep = Vector3.Distance(last, pose.Position);
             Assert.True(Vector3.Distance(last, pose.Position) < 0.4f, $"tick {i}: jumped {Vector3.Distance(last, pose.Position)} m");
             Assert.True(MathF.Abs(Quaternion.Dot(lastTurn, pose.Orientation)) > 0.998f, $"tick {i}: turned too fast");
             Assert.True(Vector3.Distance(pose.Position, chest) > 2f, $"tick {i}: too close to the player");
@@ -445,40 +514,85 @@ public class CameraModuleTests
             last = pose.Position;
             lastTurn = pose.Orientation;
         }
-        // Eased: slow at the start and the end, fast in the middle.
+        // Eased in and out: slow at the start and the end, fast in the middle.
+        Assert.True(firstStep < 0.05f, $"first step {firstStep}");
         Assert.True(Vector3.Distance(bus.Poses[^1].Position, bus.Poses[^2].Position) < 0.05f);
         Assert.Equal(1f, camera.Framing);
     }
 
+    // ---- the front view at home (the wardrobe) ----
+
     [Fact]
-    public void OrbitsSlowlyALittleAroundTheFront()
+    public void AtHomeWithRoomInFrontFramesStraightFromTheFront()
     {
+        // Where you come in, facing north into the room: 6 m to the north wall.
+        var feet = HomeFeet(600f, 601f);
         var (camera, bus) = Started();
-        var feet = ForestBounds.PlayerStart;
-        RunScreens(camera, bus, feet, Facing, true, false, TransitionTicks + 1);
+        RunScreens(camera, bus, feet, 0f, false, false, 10);
+        RunScreens(camera, bus, feet, 0f, true, false, TransitionTicks + 1);
+        var pose = bus.Poses[^1];
+        Assert.True(Vector3.Distance(CameraModule.FrontView(feet, MathF.PI).Position, pose.Position) < 1e-3f);
+        AssertInsideTheRoom(pose.Position, "open");
+        AssertFramedInTheLeftHalf(pose, feet);
+    }
+
+    [Fact]
+    public void AtHomeALittleShortOfRoomItPullsInAndRisesSlightly()
+    {
+        // Facing north, 2.6 m from the north wall: 2.3 m of room in front, less than the 2.75 m.
+        var feet = HomeFeet(600f, 597.6f);
         var chest = feet + new Vector3(0f, CameraModule.ChestHeight, 0f);
-        float baseYaw = Facing + MathF.PI;
-        float min = float.MaxValue, max = float.MinValue;
-        float lastYaw = bus.Poses[^1].Yaw;
-        int ticks = (int)(CameraModule.OrbitPeriod * 60f);
-        for (int i = 0; i < ticks; i++)
+        var (camera, bus) = Started();
+        RunScreens(camera, bus, feet, 0f, true, false, TransitionTicks + 1);
+        var pose = bus.Poses[^1];
+        AssertInsideTheRoom(pose.Position, "open");
+        Vector3 offset = pose.Position - chest;
+        Assert.Equal(0f, offset.X, 3);                                  // still straight in front
+        Assert.InRange(-offset.Z, 2.2f, 2.31f);                         // pulled in to the wall's clearance
+        Assert.InRange(offset.Y, 0.1f, 0.4f);                           // raised a little
+        Assert.True(Vector3.Transform(-Vector3.UnitZ, pose.Orientation).Y < 0f, "looks a little down");
+        AssertFramedInTheLeftHalf(pose, feet);
+    }
+
+    [Theory]
+    [InlineData(604.5f, 596.6f, 0f)]                 // at the wardrobe in the north-east corner, facing it
+    [InlineData(605f, 600f, -MathF.PI / 2f)]         // close to the east wall, facing it
+    [InlineData(595f, 595.8f, MathF.PI / 4f)]        // in the north-west corner, facing into it
+    [InlineData(600f, 604.2f, MathF.PI)]             // by the door, facing it
+    public void AtHomeTheCameraStaysInsideTheWallsAndStillFramesThePlayer(float x, float z, float facing)
+    {
+        var feet = HomeFeet(x, z);
+        var (camera, bus) = Started();
+        RunScreens(camera, bus, feet, facing, false, false, 10);
+        for (int i = 1; i <= TransitionTicks + 1; i++)
         {
-            RunScreens(camera, bus, feet, Facing, true, false, 1);
-            var pose = bus.Poses[^1];
-            float swing = MathF.IEEERemainder(pose.Yaw - baseYaw, MathF.Tau);
-            min = MathF.Min(min, swing);
-            max = MathF.Max(max, swing);
-            Assert.True(MathF.Abs(MathF.IEEERemainder(pose.Yaw - lastYaw, MathF.Tau)) < 0.2f * Degree, "orbits slowly");
-            lastYaw = pose.Yaw;
-            // The player stays framed the same way: same distance, a little right of center.
-            var onScreen = OnScreen(pose, chest);
-            Assert.InRange(onScreen.X, 0.15f, 0.35f);
-            Assert.InRange(onScreen.Z, 2.4f, 2.6f);
-            Assert.Equal(feet.Y + CameraModule.ChestHeight, pose.Position.Y, 3);
+            RunScreens(camera, bus, feet, facing, true, false, 1);
+            AssertInsideTheRoom(bus.Poses[^1].Position, $"opening, tick {i}");
         }
-        // A little each way, enough to see the outfit in 3D.
-        Assert.InRange(max, 14f * Degree, 15.01f * Degree);
-        Assert.InRange(min, -15.01f * Degree, -14f * Degree);
+        var pose = bus.Poses[^1];
+        AssertFramedInTheLeftHalf(pose, feet);
+        var chest = feet + new Vector3(0f, CameraModule.ChestHeight, 0f);
+        float distance = Vector3.Distance(pose.Position, chest);
+        Assert.InRange(distance, 2.2f, 3f);
+        // No room in front: it goes round to the nearest side with room rather than clip through the wall.
+        Assert.True(CameraModule.RoomFreeLength(chest, Vector3.Normalize(pose.Position - chest)) >= distance - 1e-3f);
+        for (int i = 1; i <= TransitionTicks + 1; i++)
+        {
+            RunScreens(camera, bus, feet, facing, false, false, 1);
+            AssertInsideTheRoom(bus.Poses[^1].Position, $"closing, tick {i}");
+        }
+    }
+
+    [Fact]
+    public void RoomFreeLengthStopsAtTheWallsFloorAndCeiling()
+    {
+        var p = new Vector3(600f, Areas.HomeFloorY + 1f, 600f);
+        float c = CameraModule.Clearance;
+        Assert.Equal(Areas.Home.MaxX - 600f - c, CameraModule.RoomFreeLength(p, Vector3.UnitX), 3);
+        Assert.Equal(600f - Areas.Home.MinZ - c, CameraModule.RoomFreeLength(p, -Vector3.UnitZ), 3);
+        Assert.Equal(1f - c, CameraModule.RoomFreeLength(p, -Vector3.UnitY), 3);
+        Assert.Equal(CameraModule.RoomHeight - 1f - c, CameraModule.RoomFreeLength(p, Vector3.UnitY), 3);
+        Assert.Equal(0f, CameraModule.RoomFreeLength(new Vector3(610f, Areas.HomeFloorY + 1f, 600f), -Vector3.UnitX));
     }
 
     [Fact]
@@ -552,6 +666,9 @@ public class CameraModuleTests
         // Into the front view and back.
         for (int i = 0; i < 300; i++)
             RunScreens(camera, bus, OnGround(0f, 74f), Facing, i < 150, false, 1);
+        // And at home, facing a wall.
+        for (int i = 0; i < 300; i++)
+            RunScreens(camera, bus, HomeFeet(604.5f, 596.6f), 0f, i < 150, false, 1);
         Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
     }
 

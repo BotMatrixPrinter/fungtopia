@@ -20,20 +20,32 @@ and publishes one `CameraPose` per fixed tick.
     (`Fungtopia.Forest.Obstacles`, treated as tall cylinders) is in the way, the camera pulls in
     at once to keep `Clearance` (0.3 m) from it, and eases back out (`ReturnSharpness`, 4 per
     second) once the view clears.
+  - **Home.** In the home room (`Fungtopia.Map.Areas.Home`, floor `Areas.HomeFloorY`,
+    `RoomHeight` 4 m) the walls, floor and ceiling take the place of the ground and trunks: the
+    camera keeps `Clearance` inside them (`RoomFreeLength`).
   - **Front view.** While `Fungtopia.Wardrobe.WardrobeState.Open` (the wardrobe or Abby's shop)
     or `Fungtopia.StartScreen.StartScreenState.Open`, the camera swings round to the player's
-    front (`FrontView`): `FrontDistance` (2.5 m) from the chest, level at `ChestHeight` (0.6 m
-    above the feet), sitting `FrameShift` (0.6 m) to the screen-left so the player shows a little
-    right of the screen center (clear of a panel on the left). There it orbits slowly,
-    `OrbitAngle` (15 degrees) each way around the front over `OrbitPeriod` (16 s). The swing in
-    and back out takes `TransitionSeconds` (1 s), eased (`Framing` 0..1); it blends the orbit's
-    yaw, pitch, distance and center, not positions, so it goes round the player, never through
-    them. Look input is ignored while open, so it comes back to the orbit it left.
+    front (`FrontView`), like the character creation screen: `FrontDistance` (2.75 m) from the
+    chest, level at `ChestHeight` (0.6 m above the feet), turned right by `FrameAngle` so the
+    whole player (head to feet) stands in the middle of the screen's left half (`FrameScreenX`
+    -0.5 at the 70 degree `FieldOfView`, 16:9), clear of a panel on the right. The side it looks
+    from (`FrontYaw`, the arm's yaw) is fixed when the view begins (again after a teleport),
+    from the player's facing (`Facing` + π), and the camera then holds still: no orbit, and
+    turning the character (`PreviewYaw`) does not move it. At home (`ChooseFrontYaw`), when the
+    walls leave less than `MinRoomDistance` (2.2 m) in front, it takes the nearest side (in 10
+    degree steps) that has that room; with less than 2.75 m it pulls in and rises
+    `RaisePerMeter` (0.5 m per meter pulled in), looking down a little. The swing in and back
+    out takes `TransitionSeconds` (1 s), eased (`Framing` 0..1); it blends the arm's yaw, pitch,
+    length and center, not positions, so it goes round the player, never through them (and
+    stays inside the room at home). Look input is ignored while open, so it comes back to the
+    orbit it left. The player should turn to face the camera's side (`FrontYaw` - π) plus
+    `PreviewYaw` and stand still meanwhile: that is the Player module's.
   - Modules tick in name order, so the camera uses the player's state from the previous tick.
 - `Godot/`: `Main.tscn` with `CameraView`, a `Camera3D` (70 degree FOV) made current when it
   loads, so the Input module aims through it. Each frame it is placed between the last two
   poses (a jump of more than 3 m is a cut).
 - `Tests/`: xUnit tests of `CameraModule` with a fake `IMessageBus`: orbit limits, smooth
-  following, ground and trunk pull-in, the front view's framing, orbit and transitions, no allocations per tick, determinism.
+  following, ground, trunk and wall pull-in, the front view's framing (left half, inside the home
+  room), holding still and transitions, no allocations per tick, determinism.
 
 Test it with `./test.sh Camera` from the repository root.
