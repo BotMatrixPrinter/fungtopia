@@ -13,6 +13,10 @@
     <ProjectReference Include="../Core/Fungtopia.StartScreen.Core.csproj" />
     <ProjectReference Include="../Contract/Fungtopia.StartScreen.Contract.csproj" />
     <ProjectReference Include="../../Wardrobe/Contract/Fungtopia.Wardrobe.Contract.csproj" />
+    <ProjectReference Include="../../Save/Contract/Fungtopia.Save.Contract.csproj" />
+    <ProjectReference Include="../../Input/Contract/Fungtopia.Input.Contract.csproj" />
+    <ProjectReference Include="../../Player/Contract/Fungtopia.Player.Contract.csproj" />
+    <ProjectReference Include="../../Map/Contract/Fungtopia.Map.Contract.csproj" />
     <ProjectReference Include="../../../shell/Contract/Fungtopia.Shell.Contract.csproj" />
   </ItemGroup>
 </Project>

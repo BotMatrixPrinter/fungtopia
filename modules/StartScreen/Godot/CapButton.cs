@@ -19,6 +19,9 @@ public partial class CapButton : Control
 
     public bool Highlighted { get; set; }
 
+    /// <summary>False: greyed (it cannot be chosen now).</summary>
+    public bool Enabled { get; set; } = true;
+
     public CapButton() => MouseFilter = MouseFilterEnum.Ignore;
 
     public override void _Process(double delta)
@@ -27,6 +30,7 @@ public partial class CapButton : Control
         PivotOffset = Size * 0.5f;
         float s = Highlighted ? 1.04f + Mathf.Sin(_time * 5f) * 0.035f : 1f;
         Scale = new Vector2(s, s);
+        Modulate = Enabled ? Colors.White : new Color(0.75f, 0.72f, 0.75f, 0.6f);
         QueueRedraw();
     }
 

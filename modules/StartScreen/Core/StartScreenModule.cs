@@ -1,20 +1,33 @@
 using System;
+using Fungtopia.Input;
+using Fungtopia.Player;
+using Fungtopia.Save;
 using Fungtopia.Shell;
 using Fungtopia.Wardrobe;
 
 namespace Fungtopia.StartScreen;
 
 /// <summary>
-/// The start screen's flow: Title, then the character, then "Make your look", then the starter
-/// pet, then "Start!". The view reports presses between ticks (<see cref="Press"/>,
+/// The start screen's flow: the title's Continue / Load / New Game; Load picks a slot, then its
+/// manual save or autosave; New Game picks a slot (asking "Overwrite?" when it is taken), then
+/// the character, then "Make your look", then the starter pet, then "Start!". It keeps the
+/// latest <see cref="SaveSlots"/> for the slot info. The view reports presses between ticks (<see cref="Press"/>,
 /// <see cref="Point"/>, <see cref="Pick"/>); each tick applies them in order, sends the look as
 /// <see cref="SetLook"/> and the outfit as <see cref="Equip"/>s on the tick they change,
 /// publishes <see cref="PreviewYaw"/> every tick of the look step (the character turned by the
 /// view's drag, keys and stick, like the wardrobe's), <see cref="GameStart"/> once on the tick "Start!" is pressed, and
+/// <see cref="NewGameInSlot"/> on the tick a new game's slot is picked, <see cref="LoadGame"/>
+/// then <see cref="GameStart"/> on the tick a save is chosen, <see cref="UiFocus"/> and
 /// <see cref="StartScreenState"/> every tick.
 /// </summary>
-public sealed class StartScreenModule : IModule
+public sealed class StartScreenModule : IModule, IMessageHandler<SaveSlots>
 {
+    /// <summary>The <see cref="UiFocus.Owner"/> of the start screen ("STRT").</summary>
+    public const int FocusOwner = 0x5354_5254;
+
+    /// <summary>The most items a menu step has (<see cref="Point"/> takes 0 up to this, less one).</summary>
+    public const int MaxOptions = 4;
+
     /// <summary>Presses kept between two ticks; more are dropped.</summary>
     public const int MaxQueued = 32;
 
@@ -42,6 +55,10 @@ public sealed class StartScreenModule : IModule
     private bool _turnRight;
     private float _turnStick;
     private float _drag;
+    private SaveSlots _slots;
+    private bool _titleMoved;
+    private bool _newGameDue;
+    private bool _focusOpen;
 
     public StartStep Step { get; private set; } = StartStep.Title;
 
@@ -82,6 +99,28 @@ public sealed class StartScreenModule : IModule
     /// </summary>
     public float Yaw { get; private set; }
 
+    /// <summary>
+    /// The highlighted item of a menu step: a <see cref="TitleItem"/> on the title, slot − 1 on
+    /// <see cref="StartStep.Load"/> and <see cref="StartStep.NewSlot"/>, 0 manual / 1 autosave on
+    /// <see cref="StartStep.LoadSave"/>, 0 Yes / 1 No on <see cref="StartStep.Overwrite"/>.
+    /// </summary>
+    public int Highlight { get; private set; } = (int)TitleItem.NewGame;
+
+    /// <summary>The slot (1..3) picked on <see cref="StartStep.Load"/> or <see cref="StartStep.NewSlot"/>, then loaded or played; 0 before.</summary>
+    public int GameSlot { get; private set; }
+
+    /// <summary>Whether a save was loaded (Continue or Load) rather than a new game started.</summary>
+    public bool Loaded { get; private set; }
+
+    /// <summary>Whether the save loaded was the slot's autosave.</summary>
+    public bool LoadedAuto { get; private set; }
+
+    /// <summary>The latest <see cref="SaveSlots"/> (every slot empty until one comes).</summary>
+    public SaveSlots Slots => _slots;
+
+    /// <summary>Whether any slot has a readable save: Continue shows, Load can be chosen.</summary>
+    public bool CanContinue => _slots.TryGetNewest(out _, out _);
+
     /// <summary>Ticks so far.</summary>
     public long Ticks { get; private set; }
 
@@ -92,7 +131,36 @@ public sealed class StartScreenModule : IModule
     {
         ArgumentNullException.ThrowIfNull(bus);
         _bus = bus;
+        bus.Subscribe<SaveSlots>(this);
     }
+
+    public void Handle(in SaveSlots message) => _slots = message;
+
+    /// <summary>How many items the menu of <paramref name="step"/> has (0 when it is not a menu).</summary>
+    public static int ItemCount(StartStep step) => step switch
+    {
+        StartStep.Title or StartStep.Load or StartStep.NewSlot => 3,
+        StartStep.LoadSave or StartStep.Overwrite => 2,
+        _ => 0,
+    };
+
+    /// <summary>Whether item <paramref name="item"/> of the current step's menu can be chosen (see <see cref="Highlight"/>).</summary>
+    public bool ItemEnabled(int item)
+    {
+        if ((uint)item >= (uint)ItemCount(Step))
+            return false;
+        return Step switch
+        {
+            StartStep.Title => item == (int)TitleItem.NewGame || CanContinue,
+            StartStep.Load => CanLoad(_slots.Get(item + 1)),
+            StartStep.LoadSave => item == 0 ? _slots.Get(GameSlot).Manual.Ok : _slots.Get(GameSlot).Auto.Ok,
+            _ => true,
+        };
+    }
+
+    private static bool CanLoad(in SlotInfo slot) => slot.Manual.Ok || slot.Auto.Ok;
+
+    private bool IsMenu => ItemCount(Step) > 0;
 
     /// <summary>The value of look row <paramref name="row"/>.</summary>
     public int LookValue(LookRow row) => row switch
@@ -123,12 +191,13 @@ public sealed class StartScreenModule : IModule
 
     /// <summary>
     /// Reports the mouse over choice <paramref name="option"/> (0 left, 1 right) of the current
-    /// step: it becomes highlighted on the next tick. A click is <c>Point</c> then
-    /// <c>Press(Confirm)</c>.
+    /// step, or over item <paramref name="option"/> of a menu step (see <see cref="Highlight"/>):
+    /// it becomes highlighted on the next tick (items that cannot be chosen are not). A click is
+    /// <c>Point</c> then <c>Press(Confirm)</c>.
     /// </summary>
     public void Point(int option)
     {
-        if (option is 0 or 1)
+        if ((uint)option < MaxOptions)
             Enqueue(StartButton.Left, option, -1);
     }
 
@@ -181,6 +250,8 @@ public sealed class StartScreenModule : IModule
         if (_bus == null)
             throw new InvalidOperationException("StartScreenModule.Tick before Start.");
         var before = Step;
+        if (Step == StartStep.Title)
+            FixTitleHighlight();
         bool started = false;
         for (int i = 0; i < _queued && !started; i++)
             started = Apply(_queue[i], _queuedOption[i], _queuedRow[i]);
@@ -201,9 +272,30 @@ public sealed class StartScreenModule : IModule
         }
         else
             _drag = 0f;
+        if (_newGameDue)
+            _bus.Publish(new NewGameInSlot(GameSlot));
+        _newGameDue = false;
+        if (started && Loaded)
+            _bus.Publish(new LoadGame(GameSlot, LoadedAuto));
         if (started)
             _bus.Publish(new GameStart(Character, StarterPet));
+        if (Open || _focusOpen)
+            _bus.Publish(new UiFocus(FocusOwner, Open));
+        _focusOpen = Open;
         _bus.Publish(new StartScreenState(Open));
+    }
+
+    /// <summary>
+    /// The title highlights Continue once saves are known (until the player moves the
+    /// highlight), and never an item that cannot be chosen.
+    /// </summary>
+    private void FixTitleHighlight()
+    {
+        bool canContinue = CanContinue;
+        if (!_titleMoved && canContinue)
+            Highlight = (int)TitleItem.Continue;
+        else if (!canContinue)
+            Highlight = (int)TitleItem.NewGame;
     }
 
     /// <summary>Puts on the whole <see cref="Outfit"/>: one <see cref="Equip"/> per slot it has (top first), an unequip per slot it leaves empty.</summary>
@@ -238,7 +330,13 @@ public sealed class StartScreenModule : IModule
         }
         if (option >= 0)
         {
-            Choose(option);
+            if (IsMenu)
+            {
+                if (ItemEnabled(option))
+                    SetHighlight(option);
+            }
+            else
+                Choose(option);
             return false;
         }
         switch (button)
@@ -246,38 +344,165 @@ public sealed class StartScreenModule : IModule
             case StartButton.Left:
                 if (Step == StartStep.Look)
                     Cycle(-1);
+                else if (IsMenu)
+                    MoveHighlight(-1);
                 else
                     Choose(0);
                 return false;
             case StartButton.Right:
                 if (Step == StartStep.Look)
                     Cycle(1);
+                else if (IsMenu)
+                    MoveHighlight(1);
                 else
                     Choose(1);
                 return false;
             case StartButton.Up:
                 if (Step == StartStep.Look && Row > LookRow.Skin)
                     Row--;
+                else if (IsMenu)
+                    MoveHighlight(-1);
                 return false;
             case StartButton.Down:
                 if (Step == StartStep.Look && Row < LookRow.Outfit)
                     Row++;
+                else if (IsMenu)
+                    MoveHighlight(1);
                 return false;
             case StartButton.Back:
-                if (Step is StartStep.Character or StartStep.Look or StartStep.Pet or StartStep.Ready)
-                {
-                    Step--;
-                    if (Step == StartStep.Look)
-                        FaceCamera();
-                }
+                Back();
                 return false;
             case StartButton.Confirm:
+                return Confirm();
+            default:
+                return false;
+        }
+    }
+
+    private void Back()
+    {
+        switch (Step)
+        {
+            case StartStep.Load:
+                GoTo(StartStep.Title, (int)TitleItem.Load);
+                break;
+            case StartStep.NewSlot:
+                GoTo(StartStep.Title, (int)TitleItem.NewGame);
+                break;
+            case StartStep.LoadSave:
+                GoTo(StartStep.Load, GameSlot - 1);
+                break;
+            case StartStep.Overwrite:
+            case StartStep.Character:
+                GoTo(StartStep.NewSlot, GameSlot - 1);
+                break;
+            case StartStep.Look or StartStep.Pet or StartStep.Ready:
+                Step--;
+                if (Step == StartStep.Look)
+                    FaceCamera();
+                break;
+        }
+    }
+
+    /// <summary>Chooses the highlighted item or goes on; true when the screen closes (Start! or a load).</summary>
+    private bool Confirm()
+    {
+        if (IsMenu && !ItemEnabled(Highlight))
+            return false;
+        switch (Step)
+        {
+            case StartStep.Title:
+                if (Highlight == (int)TitleItem.Continue)
+                {
+                    _slots.TryGetNewest(out int slot, out bool auto);
+                    return BeginLoad(slot, auto);
+                }
+                if (Highlight == (int)TitleItem.Load)
+                {
+                    // The first slot that can be loaded is highlighted.
+                    int first = 0;
+                    while (first < SaveSlots.Count - 1 && !CanLoad(_slots.Get(first + 1)))
+                        first++;
+                    GoTo(StartStep.Load, first);
+                }
+                else
+                    GoTo(StartStep.NewSlot, 0);
+                return false;
+            case StartStep.Load:
+                GameSlot = Highlight + 1;
+                GoTo(StartStep.LoadSave, _slots.Get(GameSlot).NewestIsAuto || !_slots.Get(GameSlot).Manual.Ok ? 1 : 0);
+                return false;
+            case StartStep.LoadSave:
+                return BeginLoad(GameSlot, Highlight == 1);
+            case StartStep.NewSlot:
+                GameSlot = Highlight + 1;
+                if (_slots.Get(GameSlot).Exists)
+                    GoTo(StartStep.Overwrite, 1);
+                else
+                    BeginNewGame();
+                return false;
+            case StartStep.Overwrite:
+                if (Highlight == 0)
+                    BeginNewGame();
+                else
+                    GoTo(StartStep.NewSlot, GameSlot - 1);
+                return false;
+            case StartStep.Character or StartStep.Look or StartStep.Pet or StartStep.Ready:
                 Step++;
                 if (Step == StartStep.Look)
                     EnterLook();
                 return Step == StartStep.Started;
             default:
                 return false;
+        }
+    }
+
+    private void GoTo(StartStep step, int highlight)
+    {
+        Step = step;
+        Highlight = highlight;
+    }
+
+    /// <summary>The new game plays in <see cref="GameSlot"/>: <see cref="NewGameInSlot"/> this tick, then the character.</summary>
+    private void BeginNewGame()
+    {
+        _newGameDue = true;
+        Step = StartStep.Character;
+    }
+
+    /// <summary>Loads <paramref name="slot"/>'s manual save or autosave: the screen closes, as that save's character.</summary>
+    private bool BeginLoad(int slot, bool auto)
+    {
+        var info = auto ? _slots.Get(slot).Auto : _slots.Get(slot).Manual;
+        GameSlot = slot;
+        Loaded = true;
+        LoadedAuto = auto;
+        // The restored parts set the real state; GameStart only lets the modules that wait for it start.
+        Character = info.Character == CharacterKind.Boy ? GameStart.Boy : GameStart.Girl;
+        StarterPet = GameStart.Cat;
+        _newGameDue = false;
+        Step = StartStep.Started;
+        return true;
+    }
+
+    private void SetHighlight(int item)
+    {
+        Highlight = item;
+        if (Step == StartStep.Title)
+            _titleMoved = true;
+    }
+
+    /// <summary>The next (<paramref name="direction"/> 1) or previous (-1) item that can be chosen; it stops at the ends.</summary>
+    private void MoveHighlight(int direction)
+    {
+        int count = ItemCount(Step);
+        for (int item = Highlight + direction; item >= 0 && item < count; item += direction)
+        {
+            if (ItemEnabled(item))
+            {
+                SetHighlight(item);
+                return;
+            }
         }
     }
 
@@ -363,6 +588,8 @@ public sealed class StartScreenModule : IModule
 
     private void Choose(int option)
     {
+        if (option is not (0 or 1))
+            return;
         if (Step == StartStep.Character)
             Character = option;
         else if (Step == StartStep.Pet)

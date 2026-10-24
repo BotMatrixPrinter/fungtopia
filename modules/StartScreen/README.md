@@ -1,7 +1,11 @@
 # StartScreen module
 
 The cute title screen shown when the game starts: a big "Fungtopia" logo with mushroom-cap
-letters over a soft blurred view of Mushroom Town, then "Choose your character" (the Girl and
+letters over a soft blurred view of Mushroom Town, with **Continue** (the newest save of any
+slot, manual or auto; hidden when there is none), **Load** (the three save slots with their
+character, day, coins, area and saved time; then the slot's manual save or its autosave) and
+**New Game** (pick slot 1-3; a slot in use asks "Overwrite?"). Continue and Load load the save
+through the Save module and close the screen. A new game goes on to "Choose your character" (the Girl and
 the Boy side by side on little turntables), then "Make your look" (skin tone, hair style, hair
 color, eye color and a starter outfit, each change sent at once to the Wardrobe module), then
 "Choose your starter pet" (the Mushroom Cat and the Mushroom Dog), then a "Start!" button. It
@@ -9,10 +13,13 @@ publishes the character and pet once when Start is pressed.
 
 - `Contract/` — `Fungtopia.StartScreen.Contract` (namespace `Fungtopia.StartScreen`), see below.
 - `Core/` — `Fungtopia.StartScreen.Core`: `StartScreenModule`, the module's one `IModule`, and
-  the `StartStep`, `LookRow` and `StartButton` enums. It references the Wardrobe Contract
-  (`Fungtopia.Wardrobe`: `Looks`, `Catalog`, `SetLook`, `Equip`, `PreviewYaw`).
+  the `StartStep`, `TitleItem`, `LookRow` and `StartButton` enums. It references the Wardrobe
+  Contract (`Fungtopia.Wardrobe`: `Looks`, `Catalog`, `SetLook`, `Equip`, `PreviewYaw`), the Save
+  Contract (`Fungtopia.Save`: `SaveSlots`, `LoadGame`, `NewGameInSlot`; it brings the Map and
+  Player Contracts) and the Input Contract (`Fungtopia.Input.UiFocus`).
 - `Godot/` — `Main.tscn` with `StartScreenView` (a `CanvasLayer` on layer 50, over the HUD),
-  built in code from `MushroomLogo`, `ChoiceCard`, `CapButton`, `LookPanel` and `PreviewStage`;
+  built in code from `MushroomLogo`, `ChoiceCard`, `SlotCard`, `CapButton`, `LookPanel` and
+  `PreviewStage`;
   `Preview.tscn` (one step, for screenshots); `Shaders/` (toon surface, ink outline, blur).
 - `Models/` — `previews.py`, the Blender script that builds and exports `girl.glb`, `boy.glb`,
   `cat.glb`, `dog.glb` and `town.glb` next to it.
@@ -25,8 +32,16 @@ Test it with `./test.sh StartScreen` from the repository root.
 
 | Message | Who publishes it | What it is |
 | --- | --- | --- |
-| `GameStart` | StartScreen, once, on the tick "Start!" is pressed | `Character` (`GameStart.Girl` = 0, `GameStart.Boy` = 1), `StarterPet` (`GameStart.Cat` = 0, `GameStart.Dog` = 1). |
-| `StartScreenState` | StartScreen, once every tick | `Open`: true from the first tick until "Start!" is pressed, false after. |
+| `GameStart` | StartScreen, once, on the tick "Start!" is pressed, or a save is chosen (Continue, Load) | `Character` (`GameStart.Girl` = 0, `GameStart.Boy` = 1), `StarterPet` (`GameStart.Cat` = 0, `GameStart.Dog` = 1). For a loaded save: that save's character (from `SaveSlots`) and the Cat, so the modules that wait for `GameStart` start; the Save module's `RestorePart`s (on its next tick) then set the real state. |
+| `StartScreenState` | StartScreen, once every tick | `Open`: true from the first tick until "Start!" is pressed or a save is loaded, false after. |
+
+It reads the Save module's `Fungtopia.Save.SaveSlots` (kept, the latest one) and sends:
+
+| Message | When | What |
+| --- | --- | --- |
+| `Fungtopia.Save.NewGameInSlot` | On the tick New Game's slot is picked (an empty slot, or "Yes" to "Overwrite?"); again if the player goes back and picks one again | `Slot` 1..3. Nothing is deleted: the Save module overwrites the slot's files at its first save. |
+| `Fungtopia.Save.LoadGame` | Once, on the tick Continue, or a slot's manual save or autosave, is chosen | `Slot`, `Auto`. Then `GameStart`, and the screen closes without the creation steps. |
+| `Fungtopia.Input.UiFocus` | Every tick while open, then once on the tick it closes | `Owner` `StartScreenModule.FocusOwner` (0x53545254, "STRT"), `Open`. |
 
 It also sends the Wardrobe module's messages (see the Wardrobe README) from the look step:
 
@@ -36,33 +51,64 @@ It also sends the Wardrobe module's messages (see the Wardrobe README) from the 
 | `Fungtopia.Wardrobe.Equip` | On the same tick the look step is reached, and on each tick the outfit changes | Four messages for the chosen `Catalog.StarterOutfits` entry, in the order Top, Bottom, Shoes, Head: `new Equip(id)`, or `Equip.Unequip(slot)` for a slot it leaves empty. |
 | `Fungtopia.Wardrobe.PreviewYaw` | Every tick the look step is showing (from the tick it is reached; not on the tick it is left) | `Yaw`: how the player turned the character, as the wardrobe sends it: radians in [-π, π), 0 faces the camera, positive turns its front to the screen's right; 0 each time the look step is reached. |
 
-In a tick they come in the order `SetLook`, `Equip`s, `PreviewYaw`, `GameStart`, `StartScreenState`; a few
-changes in one tick send one `SetLook` (the latest look). On the tick Start is pressed,
-`GameStart` comes first, then `StartScreenState` with `Open` false.
+In a tick they come in the order `SetLook`, `Equip`s, `PreviewYaw`, `NewGameInSlot`, `LoadGame`,
+`GameStart`, `UiFocus`, `StartScreenState`; a few changes in one tick send one `SetLook` (the
+latest look). On the tick Start is pressed (or a save is chosen), `LoadGame` (a load only) and
+`GameStart` come first, then `UiFocus` and `StartScreenState` with `Open` false.
 
-Other modules (Player, Pet) do not read `GameStart` yet, the Player does not draw the
-Wardrobe's `AppearanceState` yet, and it turns the character by `PreviewYaw` (and stands still)
-only if its own job makes it do so during the start screen too: until they do, the game runs behind
-the start screen and starts as the Girl with the Cat whatever is chosen.
 
 ## Core
 
-`StartScreenModule` goes through the steps `Title`, `Character`, `Look`, `Pet`, `Ready`, then
-`Started` (closed for good). The view reports presses between ticks, and each tick applies them
-in order (up to 32 a tick; more are dropped):
+`StartScreenModule` starts on `Title`. A new game goes `Title`, `NewSlot` (then `Overwrite` for a
+slot in use), `Character`, `Look`, `Pet`, `Ready`, then `Started` (closed for good); a load goes
+`Title`, `Load`, `LoadSave`, `Started`, or straight from `Title` to `Started` with Continue. The
+view reports presses between ticks, and each tick applies them in order (up to 32 a tick; more
+are dropped).
+
+**Menus.** `Title`, `Load`, `LoadSave`, `NewSlot` and `Overwrite` are menus (`ItemCount(step)`):
+`Highlight` is the highlighted item and `ItemEnabled(item)` says whether it can be chosen.
+
+| Step | Items (`Highlight`) | Can be chosen |
+| --- | --- | --- |
+| `Title` | `TitleItem.Continue` (0), `Load` (1), `NewGame` (2) | Continue and Load only when `CanContinue` (some slot has a readable save, `SaveSlots.TryGetNewest`) |
+| `Load` | slot 1..3 (0..2) | a slot with a readable manual save or autosave |
+| `LoadSave` | the `GameSlot`'s manual save (0), its autosave (1) | a readable one |
+| `NewSlot` | slot 1..3 (0..2) | all |
+| `Overwrite` | Yes (0), No (1) | both |
+
+- Up / Left and Down / Right highlight the previous / next item that can be chosen (they stop at
+  the ends); `Point(item)` (the mouse over it, 0..`MaxOptions` − 1) highlights it if it can be
+  chosen; `Confirm` chooses the highlighted item (nothing when it cannot be chosen).
+- The title highlights New Game at first, then Continue as soon as `SaveSlots` shows a save
+  (unless the player has moved the highlight), and New Game whenever Continue cannot be chosen.
+- **Continue** loads the newest readable save of any slot, manual or auto. **Load** goes to
+  `Load` (the first slot that can be loaded highlighted); a slot goes to `LoadSave` (its newer
+  save highlighted); choosing a save loads it. Loading sets `GameSlot`, `Loaded`, `LoadedAuto`,
+  `Character` (the save's) and `StarterPet` (the Cat), and closes the screen: `LoadGame`, then
+  `GameStart`, on that tick.
+- **New Game** goes to `NewSlot` (slot 1 highlighted). An empty slot sets `GameSlot` and goes to
+  `Character`, publishing `NewGameInSlot` on that tick; a slot that exists (even unreadable) goes
+  to `Overwrite` with No highlighted: Yes does the same as an empty slot, No goes back to
+  `NewSlot`.
+- `Back`: `Load` and `NewSlot` go to `Title`, `LoadSave` to `Load`, `Overwrite` and `Character`
+  to `NewSlot` (the slot kept highlighted); nothing on `Title`.
+
+**New game.**
 
 - `Press(StartButton.Confirm)` goes to the next step; on `Ready` it presses "Start!".
-- `Press(StartButton.Back)` goes one step back (not before `Title`); the choices are kept.
+- `Press(StartButton.Back)` goes one step back (from `Character` to `NewSlot`); the choices are kept.
 - `Press(StartButton.Left)` / `Right` highlight the left (Girl, Cat) or right (Boy, Dog) choice
   on the `Character` and `Pet` steps; on the `Look` step they change the highlighted row's value
   to the previous / next one, wrapping round (outfits that do not fit the character, the
-  Mushroom Dress for the Boy, are skipped); elsewhere they do nothing.
+  Mushroom Dress for the Boy, are skipped); on menus they move the highlight; on `Ready`
+  they do nothing.
 - `Press(StartButton.Up)` / `Down` highlight the row above / below on the `Look` step (`Skin`,
-  `HairStyle`, `HairColor`, `EyeColor`, `Outfit`; they stop at the ends); elsewhere nothing.
+  `HairStyle`, `HairColor`, `EyeColor`, `Outfit`; they stop at the ends); on menus they move
+  the highlight; elsewhere nothing.
 - `Pick(row, value)` (a click on a swatch or pill) highlights that row and gives it that value,
   on the `Look` step only; values out of range and outfits that do not fit are ignored.
-- `Point(option)` (0 or 1) highlights that choice (the mouse is over its card); a click is
-  `Point` then `Confirm`.
+- `Point(option)` (0 or 1) highlights that choice (the mouse is over its card), on menus that
+  item; other values are ignored; a click is `Point` then `Confirm`.
 
 **Turning** (the same as the wardrobe's): on each tick of the `Look` step `Yaw` turns and is
 published as `PreviewYaw`: `SetTurnButtons(left, right)` (Q / LB, E / RB, held) turn at
@@ -77,7 +123,7 @@ gets `Catalog.DefaultOutfit` (the Mushroom Dress for the Girl, Sunny Stripes for
 `Skin` row highlighted; the look and outfit are then sent whole. Coming back from `Pet` sends
 nothing. Once started, presses are ignored and
 `GameStart` is never published again. The view also reads `Step`, `Character`, `StarterPet`,
-`Open`, `Row`, `Yaw`, `Skin`, `HairStyle`, `HairColor`, `EyeColor`, `Outfit`, `LookValue(row)`,
+`Open`, `Row`, `Yaw`, `Highlight`, `GameSlot`, `Slots`, `CanContinue`, `Skin`, `HairStyle`, `HairColor`, `EyeColor`, `Outfit`, `LookValue(row)`,
 `LookCount(row)`, `OutfitFits(outfit)`, `Ticks` and `StepTicks` (ticks since the step began). No allocations per tick.
 
 ## View
@@ -88,8 +134,18 @@ nothing. Once started, presses are ignored and
 | Look: pick a row | Click a value in it | Up / Down arrows | Left stick or D-pad up / down |
 | Look: change a value | Click a swatch or pill | Left / Right arrows | Left stick or D-pad left / right |
 | Look: turn the character | Drag on the left half | Q / E (held) | Right stick, LB / RB (held) |
-| OK, next, "Start!" | Click (a card, "Next", "Start!", anywhere on the title) | Enter, or E (not on the look step, where E turns) | A |
+| Highlight a menu item (title button, slot, save, Yes / No) | Hover it | Arrows | Left stick or D-pad |
+| OK, next, "Start!" | Click (a card, a menu item, "Next", "Start!") | Enter, or E (not on the look step, where E turns) | A |
 | Back | The "Back" button | Esc or Backspace | B |
+
+The title shows the logo with a row of cap buttons under it: Continue (green, only when there is
+a save; the line under the row says what it loads: slot, character, day, area), Load (greyed when
+there is nothing to load) and New Game. `Load` and `NewSlot` show three `SlotCard`s ("Slot N",
+then the newest save's character, "Day D   C coins", area, "Saved …" or "Autosaved …" in local
+time; "Empty", or "Damaged save"); `LoadSave` shows two (Manual save, Autosave; "No save yet"
+when missing); `Overwrite` shows the slot's card with Yes and No under it. Cards and buttons that
+cannot be chosen are greyed; the highlighted one grows and gets a gold border (cards a bobbing
+arrow too). The slot info is redrawn every half second (the Save module sends it every second).
 
 While open, `StartScreenView` takes every input event (so a press there does not also jump or
 talk in the game) and keeps the mouse visible; after "Start!" it fades out (0.6 s), stops
@@ -127,7 +183,9 @@ and lit windows, giant mushroom trees and little mushrooms.
 ## Screenshots
 
 `./screenshot.sh modules/StartScreen/Godot/Preview.tscn` shows one step; the environment
-variable `START_PREVIEW` picks it: `title` (default), `character`, `boy` (the Boy
+variable `START_PREVIEW` picks it: `title` (default, no saves), `menu` (the title with
+Continue), `load`, `loadsave` (slot 1's two saves), `newslot`, `overwrite` (these five with made-up
+saves: slot 1 both saves, slot 2 damaged, slot 3 empty), `character`, `boy` (the Boy
 highlighted), `look` (the Girl's look step), `boylook` (the Boy's, with skin tone and hair color
 changed), `pet`, `dog` (the Dog highlighted) or `ready` (the Boy with the Dog). The preview has no
 game behind it, so the left of the look step is empty there. The main

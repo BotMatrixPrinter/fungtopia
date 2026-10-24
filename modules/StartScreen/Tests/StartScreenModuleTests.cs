@@ -1,5 +1,9 @@
 using System;
 using System.Collections.Generic;
+using Fungtopia.Input;
+using Fungtopia.Map;
+using Fungtopia.Player;
+using Fungtopia.Save;
 using Fungtopia.Shell;
 using Fungtopia.Wardrobe;
 using Xunit;
@@ -16,10 +20,15 @@ public class StartScreenModuleTests
         public readonly List<SetLook> SetLooks = new();
         public readonly List<Equip> Equips = new();
         public readonly List<PreviewYaw> Yaws = new();
+        public readonly List<NewGameInSlot> NewGames = new();
+        public readonly List<LoadGame> Loads = new();
+        public readonly List<UiFocus> Focus = new();
         public readonly List<string> Order = new();
         public int OtherMessages;
 
-        public void Subscribe<T>(IMessageHandler<T> handler) where T : struct { }
+        public readonly List<Type> Subscribed = new();
+
+        public void Subscribe<T>(IMessageHandler<T> handler) where T : struct => Subscribed.Add(typeof(T));
 
         public void Publish<T>(in T message) where T : struct
         {
@@ -47,6 +56,21 @@ public class StartScreenModuleTests
             {
                 Yaws.Add(yaw);
                 Order.Add("PreviewYaw");
+            }
+            else if (message is NewGameInSlot newGame)
+            {
+                NewGames.Add(newGame);
+                Order.Add("NewGameInSlot");
+            }
+            else if (message is LoadGame load)
+            {
+                Loads.Add(load);
+                Order.Add("LoadGame");
+            }
+            else if (message is UiFocus focus)
+            {
+                Focus.Add(focus);
+                Order.Add("UiFocus");
             }
             else
                 OtherMessages++;
@@ -81,6 +105,14 @@ public class StartScreenModuleTests
     }
 
     private void Tick(StartScreenModule screen) => screen.Tick(new TickContext(_tick++, 1.0 / 60));
+
+    /// <summary>From the title with no saves: New Game, then the empty slot 1, in one tick.</summary>
+    private void ToCharacter(StartScreenModule screen)
+    {
+        Assert.Equal(StartStep.Title, screen.Step);
+        PressAndTick(screen, StartButton.Confirm, StartButton.Confirm);
+        Assert.Equal(StartStep.Character, screen.Step);
+    }
 
     private void PressAndTick(StartScreenModule screen, params StartButton[] buttons)
     {
@@ -118,12 +150,12 @@ public class StartScreenModuleTests
     {
         var screen = Started(new FakeBus());
         var seen = new List<StartStep> { screen.Step };
-        for (int i = 0; i < 5; i++)
+        for (int i = 0; i < 6; i++)
         {
             PressAndTick(screen, StartButton.Confirm);
             seen.Add(screen.Step);
         }
-        Assert.Equal(new[] { StartStep.Title, StartStep.Character, StartStep.Look, StartStep.Pet, StartStep.Ready, StartStep.Started }, seen);
+        Assert.Equal(new[] { StartStep.Title, StartStep.NewSlot, StartStep.Character, StartStep.Look, StartStep.Pet, StartStep.Ready, StartStep.Started }, seen);
         Assert.False(screen.Open);
     }
 
@@ -138,13 +170,15 @@ public class StartScreenModuleTests
         Assert.All(bus.States, s => Assert.True(s.Open));
         Assert.Empty(bus.Starts);
 
-        PressAndTick(screen, StartButton.Confirm, StartButton.Confirm, StartButton.Confirm, StartButton.Confirm, StartButton.Confirm);
+        PressAndTick(screen, StartButton.Confirm, StartButton.Confirm, StartButton.Confirm, StartButton.Confirm, StartButton.Confirm, StartButton.Confirm);
         Tick(screen);
         Tick(screen);
         Assert.Equal(13, bus.States.Count);
         Assert.False(bus.States[10].Open);
         Assert.False(bus.States[12].Open);
         Assert.Equal(0, bus.OtherMessages);
+        Assert.Equal(new[] { 1 }, bus.NewGames.ConvertAll(n => n.Slot));
+        Assert.Empty(bus.Loads);
     }
 
     [Fact]
@@ -161,7 +195,7 @@ public class StartScreenModuleTests
     {
         var bus = new FakeBus();
         var screen = Started(bus);
-        PressAndTick(screen, StartButton.Confirm, StartButton.Confirm, StartButton.Confirm, StartButton.Confirm, StartButton.Confirm);
+        PressAndTick(screen, StartButton.Confirm, StartButton.Confirm, StartButton.Confirm, StartButton.Confirm, StartButton.Confirm, StartButton.Confirm);
         var start = Assert.Single(bus.Starts);
         Assert.Equal(GameStart.Girl, start.Character);
         Assert.Equal(GameStart.Cat, start.StarterPet);
@@ -176,7 +210,7 @@ public class StartScreenModuleTests
     {
         var bus = new FakeBus();
         var screen = Started(bus);
-        PressAndTick(screen, StartButton.Confirm);
+        ToCharacter(screen);
         PressAndTick(screen, StartButton.Right, character);
         Assert.Equal(wantCharacter, screen.Character);
         PressAndTick(screen, StartButton.Confirm, StartButton.Confirm);   // through the look step
@@ -200,7 +234,7 @@ public class StartScreenModuleTests
         Assert.Equal(StartStep.Title, screen.Step);
         Assert.Equal(GameStart.Girl, screen.Character);
         Assert.Equal(GameStart.Cat, screen.StarterPet);
-        PressAndTick(screen, StartButton.Confirm, StartButton.Confirm, StartButton.Confirm, StartButton.Confirm);
+        PressAndTick(screen, StartButton.Confirm, StartButton.Confirm, StartButton.Confirm, StartButton.Confirm, StartButton.Confirm);
         Assert.Equal(StartStep.Ready, screen.Step);
         PressAndTick(screen, StartButton.Right, StartButton.Left, StartButton.Right, StartButton.Up, StartButton.Down);
         Assert.Equal(StartStep.Ready, screen.Step);
@@ -213,7 +247,11 @@ public class StartScreenModuleTests
     {
         var bus = new FakeBus();
         var screen = Started(bus);
-        screen.Press(StartButton.Confirm);           // click on the title
+        screen.Point((int)TitleItem.NewGame);        // click "New Game" on the title
+        screen.Press(StartButton.Confirm);
+        Tick(screen);
+        screen.Point(0);                             // click slot 1
+        screen.Press(StartButton.Confirm);
         Tick(screen);
         screen.Point(1);                             // hover the Boy
         Tick(screen);
@@ -238,7 +276,7 @@ public class StartScreenModuleTests
     public void PointingOutsideTheTwoChoicesIsIgnored()
     {
         var screen = Started(new FakeBus());
-        PressAndTick(screen, StartButton.Confirm);
+        ToCharacter(screen);
         screen.Point(2);
         screen.Point(-1);
         Tick(screen);
@@ -253,7 +291,7 @@ public class StartScreenModuleTests
         var screen = Started(bus);
         PressAndTick(screen, StartButton.Back);
         Assert.Equal(StartStep.Title, screen.Step);
-        PressAndTick(screen, StartButton.Confirm, StartButton.Right, StartButton.Confirm, StartButton.Right,
+        PressAndTick(screen, StartButton.Confirm, StartButton.Confirm, StartButton.Right, StartButton.Confirm, StartButton.Right,
                      StartButton.Confirm, StartButton.Right, StartButton.Confirm);
         Assert.Equal(StartStep.Ready, screen.Step);
         PressAndTick(screen, StartButton.Back);
@@ -277,10 +315,10 @@ public class StartScreenModuleTests
     {
         var bus = new FakeBus();
         var screen = Started(bus);
-        PressAndTick(screen, StartButton.Confirm, StartButton.Confirm, StartButton.Confirm, StartButton.Confirm);
+        PressAndTick(screen, StartButton.Confirm, StartButton.Confirm, StartButton.Confirm, StartButton.Confirm, StartButton.Confirm);
         bus.Order.Clear();
         PressAndTick(screen, StartButton.Confirm);
-        Assert.Equal(new[] { "GameStart", "StartScreenState" }, bus.Order);
+        Assert.Equal(new[] { "GameStart", "UiFocus", "StartScreenState" }, bus.Order);
         Assert.False(bus.States[^1].Open);
     }
 
@@ -290,7 +328,7 @@ public class StartScreenModuleTests
         var bus = new FakeBus();
         var screen = Started(bus);
         // Extra presses in the same frame as "Start!" and in later frames change nothing.
-        PressAndTick(screen, StartButton.Confirm, StartButton.Confirm, StartButton.Confirm, StartButton.Confirm,
+        PressAndTick(screen, StartButton.Confirm, StartButton.Confirm, StartButton.Confirm, StartButton.Confirm, StartButton.Confirm,
                      StartButton.Confirm, StartButton.Back, StartButton.Confirm);
         bus.ClearLookMessages();
         for (int i = 0; i < 5; i++)
@@ -315,7 +353,7 @@ public class StartScreenModuleTests
         screen.Press(StartButton.Confirm);
         Assert.Equal(StartStep.Title, screen.Step);
         Tick(screen);
-        Assert.Equal(StartStep.Character, screen.Step);
+        Assert.Equal(StartStep.NewSlot, screen.Step);
     }
 
     [Fact]
@@ -350,6 +388,7 @@ public class StartScreenModuleTests
         var screen = new StartScreenModule();
         screen.Start(bus);
         screen.Press(StartButton.Confirm);
+        screen.Press(StartButton.Confirm);
         void Run(int ticks)
         {
             for (int i = 0; i < ticks; i++)
@@ -363,14 +402,14 @@ public class StartScreenModuleTests
         long before = GC.GetAllocatedBytesForCurrentThread();
         Run(100);
         Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
-        Assert.Equal(200, bus.Count);
+        Assert.Equal(2 * 200 + 1, bus.Count);   // UiFocus and StartScreenState each tick, one NewGameInSlot
     }
 
     /// <summary>On the look step as the Girl (or the Boy with <paramref name="boy"/>), with the messages of getting there cleared.</summary>
     private StartScreenModule OnLookStep(FakeBus bus, bool boy = false)
     {
         var screen = Started(bus);
-        PressAndTick(screen, StartButton.Confirm);
+        ToCharacter(screen);
         PressAndTick(screen, boy ? StartButton.Right : StartButton.Left, StartButton.Confirm);
         Assert.Equal(StartStep.Look, screen.Step);
         bus.ClearLookMessages();
@@ -398,7 +437,7 @@ public class StartScreenModuleTests
     {
         var bus = new FakeBus();
         var screen = Started(bus);
-        PressAndTick(screen, StartButton.Confirm);
+        ToCharacter(screen);
         Assert.Empty(bus.SetLooks);
         Assert.Empty(bus.Equips);
         bus.Order.Clear();
@@ -411,7 +450,7 @@ public class StartScreenModuleTests
         AssertLook(Assert.Single(bus.SetLooks), 0, 0, 0, 0);
         Assert.Equal(new[] { ("spotted_dress", Slot.Top), ("", Slot.Bottom), ("mary_janes", Slot.Shoes), ("big_bow", Slot.Head) },
             Equipped(bus));
-        Assert.Equal(new[] { "SetLook", "Equip", "Equip", "Equip", "Equip", "PreviewYaw", "StartScreenState" }, bus.Order);
+        Assert.Equal(new[] { "SetLook", "Equip", "Equip", "Equip", "Equip", "PreviewYaw", "UiFocus", "StartScreenState" }, bus.Order);
         Assert.True(bus.States[^1].Open);
     }
 
@@ -420,7 +459,7 @@ public class StartScreenModuleTests
     {
         var bus = new FakeBus();
         var screen = Started(bus);
-        PressAndTick(screen, StartButton.Confirm);
+        ToCharacter(screen);
         PressAndTick(screen, StartButton.Right, StartButton.Confirm);
         Assert.Equal(0, screen.Outfit);
         Assert.Single(bus.SetLooks);
@@ -437,7 +476,7 @@ public class StartScreenModuleTests
         PressAndTick(screen, StartButton.Right);                      // skin 1
         AssertLook(Assert.Single(bus.SetLooks), 1, 0, 0, 0);
         Assert.Empty(bus.Equips);
-        Assert.Equal(new[] { "SetLook", "PreviewYaw", "StartScreenState" }, bus.Order);
+        Assert.Equal(new[] { "SetLook", "PreviewYaw", "UiFocus", "StartScreenState" }, bus.Order);
 
         bus.ClearLookMessages();
         PressAndTick(screen, StartButton.Down, StartButton.Right, StartButton.Right);   // hair style 2
@@ -576,7 +615,7 @@ public class StartScreenModuleTests
     {
         var bus = new FakeBus();
         var screen = Started(bus);
-        PressAndTick(screen, StartButton.Confirm);
+        ToCharacter(screen);
         screen.Pick(LookRow.Skin, 2);                                // on the character step
         Tick(screen);
         Assert.Equal(0, screen.Skin);
@@ -658,7 +697,7 @@ public class StartScreenModuleTests
         var start = Assert.Single(bus.Starts);
         Assert.Equal(GameStart.Boy, start.Character);
         Assert.Equal(GameStart.Dog, start.StarterPet);
-        Assert.Equal(new[] { "GameStart", "StartScreenState" }, bus.Order);
+        Assert.Equal(new[] { "GameStart", "UiFocus", "StartScreenState" }, bus.Order);
         Assert.Equal(1, screen.Skin);
     }
 
@@ -668,6 +707,7 @@ public class StartScreenModuleTests
         var bus = new CountingBus();
         var screen = new StartScreenModule();
         screen.Start(bus);
+        screen.Press(StartButton.Confirm);
         screen.Press(StartButton.Confirm);
         screen.Press(StartButton.Confirm);
         screen.Tick(new TickContext(0, 1.0 / 60));
@@ -701,7 +741,7 @@ public class StartScreenModuleTests
     {
         var bus = new FakeBus();
         var screen = Started(bus);
-        PressAndTick(screen, StartButton.Confirm);
+        ToCharacter(screen);
         Tick(screen);
         Assert.Empty(bus.Yaws);                                       // not on the title or the character step
 
@@ -828,7 +868,7 @@ public class StartScreenModuleTests
     {
         var bus = new FakeBus();
         var screen = Started(bus);
-        PressAndTick(screen, StartButton.Confirm);                    // the character step
+        ToCharacter(screen);                    // the character step
         screen.Drag(100f);                                           // dropped: not the look step
         screen.SetTurnButtons(false, true);
         Tick(screen);
@@ -855,6 +895,409 @@ public class StartScreenModuleTests
         Tick(screen);
         PressAndTick(screen, StartButton.Back, StartButton.Confirm);  // character and back again
         Assert.Equal(0f, bus.Yaws[^1].Yaw);
+    }
+
+    // ---- Save games: Continue, Load and New Game ----
+
+    private static readonly DateTime T0 = new(2026, 10, 24, 12, 0, 0, DateTimeKind.Utc);
+
+    /// <summary>A readable save made <paramref name="minutes"/> after <see cref="T0"/>.</summary>
+    private static SaveInfo SaveAt(int minutes, CharacterKind character = CharacterKind.Girl, int day = 1, int coins = 0, Area area = Area.Town) =>
+        new(SaveFileState.Ok, T0.AddMinutes(minutes), character.ToString(), character, day, coins, area);
+
+    private static SlotInfo SlotOf(int slot, SaveInfo? manual = null, SaveInfo? auto = null) =>
+        new(slot, manual ?? SaveInfo.Missing, auto ?? SaveInfo.Missing);
+
+    private static SaveSlots Slots(SlotInfo? slot1 = null, SlotInfo? slot2 = null, SlotInfo? slot3 = null) =>
+        new(slot1 ?? SlotOf(1), slot2 ?? SlotOf(2), slot3 ?? SlotOf(3));
+
+    /// <summary>The start screen with <paramref name="slots"/> received (as the Save module sends them) and one tick run.</summary>
+    private StartScreenModule WithSlots(FakeBus bus, SaveSlots slots)
+    {
+        var screen = Started(bus);
+        screen.Handle(slots);
+        Tick(screen);
+        return screen;
+    }
+
+    [Fact]
+    public void StartListensForTheSaveSlots()
+    {
+        var bus = new FakeBus();
+        Started(bus);
+        Assert.Contains(typeof(SaveSlots), bus.Subscribed);
+    }
+
+    [Fact]
+    public void WithoutSavesContinueIsHiddenLoadIsGreyAndNewGameIsHighlighted()
+    {
+        var bus = new FakeBus();
+        var screen = WithSlots(bus, Slots());
+        Assert.False(screen.CanContinue);
+        Assert.Equal((int)TitleItem.NewGame, screen.Highlight);
+        Assert.False(screen.ItemEnabled((int)TitleItem.Continue));
+        Assert.False(screen.ItemEnabled((int)TitleItem.Load));
+        Assert.True(screen.ItemEnabled((int)TitleItem.NewGame));
+        PressAndTick(screen, StartButton.Up, StartButton.Left);
+        screen.Point((int)TitleItem.Continue);
+        screen.Point((int)TitleItem.Load);
+        Tick(screen);
+        Assert.Equal((int)TitleItem.NewGame, screen.Highlight);
+        Assert.Equal(StartStep.Title, screen.Step);
+        Assert.Empty(bus.Loads);
+    }
+
+    [Fact]
+    public void ContinueIsHighlightedOnceSavesAreKnownAndLoadsTheNewestSaveOfAnySlot()
+    {
+        var bus = new FakeBus();
+        var screen = Started(bus);
+        Tick(screen);
+        Assert.Equal((int)TitleItem.NewGame, screen.Highlight);         // nothing known yet
+        // Slot 2's autosave (the Boy) is the newest of all, manual or auto.
+        screen.Handle(Slots(SlotOf(1, manual: SaveAt(10)),
+                            SlotOf(2, manual: SaveAt(20, CharacterKind.Boy), auto: SaveAt(30, CharacterKind.Boy)),
+                            SlotOf(3, auto: SaveAt(25))));
+        Tick(screen);
+        Assert.True(screen.CanContinue);
+        Assert.Equal((int)TitleItem.Continue, screen.Highlight);
+        bus.Order.Clear();
+        PressAndTick(screen, StartButton.Confirm);
+
+        var load = Assert.Single(bus.Loads);
+        Assert.Equal(2, load.Slot);
+        Assert.True(load.Auto);
+        var start = Assert.Single(bus.Starts);
+        Assert.Equal(GameStart.Boy, start.Character);
+        Assert.Equal(GameStart.Cat, start.StarterPet);
+        Assert.Equal(new[] { "LoadGame", "GameStart", "UiFocus", "StartScreenState" }, bus.Order);
+        Assert.False(bus.States[^1].Open);
+        Assert.False(screen.Open);
+        Assert.True(screen.Loaded);
+        Assert.Equal(2, screen.GameSlot);
+        // No character creation: no slot claimed for a new game, no look sent.
+        Assert.Empty(bus.NewGames);
+        Assert.Empty(bus.SetLooks);
+        Assert.Empty(bus.Equips);
+    }
+
+    [Fact]
+    public void ContinueTakesANewerManualSave()
+    {
+        var bus = new FakeBus();
+        var screen = WithSlots(bus, Slots(SlotOf(1, manual: SaveAt(10), auto: SaveAt(5)),
+                                          slot3: SlotOf(3, manual: SaveAt(40), auto: SaveAt(35, CharacterKind.Boy))));
+        PressAndTick(screen, StartButton.Confirm);
+        var load = Assert.Single(bus.Loads);
+        Assert.Equal(3, load.Slot);
+        Assert.False(load.Auto);
+        Assert.Equal(GameStart.Girl, Assert.Single(bus.Starts).Character);
+    }
+
+    [Fact]
+    public void ContinueIsHiddenAgainWhenTheSavesAreGone()
+    {
+        var bus = new FakeBus();
+        var screen = WithSlots(bus, Slots(SlotOf(1, manual: SaveAt(10))));
+        Assert.Equal((int)TitleItem.Continue, screen.Highlight);
+        screen.Handle(Slots(SlotOf(1, manual: SaveInfo.Unreadable)));
+        Tick(screen);
+        Assert.False(screen.CanContinue);
+        Assert.Equal((int)TitleItem.NewGame, screen.Highlight);
+        PressAndTick(screen, StartButton.Confirm);
+        Assert.Equal(StartStep.NewSlot, screen.Step);
+        Assert.Empty(bus.Loads);
+    }
+
+    [Fact]
+    public void AMovedTitleHighlightStaysWhenTheSlotsComeAgain()
+    {
+        var bus = new FakeBus();
+        var screen = WithSlots(bus, Slots(SlotOf(1, manual: SaveAt(10))));
+        PressAndTick(screen, StartButton.Down, StartButton.Down);
+        Assert.Equal((int)TitleItem.NewGame, screen.Highlight);
+        screen.Handle(Slots(SlotOf(1, manual: SaveAt(10))));
+        Tick(screen);
+        Assert.Equal((int)TitleItem.NewGame, screen.Highlight);
+        PressAndTick(screen, StartButton.Up);
+        Assert.Equal((int)TitleItem.Load, screen.Highlight);
+        PressAndTick(screen, StartButton.Up, StartButton.Up);
+        Assert.Equal((int)TitleItem.Continue, screen.Highlight);         // it stops at the top
+    }
+
+    [Fact]
+    public void LoadPicksASlotThenItsManualSaveOrItsAutosave()
+    {
+        var bus = new FakeBus();
+        var slots = Slots(SlotOf(1),
+                          SlotOf(2, manual: SaveAt(20, CharacterKind.Boy, day: 4, coins: 120, area: Area.Forest), auto: SaveAt(30, CharacterKind.Boy)),
+                          SlotOf(3, manual: SaveInfo.Unreadable));
+        var screen = WithSlots(bus, slots);
+        PressAndTick(screen, StartButton.Down);
+        Assert.Equal((int)TitleItem.Load, screen.Highlight);
+        PressAndTick(screen, StartButton.Confirm);
+
+        // The three slots with their info; only slot 2 can be loaded, and it is highlighted.
+        Assert.Equal(StartStep.Load, screen.Step);
+        Assert.Equal(3, StartScreenModule.ItemCount(StartStep.Load));
+        Assert.Equal(1, screen.Highlight);
+        Assert.False(screen.ItemEnabled(0));                             // empty
+        Assert.True(screen.ItemEnabled(1));
+        Assert.False(screen.ItemEnabled(2));                             // unreadable
+        var manual = screen.Slots.Get(2).Manual;
+        Assert.Equal((CharacterKind.Boy, 4, 120, Area.Forest, T0.AddMinutes(20)), (manual.Character, manual.Day, manual.Coins, manual.Area, manual.SavedAt));
+        PressAndTick(screen, StartButton.Down, StartButton.Right, StartButton.Up, StartButton.Up);
+        Assert.Equal(1, screen.Highlight);
+        Assert.Empty(bus.Loads);
+
+        // Slot 2: its manual save and its autosave; the newer (auto) is highlighted.
+        PressAndTick(screen, StartButton.Confirm);
+        Assert.Equal(StartStep.LoadSave, screen.Step);
+        Assert.Equal(2, screen.GameSlot);
+        Assert.Equal(1, screen.Highlight);
+        Assert.True(screen.ItemEnabled(0));
+        Assert.True(screen.ItemEnabled(1));
+        PressAndTick(screen, StartButton.Up);
+        Assert.Equal(0, screen.Highlight);
+        Assert.Empty(bus.Loads);
+        bus.Order.Clear();
+        PressAndTick(screen, StartButton.Confirm);
+
+        var load = Assert.Single(bus.Loads);
+        Assert.Equal((2, false), (load.Slot, load.Auto));
+        Assert.Equal(GameStart.Boy, Assert.Single(bus.Starts).Character);
+        Assert.Equal(new[] { "LoadGame", "GameStart", "UiFocus", "StartScreenState" }, bus.Order);
+        Assert.False(screen.Open);
+        Assert.Empty(bus.NewGames);
+    }
+
+    [Fact]
+    public void LoadingTheAutosaveByMouse()
+    {
+        var bus = new FakeBus();
+        var screen = WithSlots(bus, Slots(slot3: SlotOf(3, manual: SaveAt(50), auto: SaveAt(40, CharacterKind.Boy))));
+        screen.Point((int)TitleItem.Load);
+        screen.Press(StartButton.Confirm);
+        screen.Point(2);                                                // slot 3
+        screen.Press(StartButton.Confirm);
+        Tick(screen);
+        Assert.Equal(StartStep.LoadSave, screen.Step);
+        Assert.Equal(0, screen.Highlight);                               // the manual save is newer
+        screen.Point(1);                                                // click the autosave
+        screen.Press(StartButton.Confirm);
+        Tick(screen);
+        var load = Assert.Single(bus.Loads);
+        Assert.Equal((3, true), (load.Slot, load.Auto));
+        Assert.Equal(GameStart.Boy, Assert.Single(bus.Starts).Character);
+        Assert.True(screen.LoadedAuto);
+    }
+
+    [Fact]
+    public void AMissingOrUnreadableSaveOfTheSlotCannotBeChosen()
+    {
+        var bus = new FakeBus();
+        var screen = WithSlots(bus, Slots(SlotOf(1, manual: SaveInfo.Unreadable, auto: SaveAt(5))));
+        PressAndTick(screen, StartButton.Down, StartButton.Confirm, StartButton.Confirm);
+        Assert.Equal(StartStep.LoadSave, screen.Step);
+        Assert.Equal(1, screen.Highlight);
+        Assert.False(screen.ItemEnabled(0));
+        PressAndTick(screen, StartButton.Up, StartButton.Left);
+        screen.Point(0);
+        Tick(screen);
+        Assert.Equal(1, screen.Highlight);
+        PressAndTick(screen, StartButton.Confirm);
+        Assert.Equal((1, true), (bus.Loads[0].Slot, bus.Loads[0].Auto));
+    }
+
+    [Fact]
+    public void BackLeavesTheLoadMenusWithoutLoading()
+    {
+        var bus = new FakeBus();
+        var screen = WithSlots(bus, Slots(SlotOf(1, manual: SaveAt(1)), SlotOf(2, manual: SaveAt(2))));
+        PressAndTick(screen, StartButton.Down, StartButton.Confirm, StartButton.Down, StartButton.Confirm);
+        Assert.Equal(StartStep.LoadSave, screen.Step);
+        Assert.Equal(2, screen.GameSlot);
+        PressAndTick(screen, StartButton.Back);
+        Assert.Equal(StartStep.Load, screen.Step);
+        Assert.Equal(1, screen.Highlight);                               // still on slot 2
+        PressAndTick(screen, StartButton.Back);
+        Assert.Equal(StartStep.Title, screen.Step);
+        Assert.Equal((int)TitleItem.Load, screen.Highlight);
+        PressAndTick(screen, StartButton.Back);
+        Assert.Equal(StartStep.Title, screen.Step);
+        Assert.True(screen.Open);
+        Assert.Empty(bus.Loads);
+        Assert.Empty(bus.Starts);
+        Assert.All(bus.States, s => Assert.True(s.Open));
+    }
+
+    [Fact]
+    public void NewGameInAnEmptySlotPublishesNewGameInSlotThenTheCreationSteps()
+    {
+        var bus = new FakeBus();
+        var screen = WithSlots(bus, Slots(SlotOf(1, manual: SaveAt(10))));
+        PressAndTick(screen, StartButton.Down, StartButton.Down);
+        Assert.Equal((int)TitleItem.NewGame, screen.Highlight);
+        PressAndTick(screen, StartButton.Confirm);
+        Assert.Equal(StartStep.NewSlot, screen.Step);
+        Assert.Equal(0, screen.Highlight);
+        Assert.True(screen.ItemEnabled(0) && screen.ItemEnabled(1) && screen.ItemEnabled(2));
+        PressAndTick(screen, StartButton.Right, StartButton.Right, StartButton.Right);
+        Assert.Equal(2, screen.Highlight);                               // it stops at slot 3
+        Assert.Empty(bus.NewGames);
+        bus.Order.Clear();
+        PressAndTick(screen, StartButton.Confirm);
+
+        Assert.Equal(StartStep.Character, screen.Step);
+        Assert.Equal(3, Assert.Single(bus.NewGames).Slot);
+        Assert.Equal(new[] { "NewGameInSlot", "UiFocus", "StartScreenState" }, bus.Order);
+        PressAndTick(screen, StartButton.Right, StartButton.Confirm, StartButton.Confirm, StartButton.Right, StartButton.Confirm, StartButton.Confirm);
+        var start = Assert.Single(bus.Starts);
+        Assert.Equal((GameStart.Boy, GameStart.Dog), (start.Character, start.StarterPet));
+        Assert.Single(bus.NewGames);
+        Assert.Empty(bus.Loads);
+        Assert.False(screen.Loaded);
+        Assert.Equal(3, screen.GameSlot);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AnOccupiedSlotAsksOverwriteFirst(bool unreadable)
+    {
+        var bus = new FakeBus();
+        var screen = WithSlots(bus, Slots(SlotOf(1, auto: unreadable ? SaveInfo.Unreadable : SaveAt(10))));
+        screen.Point((int)TitleItem.NewGame);
+        PressAndTick(screen, StartButton.Confirm, StartButton.Confirm);
+        Assert.Equal(StartStep.Overwrite, screen.Step);
+        Assert.Equal(1, screen.Highlight);                               // "No" first
+        Assert.Empty(bus.NewGames);
+
+        PressAndTick(screen, StartButton.Confirm);                       // No
+        Assert.Equal(StartStep.NewSlot, screen.Step);
+        Assert.Equal(0, screen.Highlight);
+        Assert.Empty(bus.NewGames);
+        PressAndTick(screen, StartButton.Confirm);
+        PressAndTick(screen, StartButton.Back);                          // Back is No too
+        Assert.Equal(StartStep.NewSlot, screen.Step);
+        PressAndTick(screen, StartButton.Confirm, StartButton.Left);
+        Assert.Equal(StartStep.Overwrite, screen.Step);
+        Assert.Equal(0, screen.Highlight);
+        Assert.Empty(bus.NewGames);
+        PressAndTick(screen, StartButton.Confirm);                       // Yes
+
+        Assert.Equal(StartStep.Character, screen.Step);
+        Assert.Equal(1, Assert.Single(bus.NewGames).Slot);
+        Assert.Empty(bus.Loads);
+    }
+
+    [Fact]
+    public void BackFromTheCharacterGoesToTheSlotsThenTheTitle()
+    {
+        var bus = new FakeBus();
+        var screen = WithSlots(bus, Slots());
+        PressAndTick(screen, StartButton.Confirm, StartButton.Down, StartButton.Confirm);
+        Assert.Equal(StartStep.Character, screen.Step);
+        Assert.Equal(2, screen.GameSlot);
+        PressAndTick(screen, StartButton.Back);
+        Assert.Equal(StartStep.NewSlot, screen.Step);
+        Assert.Equal(1, screen.Highlight);
+        PressAndTick(screen, StartButton.Back);
+        Assert.Equal(StartStep.Title, screen.Step);
+        Assert.Equal((int)TitleItem.NewGame, screen.Highlight);
+        Assert.Equal(2, Assert.Single(bus.NewGames).Slot);
+        Assert.Empty(bus.Starts);
+    }
+
+    [Fact]
+    public void PointingBeyondAMenuIsIgnored()
+    {
+        var bus = new FakeBus();
+        var screen = WithSlots(bus, Slots(SlotOf(1, manual: SaveAt(1))));
+        screen.Point(StartScreenModule.MaxOptions);
+        screen.Point(3);
+        screen.Point(-1);
+        Tick(screen);
+        Assert.Equal((int)TitleItem.Continue, screen.Highlight);
+        PressAndTick(screen, StartButton.Down, StartButton.Confirm);    // the load step
+        screen.Point(3);
+        Tick(screen);
+        Assert.Equal(0, screen.Highlight);
+    }
+
+    [Fact]
+    public void UiFocusIsOpenEveryTickWhileOpenThenClosedOnce()
+    {
+        var bus = new FakeBus();
+        var screen = Started(bus);
+        for (int i = 0; i < 5; i++)
+            Tick(screen);
+        Assert.Equal(5, bus.Focus.Count);
+        Assert.All(bus.Focus, f => Assert.Equal((StartScreenModule.FocusOwner, true), (f.Owner, f.Open)));
+        PressAndTick(screen, StartButton.Confirm, StartButton.Confirm, StartButton.Confirm, StartButton.Confirm, StartButton.Confirm, StartButton.Confirm);
+        Assert.Equal(6, bus.Focus.Count);
+        Assert.Equal((StartScreenModule.FocusOwner, false), (bus.Focus[^1].Owner, bus.Focus[^1].Open));
+        for (int i = 0; i < 5; i++)
+            Tick(screen);
+        Assert.Equal(6, bus.Focus.Count);
+    }
+
+    [Fact]
+    public void AfterALoadPressesAreIgnoredAndNothingIsPublishedAgain()
+    {
+        var bus = new FakeBus();
+        var screen = WithSlots(bus, Slots(SlotOf(1, manual: SaveAt(1))));
+        PressAndTick(screen, StartButton.Confirm, StartButton.Confirm, StartButton.Back);
+        for (int i = 0; i < 5; i++)
+            PressAndTick(screen, StartButton.Confirm, StartButton.Back);
+        Assert.Single(bus.Loads);
+        Assert.Single(bus.Starts);
+        Assert.Equal(StartStep.Started, screen.Step);
+        Assert.Single(bus.Focus.FindAll(f => !f.Open));
+    }
+
+    [Fact]
+    public void MenuTicksDoNotAllocate()
+    {
+        var bus = new CountingBus();
+        var screen = new StartScreenModule();
+        screen.Start(bus);
+        var slots = Slots(SlotOf(1, manual: SaveAt(1)), SlotOf(2, auto: SaveAt(2)), SlotOf(3, manual: SaveInfo.Unreadable));
+        screen.Handle(slots);
+        screen.Press(StartButton.Down);
+        screen.Press(StartButton.Confirm);
+        screen.Tick(new TickContext(0, 1.0 / 60));
+        Assert.Equal(StartStep.Load, screen.Step);
+        void Run(int ticks)
+        {
+            for (int i = 0; i < ticks; i++)
+            {
+                screen.Handle(slots);
+                if (i % 2 == 0)
+                {
+                    // Back to the title (Load highlighted) and in again, then about the slots.
+                    screen.Press(StartButton.Back);
+                    screen.Press(StartButton.Back);
+                    screen.Press(StartButton.Confirm);
+                    screen.Press(i % 4 == 0 ? StartButton.Down : StartButton.Up);
+                    screen.Point(i % 3);
+                }
+                else
+                {
+                    // Into a slot's saves, about them, and back.
+                    screen.Press(StartButton.Confirm);
+                    screen.Press(StartButton.Up);
+                    screen.Point(1);
+                    screen.Press(StartButton.Back);
+                }
+                screen.Tick(new TickContext(i + 1, 1.0 / 60));
+            }
+        }
+        Run(100);   // warm up
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        Run(100);
+        Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
+        Assert.True(screen.Open);
     }
 
     [Fact]

@@ -1,3 +1,7 @@
+using System;
+using System.Globalization;
+using Fungtopia.Map;
+using Fungtopia.Save;
 using Fungtopia.Shell;
 using Godot;
 using GodotInput = Godot.Input;
@@ -7,7 +11,8 @@ namespace Fungtopia.StartScreen.View;
 /// <summary>
 /// Draws the start screen over everything (a <c>CanvasLayer</c> on layer 50) and reports mouse,
 /// keyboard and gamepad presses to its Core: the "Fungtopia" logo over a soft blurred view of
-/// Mushroom Town, then the Girl and the Boy, then "Make your look" (a panel on the right, the
+/// Mushroom Town with Continue, Load and New Game; the three save slots (Load: then the slot's
+/// manual save and autosave; New Game: "Overwrite?" for a taken slot); then the Girl and the Boy, then "Make your look" (a panel on the right, the
 /// game's own character seen on the left), then the Mushroom Cat and the Mushroom Dog, then
 /// "Start!". On the look step a mouse drag on the left half, Q / E, LB / RB and the right stick
 /// turn the character (the Core's <c>PreviewYaw</c>), like the wardrobe. It takes every input
@@ -31,7 +36,13 @@ public partial class StartScreenView : CanvasLayer, IModuleView
     private Control _content = null!;
     private Label _heading = null!;
     private Label _hint = null!;
-    private Label _prompt = null!;
+    private Label _info = null!;
+    private readonly CapButton[] _menu = new CapButton[3];
+    private readonly SlotCard[] _slotCards = new SlotCard[SaveSlots.Count];
+    private CapButton _yes = null!;
+    private CapButton _no = null!;
+    private float _refresh;
+    private bool _couldContinue;
     private readonly ChoiceCard[] _cards = new ChoiceCard[2];
     private readonly ChoiceCard[] _picks = new ChoiceCard[2];
     private CapButton _start = null!;
@@ -48,6 +59,9 @@ public partial class StartScreenView : CanvasLayer, IModuleView
     private static readonly string[] Models = { "girl", "boy", "cat", "dog" };
     private static readonly string[] Names = { "Girl", "Boy", "Mushroom Cat", "Mushroom Dog" };
     private static readonly Color[] CardCaps = { StartStyle.Pink, StartStyle.Blue, StartStyle.Gold, StartStyle.Red };
+    private static readonly string[] MenuNames = { "Continue", "Load", "New Game" };
+    private static readonly Color[] MenuCaps = { StartStyle.Green, StartStyle.Blue, StartStyle.Red };
+    private static readonly Color[] SlotCaps = { StartStyle.Pink, StartStyle.Blue, StartStyle.Gold };
 
     public void Bind(IModule module) => _screen = (StartScreenModule)module;
 
@@ -88,7 +102,7 @@ public partial class StartScreenView : CanvasLayer, IModuleView
         _root.AddChild(_content);
 
         _heading = NewLabel(64, StartStyle.Cream, 18);
-        _prompt = NewLabel(44, StartStyle.Cream, 14);
+        _info = NewLabel(34, StartStyle.Cream, 12);
         _hint = NewLabel(28, StartStyle.Cream, 10);
         for (int i = 0; i < 2; i++)
         {
@@ -105,6 +119,20 @@ public partial class StartScreenView : CanvasLayer, IModuleView
         _back = new CapButton { Text = "Back", FontSize = 30, CapColor = StartStyle.Lilac };
         _content.AddChild(_start);
         _content.AddChild(_back);
+        for (int i = 0; i < _menu.Length; i++)
+        {
+            _menu[i] = new CapButton { Text = MenuNames[i], FontSize = 44, CapColor = MenuCaps[i] };
+            _content.AddChild(_menu[i]);
+        }
+        for (int i = 0; i < _slotCards.Length; i++)
+        {
+            _slotCards[i] = new SlotCard();
+            _content.AddChild(_slotCards[i]);
+        }
+        _yes = new CapButton { Text = "Yes", FontSize = 44, CapColor = StartStyle.Red };
+        _no = new CapButton { Text = "No", FontSize = 44, CapColor = StartStyle.Green };
+        _content.AddChild(_yes);
+        _content.AddChild(_no);
     }
 
     private Label NewLabel(int size, Color color, int outline)
@@ -134,8 +162,11 @@ public partial class StartScreenView : CanvasLayer, IModuleView
         if (GodotInput.MouseMode != GodotInput.MouseModeEnum.Visible)
             GodotInput.MouseMode = GodotInput.MouseModeEnum.Visible;
         var step = _screen.Step;
-        if (step != _shownStep)
+        _refresh -= dt;
+        if (step != _shownStep || _screen.CanContinue != _couldContinue)
             ShowStep(step);
+        else if (_refresh <= 0f && IsMenu(step))
+            FillSlots(step);   // the Save module sends the slots every second
         Layout(step);
         if (step == StartStep.Look)
         {
@@ -166,13 +197,113 @@ public partial class StartScreenView : CanvasLayer, IModuleView
         }
         _start.Highlighted = step == StartStep.Ready;
         _look.Screen = _screen;
-        _prompt.Modulate = new Color(1f, 1f, 1f, 0.55f + 0.45f * Mathf.Cos(_time * 3.5f));
+        for (int i = 0; i < ItemCount(step); i++)
+        {
+            if (Item(step, i) is CapButton button)
+            {
+                button.Highlighted = _screen.Highlight == i;
+                button.Enabled = _screen.ItemEnabled(i);
+            }
+            else if (Item(step, i) is SlotCard card)
+            {
+                card.Highlighted = _screen.Highlight == i;
+                card.Enabled = _screen.ItemEnabled(i);
+            }
+        }
     }
+
+    private static bool IsMenu(StartStep step) => StartScreenModule.ItemCount(step) > 0;
+
+    private static int ItemCount(StartStep step) => StartScreenModule.ItemCount(step);
+
+    /// <summary>The control of menu item <paramref name="item"/> on <paramref name="step"/> (see the Core's Highlight).</summary>
+    private Control? Item(StartStep step, int item) => step switch
+    {
+        StartStep.Title => _menu[item],
+        StartStep.Load or StartStep.NewSlot or StartStep.LoadSave => _slotCards[item],
+        StartStep.Overwrite => item == 0 ? _yes : _no,
+        _ => null,
+    };
+
+    /// <summary>Writes the slot info on the cards (and what Continue loads under the title menu).</summary>
+    private void FillSlots(StartStep step)
+    {
+        _refresh = 0.5f;
+        var slots = _screen!.Slots;
+        int slot = Math.Max(_screen.GameSlot, 1);
+        for (int i = 0; i < _slotCards.Length; i++)
+        {
+            var card = _slotCards[i];
+            card.CapColor = SlotCaps[i];
+            if (step == StartStep.LoadSave)
+            {
+                var info = i == 0 ? slots.Get(slot).Manual : slots.Get(slot).Auto;
+                card.Title = i == 0 ? "Manual save" : "Autosave";
+                card.Lines = SaveLines(info, i == 1);
+                card.CapColor = i == 0 ? StartStyle.Blue : StartStyle.Lilac;
+            }
+            else if (step == StartStep.Overwrite && i == 0)
+            {
+                card.Title = $"Slot {slot}";
+                card.Lines = SlotLines(slots.Get(slot));
+                card.CapColor = SlotCaps[slot - 1];
+            }
+            else
+            {
+                card.Title = $"Slot {i + 1}";
+                card.Lines = SlotLines(slots.Get(i + 1));
+            }
+        }
+        _info.Text = "";
+        if (step == StartStep.Title && slots.TryGetNewest(out int newest, out bool auto))
+        {
+            var info = auto ? slots.Get(newest).Auto : slots.Get(newest).Manual;
+            _info.Text = $"Continue: slot {newest}, {Character(info)}, day {info.Day}, {AreaName(info.Area)}";
+        }
+        else if (step == StartStep.Overwrite)
+            _info.Text = "The new game takes this slot: its old saves are replaced when it is saved.";
+    }
+
+    /// <summary>A slot card: its newest readable save, or "Empty" / "Damaged save".</summary>
+    private static string[] SlotLines(in SlotInfo slot)
+    {
+        if (slot.Manual.Ok || slot.Auto.Ok)
+            return SaveLines(slot.Newest, slot.NewestIsAuto);
+        return slot.Exists ? new[] { "Damaged save", "cannot be loaded" } : new[] { "Empty" };
+    }
+
+    private static string[] SaveLines(in SaveInfo info, bool auto) => info.State switch
+    {
+        SaveFileState.Ok => new[]
+        {
+            Character(info),
+            $"Day {info.Day}   {info.Coins} coins",
+            AreaName(info.Area),
+            (auto ? "Autosaved " : "Saved ") + info.SavedAt.ToLocalTime().ToString("d MMM HH:mm", CultureInfo.InvariantCulture),
+        },
+        SaveFileState.Unreadable => new[] { "Damaged save", "cannot be loaded" },
+        _ => new[] { "No save yet" },
+    };
+
+    private static string Character(in SaveInfo info) =>
+        info.CharacterName.Length > 0 ? info.CharacterName : info.Character.ToString();
+
+    private static string AreaName(Area area) => area switch
+    {
+        Area.Town => "Mushroom Town",
+        Area.Road => "The Road",
+        Area.Forest => "Mushroom Forest",
+        Area.PetCity => "Pet City",
+        Area.Home => "Home",
+        Area.DeepForest => "Deep Forest",
+        _ => area.ToString(),
+    };
 
     /// <summary>Sets up what a step shows and which previews render.</summary>
     private void ShowStep(StartStep step)
     {
         _shownStep = step;
+        _couldContinue = _screen!.CanContinue;
         _hovered = -1;
         bool title = step == StartStep.Title;
         bool choosing = step is StartStep.Character or StartStep.Pet;
@@ -187,7 +318,7 @@ public partial class StartScreenView : CanvasLayer, IModuleView
             _cards[i].CapColor = CardCaps[first + i];
             _picks[i].Visible = ready;
         }
-        int character = _screen!.Character, pet = 2 + _screen.StarterPet;
+        int character = _screen.Character, pet = 2 + _screen.StarterPet;
         _picks[0].Preview = _stages[character].GetTexture();
         _picks[0].Title = Names[character];
         _picks[0].CapColor = CardCaps[character];
@@ -209,19 +340,31 @@ public partial class StartScreenView : CanvasLayer, IModuleView
         _next.Visible = look;
         _start.Visible = ready;
         _back.Visible = !title;
-        _prompt.Visible = title;
         _heading.Visible = !title;
+        for (int i = 0; i < _menu.Length; i++)
+            _menu[i].Visible = title && (i != (int)TitleItem.Continue || _couldContinue);
+        bool slotCards = step is StartStep.Load or StartStep.NewSlot or StartStep.LoadSave;
+        for (int i = 0; i < _slotCards.Length; i++)
+            _slotCards[i].Visible = (slotCards && i < ItemCount(step)) || (step == StartStep.Overwrite && i == 0);
+        _slotCards[0].Highlighted = false;
+        _slotCards[0].Enabled = true;
+        _yes.Visible = _no.Visible = step == StartStep.Overwrite;
+        _info.Visible = title || step == StartStep.Overwrite;
+        FillSlots(step);
         _heading.Text = step switch
         {
             StartStep.Character => "Choose your character",
             StartStep.Look => "Make your look",
             StartStep.Pet => "Choose your starter pet",
+            StartStep.Load => "Load a game",
+            StartStep.LoadSave => $"Slot {_screen.GameSlot}: which save?",
+            StartStep.NewSlot => "New game: choose a slot",
+            StartStep.Overwrite => $"Overwrite slot {_screen.GameSlot}?",
             _ => "Ready for adventure!",
         };
-        _prompt.Text = "Press Enter  /  E  /  (A)  or click to begin";
         _hint.Text = step switch
         {
-            StartStep.Title => "",
+            StartStep.Title => "Arrows / stick / D-pad: choose     Enter / E / (A) or click: OK",
             StartStep.Ready => "Enter / E / (A): Start!     Esc / (B): back",
             StartStep.Look => "Drag / Q E / (LB)(RB) / right stick: turn\nUp/Down: row    Left/Right: change    Enter/(A): next    Esc/(B): back",
             _ => "Arrows / stick / D-pad: choose     Enter / E / (A): OK     Esc / (B): back",
@@ -235,8 +378,8 @@ public partial class StartScreenView : CanvasLayer, IModuleView
         float u = Mathf.Min(view.X / 1920f, view.Y / 1080f);
         bool title = step == StartStep.Title;
         // The logo: big in the middle on the title, small at the top afterwards.
-        float logoScale = (title ? 1f : 0.42f) * u;
-        float logoY = title ? view.Y * 0.4f : 92f * u;
+        float logoScale = (title ? 0.9f : 0.42f) * u;
+        float logoY = title ? view.Y * 0.34f : 92f * u;
         _logo.Position = _logo.Position.Lerp(new Vector2(view.X * 0.5f, logoY), title && _time < 0.1f ? 1f : 0.2f);
         _logo.Scale = _logo.Scale.Lerp(new Vector2(logoScale, logoScale), title && _time < 0.1f ? 1f : 0.2f);
 
@@ -249,8 +392,32 @@ public partial class StartScreenView : CanvasLayer, IModuleView
         _next.FontSize = Mathf.RoundToInt(42 * u);
         Place(_heading, new Vector2(look ? panelX : view.X * 0.5f, look ? 180f * u : 210f * u), new Vector2(1400f, 90f) * u);
         SetFontSize(_heading, Mathf.RoundToInt(64 * u));
-        Place(_prompt, new Vector2(view.X * 0.5f, view.Y * 0.72f), new Vector2(1400f, 70f) * u);
-        SetFontSize(_prompt, Mathf.RoundToInt(44 * u));
+
+        // The title menu: a row of cap buttons (Continue only when there is a save).
+        int shown = _couldContinue ? 3 : 2;
+        for (int i = 0, slot = 0; i < _menu.Length; i++)
+        {
+            if (!_menu[i].Visible)
+                continue;
+            float x = view.X * 0.5f + (slot++ - (shown - 1) * 0.5f) * 420f * u;
+            Place(_menu[i], new Vector2(x, view.Y * 0.72f), new Vector2(360f, 160f) * u);
+            _menu[i].FontSize = Mathf.RoundToInt(44 * u);
+        }
+        Place(_info, new Vector2(view.X * 0.5f, title ? view.Y * 0.84f : view.Y * 0.5f + 300f * u), new Vector2(1600f, 60f) * u);
+        SetFontSize(_info, Mathf.RoundToInt(32 * u));
+
+        // Slot cards: three in a row (two for a slot's saves, one alone over "Overwrite?").
+        int cards = step == StartStep.Overwrite ? 1 : ItemCount(step);
+        var slotSize = new Vector2(440f, 520f) * u;
+        for (int i = 0; i < cards && i < _slotCards.Length; i++)
+        {
+            float x = view.X * 0.5f + (i - (cards - 1) * 0.5f) * 500f * u;
+            float y = step == StartStep.Overwrite ? view.Y * 0.5f - 40f * u : view.Y * 0.56f;
+            Place(_slotCards[i], new Vector2(x, y), step == StartStep.Overwrite ? slotSize * 0.8f : slotSize);
+        }
+        Place(_yes, new Vector2(view.X * 0.5f - 170f * u, view.Y * 0.5f + 400f * u), new Vector2(260f, 124f) * u);
+        Place(_no, new Vector2(view.X * 0.5f + 170f * u, view.Y * 0.5f + 400f * u), new Vector2(260f, 124f) * u);
+        _yes.FontSize = _no.FontSize = Mathf.RoundToInt(42 * u);
         Place(_hint, new Vector2(view.X * 0.5f, view.Y - 46f * u), new Vector2(1800f, 50f) * u);
         SetFontSize(_hint, Mathf.RoundToInt(28 * u));
         if (look)
@@ -396,8 +563,14 @@ public partial class StartScreenView : CanvasLayer, IModuleView
         var step = _screen!.Step;
         if (step != StartStep.Title && Hit(_back, at))
             _screen.Press(StartButton.Back);
-        else if (step == StartStep.Title)
-            _screen.Press(StartButton.Confirm);
+        else if (IsMenu(step))
+        {
+            if (CardAt(at) is int item and >= 0)
+            {
+                _screen.Point(item);
+                _screen.Press(StartButton.Confirm);
+            }
+        }
         else if (step == StartStep.Ready && Hit(_start, at))
             _screen.Press(StartButton.Confirm);
         else if (step == StartStep.Look && Hit(_next, at))
@@ -413,9 +586,16 @@ public partial class StartScreenView : CanvasLayer, IModuleView
         }
     }
 
-    /// <summary>The choice card under a point (0 or 1), or -1.</summary>
+    /// <summary>The choice card (0 or 1) or menu item under a point, or -1.</summary>
     private int CardAt(Vector2 at)
     {
+        if (IsMenu(_shownStep))
+        {
+            for (int i = 0; i < ItemCount(_shownStep); i++)
+                if (Item(_shownStep, i) is Control item && Hit(item, at))
+                    return i;
+            return -1;
+        }
         if (_shownStep is not (StartStep.Character or StartStep.Pet))
             return -1;
         for (int i = 0; i < 2; i++)
