@@ -109,7 +109,8 @@ public struct HomePet
 /// </summary>
 public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessageHandler<PlayerInput>,
     IMessageHandler<SpendResult>, IMessageHandler<WalletState>, IMessageHandler<OwnedPets>, IMessageHandler<WardrobeState>,
-    IMessageHandler<StartScreenState>, IMessageHandler<CollectSave>, IMessageHandler<RestorePart>
+    IMessageHandler<StartScreenState>, IMessageHandler<CollectSave>, IMessageHandler<RestorePart>,
+    IMessageHandler<ActiveDevice>
 {
     /// <summary>How many pieces of furniture the player can own.</summary>
     public const int MaxItems = 64;
@@ -197,6 +198,9 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
 
     public long Ticks { get; private set; }
 
+    /// <summary>The device the player used last (the latest <see cref="ActiveDevice"/>; keyboard and mouse at start): the panels show its buttons only.</summary>
+    public DeviceKind Device { get; private set; }
+
     /// <summary>A Wardrobe screen is open (the latest <see cref="WardrobeState.Open"/>): no decorating, leaving or other Interact.</summary>
     public bool WardrobeOpen { get; private set; }
 
@@ -250,6 +254,7 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
         bus.Subscribe<StartScreenState>(this);
         bus.Subscribe<CollectSave>(this);
         bus.Subscribe<RestorePart>(this);
+        bus.Subscribe<ActiveDevice>(this);
     }
 
     public void Tick(in TickContext context)
@@ -300,6 +305,8 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
     }
 
     public void Handle(in WalletState message) => Coins = message.Coins;
+
+    public void Handle(in ActiveDevice message) => Device = message.Kind;
 
     public void Handle(in WardrobeState message) => WardrobeOpen = message.Open;
 

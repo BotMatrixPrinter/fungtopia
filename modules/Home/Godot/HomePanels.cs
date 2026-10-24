@@ -1,12 +1,15 @@
+using System.Collections.Generic;
+using Fungtopia.Input;
 using Godot;
 
 namespace Fungtopia.Home.View;
 
 /// <summary>
-/// The Home module's 2D panels (a <see cref="CanvasLayer"/> on layer 11): the "E / X: ..." prompt,
+/// The Home module's 2D panels (a <see cref="CanvasLayer"/> on layer 11): the Interact prompt,
 /// the furniture shop's catalog (prices, the wallet's coins, the answer to the last purchase) and
 /// the decorating help with the held item's name. Rounded cream panels with an ink outline and a
-/// pink title tab; texts change only when the Core's values do.
+/// pink title tab; texts change only when the Core's values do. Prompts and hint lines are
+/// RichTextLabels with the icons of the active device's buttons only, rebuilt when it changes.
 /// </summary>
 public partial class HomePanels : CanvasLayer
 {
@@ -15,18 +18,24 @@ public partial class HomePanels : CanvasLayer
     private static readonly Color Pink = new(0.98f, 0.62f, 0.7f);
 
     private PanelContainer _prompt = null!;
-    private Label _promptLabel = null!;
+    private RichTextLabel _promptLabel = null!;
     private PanelContainer _shop = null!;
     private Label _coins = null!;
     private readonly Label[] _lines = new Label[Furniture.KindCount];
     private Label _answer = null!;
     private PanelContainer _decorate = null!;
-    private Label _decorateTitle = null!;
+    private RichTextLabel _decorateTitle = null!;
+    private RichTextLabel _shopHelp = null!;
+    private RichTextLabel _decorateHelp = null!;
 
     private HomePrompt _shownPrompt = (HomePrompt)(-1);
+    private DeviceKind _shownDevice = (DeviceKind)(-1);
     private int _shownCoins = -1, _shownSelection = -1, _shownAnswer = -1, _shownHeld = -2, _shownItems = -1;
 
     private static Font? s_font;
+
+    // The resource cache holds textures weakly; this keeps the registered icons alive.
+    private static readonly List<Texture2D> s_kept = new();
 
     private static Font Font => s_font ??= new SystemFont
     {
@@ -43,7 +52,7 @@ public partial class HomePanels : CanvasLayer
         AddChild(root);
 
         _prompt = Panel(Cream, 22);
-        _promptLabel = Text("", 30, Ink);
+        _promptLabel = Rich(30, Ink);
         _prompt.AddChild(_promptLabel);
         _prompt.SetAnchorsPreset(Control.LayoutPreset.CenterBottom);
         _prompt.GrowHorizontal = Control.GrowDirection.Both;
@@ -75,7 +84,8 @@ public partial class HomePanels : CanvasLayer
         _answer.AutowrapMode = TextServer.AutowrapMode.WordSmart;
         _answer.CustomMinimumSize = new Vector2(500, 0);
         list.AddChild(_answer);
-        list.AddChild(Text(HomeText.ShopHelp, 18, new Color(0.5f, 0.4f, 0.42f)));
+        _shopHelp = Rich(18, new Color(0.5f, 0.4f, 0.42f));
+        list.AddChild(_shopHelp);
         root.AddChild(_shop);
 
         _decorate = Panel(Cream, 20);
@@ -85,12 +95,14 @@ public partial class HomePanels : CanvasLayer
         var box = new VBoxContainer();
         box.AddThemeConstantOverride("separation", 4);
         _decorate.AddChild(box);
-        _decorateTitle = Text("", 28, Ink);
+        _decorateTitle = Rich(28, Ink);
         _decorateTitle.HorizontalAlignment = HorizontalAlignment.Center;
+        _decorateTitle.SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter;
         box.AddChild(_decorateTitle);
-        var help = Text(HomeText.DecorateHelp, 18, new Color(0.5f, 0.4f, 0.42f));
-        help.HorizontalAlignment = HorizontalAlignment.Center;
-        box.AddChild(help);
+        _decorateHelp = Rich(18, new Color(0.5f, 0.4f, 0.42f));
+        _decorateHelp.HorizontalAlignment = HorizontalAlignment.Center;
+        _decorateHelp.SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter;
+        box.AddChild(_decorateHelp);
         root.AddChild(_decorate);
 
         _prompt.Visible = _shop.Visible = _decorate.Visible = false;
@@ -98,11 +110,20 @@ public partial class HomePanels : CanvasLayer
 
     public void Refresh(HomeModule home)
     {
+        if (home.Device != _shownDevice)
+        {
+            _shownDevice = home.Device;
+            SetRich(_shopHelp, HomeText.ShopHelp(home.Device));
+            SetRich(_decorateHelp, HomeText.DecorateHelp(home.Device));
+            _shownPrompt = (HomePrompt)(-1);
+            _shownHeld = -2;
+        }
+
         if (home.Prompt != _shownPrompt)
         {
             _shownPrompt = home.Prompt;
             _prompt.Visible = home.Prompt != HomePrompt.None;
-            _promptLabel.Text = HomeText.Prompt(home.Prompt);
+            SetRich(_promptLabel, HomeText.Prompt(home.Prompt, home.Device));
         }
 
         _shop.Visible = home.ShopOpen;
@@ -139,9 +160,9 @@ public partial class HomePanels : CanvasLayer
         {
             _shownHeld = home.Held;
             _shownItems = home.ItemCount;
-            _decorateTitle.Text = home.Held >= 0
+            SetRich(_decorateTitle, home.Held >= 0
                 ? $"Decorating: {Furniture.Name(home.Items[home.Held].Kind)}"
-                : HasUnplaced(home) ? "Decorating: pick something up, or Tab / LB for an item" : "Decorating: buy more furniture at the shop in town!";
+                : HasUnplaced(home) ? HomeText.PickUpTitle(home.Device) : "Decorating: buy more furniture at the shop in town!");
         }
     }
 
@@ -182,6 +203,51 @@ public partial class HomePanels : CanvasLayer
         tab.AddThemeStyleboxOverride("panel", style);
         tab.AddChild(Text(title, 28, new Color(1f, 1f, 1f)));
         return tab;
+    }
+
+    /// <summary>A BBCode label sized to its text and icons (one line; it grows with the icons).</summary>
+    private static RichTextLabel Rich(int size, Color color)
+    {
+        var label = new RichTextLabel
+        {
+            BbcodeEnabled = true,
+            FitContent = true,
+            AutowrapMode = TextServer.AutowrapMode.Off,
+            ScrollActive = false,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
+        label.AddThemeFontOverride("normal_font", Font);
+        label.AddThemeFontSizeOverride("normal_font_size", size);
+        label.AddThemeColorOverride("default_color", color);
+        return label;
+    }
+
+    /// <summary>Shows BBCode, first making each icon in it loadable (also without the Input module's view, as in the preview).</summary>
+    private static void SetRich(RichTextLabel label, string bbcode)
+    {
+        for (int at = bbcode.IndexOf("[img="); at >= 0; at = bbcode.IndexOf("[img=", at + 1))
+        {
+            int start = bbcode.IndexOf(']', at) + 1, end = bbcode.IndexOf("[/img]", start);
+            if (start > 0 && end > start)
+                RegisterIcon(bbcode[start..end]);
+        }
+        label.Text = bbcode;
+    }
+
+    /// <summary>Makes an SVG icon loadable by its res:// path when Godot has not imported it (a fresh checkout).</summary>
+    private static void RegisterIcon(string path)
+    {
+        if (ResourceLoader.HasCached(path) || ResourceLoader.Exists(path))
+            return;
+        var image = new Image();
+        if (image.LoadSvgFromString(FileAccess.GetFileAsString(path), 2f) != Error.Ok)
+        {
+            GD.PushWarning($"Fungtopia: Home: cannot read the icon {path}.");
+            return;
+        }
+        var texture = ImageTexture.CreateFromImage(image);
+        texture.TakeOverPath(path);
+        s_kept.Add(texture);
     }
 
     private static Label Text(string text, int size, Color color)

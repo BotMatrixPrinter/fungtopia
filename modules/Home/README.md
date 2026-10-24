@@ -9,11 +9,11 @@ through the Save module (see **Saving** below).
 
 - `Contract/` — `Fungtopia.Home.Contract` (namespace `Fungtopia.Home`): `HomeState`.
 - `Core/` — `Fungtopia.Home.Core`: `HomeModule`, the module's one `IModule`; `Furniture` (the
-  catalog), `HomeRoom` (the floor grid), `HomeText` (the texts and hint lines), `HomeSave` (the saved furniture's JSON), `MenuRepeat` (a held
+  catalog), `HomeRoom` (the floor grid), `HomeText` (the texts, and the prompts and hint lines as RichTextLabel BBCode with button icons per device), `HomeSave` (the saved furniture's JSON), `MenuRepeat` (a held
   menu direction: one step at once, repeating after a short delay).
 - `Godot/` — `Main.tscn` with `HomeView` (furniture, the catalog book, pets at home, the grid and
   cursor while decorating), `HomePanels` (prompt, shop catalog and decorating help, a
-  `CanvasLayer` on layer 11), `HomePetModel`, `HomeModels` (loads .glb models at run time, toon
+  `CanvasLayer` on layer 11); `Glyphs/key_tab.svg` (the Tab key's icon, which the Input module lacks), `HomePetModel`, `HomeModels` (loads .glb models at run time, toon
   materials); `Preview.tscn` (a decorated room, for screenshots); `Shaders/` (toon surface, ink
   outline, floor grid).
 - `Models/` — `furniture.py`, the Blender script that builds and exports `furniture.glb` next to it.
@@ -30,7 +30,7 @@ Test it with `./test.sh Home` from the repository root.
 
 ## Core
 
-`HomeModule` reads `Fungtopia.Player.PlayerState`, `Fungtopia.Input.PlayerInput` (`Interact`),
+`HomeModule` reads `Fungtopia.Player.PlayerState`, `Fungtopia.Input.PlayerInput` (`Interact`), `Fungtopia.Input.ActiveDevice` (`Device`, for the prompts),
 `Fungtopia.Wallet.WalletState` and `SpendResult`, `Fungtopia.Pet.OwnedPets`,
 `Fungtopia.Wardrobe.WardrobeState`, `Fungtopia.StartScreen.StartScreenState` and `Fungtopia.Save.CollectSave` and
 `RestorePart`; it publishes `Fungtopia.Save.SavePart`, `Fungtopia.Player.TeleportPlayer`,
@@ -44,11 +44,11 @@ the start screen is open, below):
   a press made then is dropped, not acted on after "Start!"); `StartDecorating` is refused, and
   the shop and placement mode close if they were open.
 
-- **Door.** Within 1.5 m of `Places.HomeDoor`: "E / X: Enter" teleports the player to
+- **Door.** Within 1.5 m of `Places.HomeDoor`: "[Interact] Enter" teleports the player to
   `Places.HomeInterior`. Inside, within 1.2 m of `Places.HomeExit` (the spot by the door):
-  "E / X: Leave" teleports the player out to `Places.HomeDoor`, facing the street. (The Map
+  "[Interact] Leave" teleports the player out to `Places.HomeDoor`, facing the street. (The Map
   defines `HomeExit` as the inside spot that leaves the house, so leaving lands at `HomeDoor`.)
-- **Shop.** Within 1.5 m of `Places.FurnitureShopSpot`: "E / X: Shop" opens the catalog panel
+- **Shop.** Within 1.5 m of `Places.FurnitureShopSpot`: "[Interact] Shop" opens the catalog panel
   (`ShopOpen`); it closes with Back or once the player is 3 m away. Interact buys the highlighted
   item (`ShopSelection`, `MoveShopSelection`): one `SpendCoins(RequestId, price, name)`, and
   when its `SpendResult` is `Ok` the item goes into the inventory (owned, not placed);
@@ -66,7 +66,7 @@ the start screen is open, below):
   Chair 100, Potted Mushroom 80, Painting (on an easel) 250, Pet Bed 180, Bookshelf 220,
   Toadstool Stool 90. The Basic Bed comes with the house and is not sold.
 - **Decorating.** Inside, within 1.2 m of the little catalog book on its stand (south wall, east
-  of the door, `HomeRoom.BookPosition`): "E / X: Decorate" opens placement mode. It holds the
+  of the door, `HomeRoom.BookPosition`): "[Interact] Decorate" opens placement mode. It holds the
   first owned item not yet placed (`Held`); `NextItem` holds the next one, `MoveCursor` moves it
   on the 0.5 m floor grid (24 x 20 cells over `Areas.Home`, staying inside), `Rotate` turns it a
   quarter turn (odd turns swap its footprint), and Interact (`PlaceOrPickUp`) places it if it
@@ -78,7 +78,7 @@ the start screen is open, below):
   in the north-east corner (`HomeRoom.WardrobeColumn`/`WardrobeRow`, 3 x 2 cells, doors facing
   into the room). It is not furniture: not in `Items`, never moved or picked up, and no furniture
   can be placed over it (its cells are `KeptClear`); pets walk around it. Within 1.2 m of its
-  front (`HomeRoom.WardrobeFront`): "E / X: Wardrobe" publishes `OpenWardrobe` (the Wardrobe
+  front (`HomeRoom.WardrobeFront`): "[Interact] Wardrobe" publishes `OpenWardrobe` (the Wardrobe
   module opens its screen). While `WardrobeState.Open` (`WardrobeOpen`, either Wardrobe screen)
   there is no prompt and Interact does nothing here: no leaving, no decorating
   (`StartDecorating` is refused, and placement mode ends if it was open, a held item going back
@@ -122,7 +122,18 @@ Input module):
 | Buy / place / pick up | E or Enter | A / Cross (X / Square, Interact, works too) |
 | Close / done | Q or Esc | B / Circle |
 
-The panels' hint lines (`HomeText.ShopHelp`, `DecorateHelp`) name exactly these buttons. E and
+**Prompts.** Every prompt and hint shows only the buttons of the device used last
+(`HomeModule.Device`, the latest `ActiveDevice`), as icons in `RichTextLabel`s, rebuilt the moment
+it changes. `HomeText.Prompt(prompt, device)` is the Interact icon (`Prompts.Rich`) and the verb
+("[E key] Enter", "[X] Enter" on Xbox and Generic pads, "[Square] Enter" on PlayStation, "[Y] Enter"
+on Nintendo); `HomeText.ShopHelp(device)` and `DecorateHelp(device)` the hint lines and
+`PickUpTitle(device)` decorating's "pick something up" title. On the keyboard they show Up / Down
+(choose), WASD (move), R (turn), Tab (next item), E (buy / place) and Esc (close / done); on a
+gamepad D-pad Up / Down, the left stick, RB, LB, Confirm (A / Cross / B) and Back (B / Circle / A),
+each family's own icons. Icon sizes are parameters (`PromptIconSize` 40 next to 30 px text,
+`HelpIconSize` 28 in the 18 px hints); the labels fit their content, so the panels grow with the
+icons. `HomePanels` makes each icon it shows loadable when Godot has not imported it (as the Input
+view does for its own), so the preview works without the Input module. E and
 X / Square arrive through the Input module's Interact; the rest the view reads itself. While a
 panel is open the player stands still (its `UiFocus` stops movement in the Input module); the
 player walks through furniture (it collides only with the Map's obstacles).
@@ -145,4 +156,6 @@ face).
 `./screenshot.sh modules/Home/Godot/Preview.tscn` shows a decorated room (the Cat napping on the
 pet bed, the Dog about); `HOME_PREVIEW=decorate` shows placement mode with an item held,
 `HOME_PREVIEW=shop` the furniture shop's catalog, `HOME_PREVIEW=wardrobe` the wardrobe with its
-prompt.
+prompt. `HOME_PREVIEW_DEVICE=xbox` (or `playstation`, `nintendo`, `generic`) shows that pad's
+buttons instead of the keyboard's, e.g. `HOME_PREVIEW=shop HOME_PREVIEW_DEVICE=playstation
+./screenshot.sh modules/Home/Godot/Preview.tscn`.

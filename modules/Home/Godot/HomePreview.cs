@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Fungtopia.Input;
 using Fungtopia.Map;
 using Fungtopia.Pet;
 using Fungtopia.Player;
@@ -16,7 +17,9 @@ namespace Fungtopia.Home.View;
 /// and keeps the Cat and the Dog at home (the Crow is out). The room's walls and floor are a simple
 /// backdrop (the Map module draws the real ones), its south wall left out so the camera can look
 /// in. The environment variable HOME_PREVIEW = "decorate" shows placement mode with an item held,
-/// "shop" the furniture shop's catalog, "wardrobe" the player by the wardrobe (its prompt showing).
+/// "shop" the furniture shop's catalog, "wardrobe" the player by the wardrobe (its prompt showing);
+/// HOME_PREVIEW_DEVICE = "xbox", "playstation", "nintendo" or "generic" shows that pad's buttons
+/// (keyboard and mouse otherwise).
 /// </summary>
 public partial class HomePreview : Node3D
 {
@@ -56,6 +59,14 @@ public partial class HomePreview : Node3D
     {
         _mode = OS.GetEnvironment("HOME_PREVIEW").ToLowerInvariant();
         _home.Start(_bus);
+        _bus.Publish(new ActiveDevice(OS.GetEnvironment("HOME_PREVIEW_DEVICE").ToLowerInvariant() switch
+        {
+            "xbox" => DeviceKind.Xbox,
+            "playstation" or "ps" => DeviceKind.PlayStation,
+            "nintendo" => DeviceKind.Nintendo,
+            "generic" => DeviceKind.Generic,
+            _ => DeviceKind.KeyboardMouse,
+        }));
         Furnish();
         AddBackdrop();
 

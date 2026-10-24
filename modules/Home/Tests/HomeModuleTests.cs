@@ -108,7 +108,7 @@ public class HomeModuleTests
         StandAt(bus, Places.HomeDoor.Position);
         home.Tick(Step);
         Assert.Equal(HomePrompt.Enter, home.Prompt);
-        Assert.Equal("E / X: Enter", HomeText.Prompt(HomePrompt.Enter));
+        Assert.Equal("Enter", HomeText.PromptVerb(HomePrompt.Enter));
 
         PressInteract(bus);
         home.Tick(Step);
@@ -125,7 +125,7 @@ public class HomeModuleTests
         StandAt(bus, Places.HomeExit.Position);
         home.Tick(Step);
         Assert.Equal(HomePrompt.Leave, home.Prompt);
-        Assert.Equal("E / X: Leave", HomeText.Prompt(HomePrompt.Leave));
+        Assert.Equal("Leave", HomeText.PromptVerb(HomePrompt.Leave));
 
         PressInteract(bus);
         home.Tick(Step);
@@ -191,7 +191,7 @@ public class HomeModuleTests
         StandAt(bus, Places.FurnitureShopSpot.Position);
         home.Tick(Step);
         Assert.Equal(HomePrompt.Shop, home.Prompt);
-        Assert.Equal("E / X: Shop", HomeText.Prompt(HomePrompt.Shop));
+        Assert.Equal("Shop", HomeText.PromptVerb(HomePrompt.Shop));
         PressInteract(bus);
         home.Tick(Step);
         Assert.True(home.ShopOpen);
@@ -397,13 +397,110 @@ public class HomeModuleTests
         Assert.False(home.Decorating);
     }
 
-    [Fact]
-    public void TheHintLinesNameTheButtonsTheMenusRead()
+    private static readonly DeviceKind[] AllDevices =
+        { DeviceKind.KeyboardMouse, DeviceKind.Xbox, DeviceKind.PlayStation, DeviceKind.Nintendo, DeviceKind.Generic };
+
+    /// <summary>The icon file names ("xbox_x") in a BBCode text, in order.</summary>
+    private static List<string> IconsIn(string bbcode) =>
+        System.Text.RegularExpressions.Regex.Matches(bbcode, @"\[img=\d+\]res://[^\[]*/([a-z0-9_]+)\.svg\[/img\]")
+            .Select(m => m.Groups[1].Value).ToList();
+
+    /// <summary>Whether an icon belongs to <paramref name="device"/> (Generic pads use the Xbox icons).</summary>
+    private static bool IsDevicesIcon(string icon, DeviceKind device) => device switch
     {
-        Assert.Equal("Up / Down, W / S, D-pad, stick: choose    E / Enter / A: buy    Q / Esc / B: close", HomeText.ShopHelp);
-        Assert.Contains("E / Enter / A: place / pick up", HomeText.DecorateHelp);
-        Assert.Contains("Q / Esc / B: done", HomeText.DecorateHelp);
-        Assert.Contains("Arrows / WASD / D-pad / stick: move", HomeText.DecorateHelp);
+        DeviceKind.KeyboardMouse => icon.StartsWith("key_") || icon.StartsWith("mouse_"),
+        DeviceKind.Xbox or DeviceKind.Generic => icon.StartsWith("xbox_"),
+        DeviceKind.PlayStation => icon.StartsWith("ps_"),
+        _ => icon.StartsWith("ns_"),
+    };
+
+    /// <summary>Every text the panels show with buttons in it, for <paramref name="device"/>.</summary>
+    private static IEnumerable<string> ButtonTexts(DeviceKind device)
+    {
+        foreach (var prompt in new[] { HomePrompt.Enter, HomePrompt.Leave, HomePrompt.Shop, HomePrompt.Decorate, HomePrompt.Wardrobe })
+            yield return HomeText.Prompt(prompt, device);
+        yield return HomeText.ShopHelp(device);
+        yield return HomeText.DecorateHelp(device);
+        yield return HomeText.PickUpTitle(device);
+    }
+
+    [Theory]
+    [InlineData(HomePrompt.Enter, DeviceKind.KeyboardMouse, "key_e", "Enter")]
+    [InlineData(HomePrompt.Leave, DeviceKind.Xbox, "xbox_x", "Leave")]
+    [InlineData(HomePrompt.Shop, DeviceKind.PlayStation, "ps_square", "Shop")]
+    [InlineData(HomePrompt.Decorate, DeviceKind.Nintendo, "ns_y", "Decorate")]
+    [InlineData(HomePrompt.Wardrobe, DeviceKind.Generic, "xbox_x", "Wardrobe")]
+    public void ThePromptIsTheInteractIconOfTheDeviceAndTheVerb(HomePrompt prompt, DeviceKind device, string icon, string verb)
+    {
+        Assert.Equal($"[img={HomeText.PromptIconSize}]res://modules/Input/Glyphs/{icon}.svg[/img] {verb}", HomeText.Prompt(prompt, device));
+        Assert.Equal(Prompts.Rich(PromptAction.Interact, device, HomeText.PromptIconSize) + " " + verb, HomeText.Prompt(prompt, device));
+        Assert.Equal("", HomeText.Prompt(HomePrompt.None, device));
+    }
+
+    [Fact]
+    public void EveryPromptAndHintUsesOnlyTheActiveDevicesIconsAndNoKeyNamesAsText()
+    {
+        foreach (var device in AllDevices)
+            foreach (var text in ButtonTexts(device))
+            {
+                var icons = IconsIn(text);
+                Assert.NotEmpty(icons);
+                Assert.All(icons, icon => Assert.True(IsDevicesIcon(icon, device), $"{device}: {icon} in {text}"));
+                // Outside the icons only plain words remain: no "E / X", "Esc", "(B)" or other button names.
+                string words = System.Text.RegularExpressions.Regex.Replace(text, @"\[img=\d+\][^\[]*\[/img\]", "");
+                Assert.DoesNotContain("[", words);
+                Assert.DoesNotContain("/ X", words);
+                foreach (var name in new[] { "Esc", "Enter /", "Tab", "LB", "RB", "D-pad", "stick", "Cross", "Circle", "Square", "(B)", "(A)", "E /", "Q /" })
+                    Assert.DoesNotContain(name, words);
+            }
+    }
+
+    [Fact]
+    public void TheHintLinesShowTheIconsOfTheButtonsTheMenusRead()
+    {
+        Assert.Equal(new[] { "key_up", "key_down", "key_e", "key_esc" }, IconsIn(HomeText.ShopHelp(DeviceKind.KeyboardMouse)));
+        Assert.Equal(new[] { "xbox_dpad_up", "xbox_dpad_down", "xbox_a", "xbox_b" }, IconsIn(HomeText.ShopHelp(DeviceKind.Xbox)));
+        Assert.Equal(new[] { "ps_dpad_up", "ps_dpad_down", "ps_cross", "ps_circle" }, IconsIn(HomeText.ShopHelp(DeviceKind.PlayStation)));
+        Assert.Equal(new[] { "key_wasd", "key_r", "key_tab", "key_e", "key_esc" }, IconsIn(HomeText.DecorateHelp(DeviceKind.KeyboardMouse)));
+        Assert.Equal(new[] { "xbox_ls", "xbox_rb", "xbox_lb", "xbox_a", "xbox_b" }, IconsIn(HomeText.DecorateHelp(DeviceKind.Xbox)));
+        Assert.Equal(new[] { "ps_ls", "ps_r1", "ps_l1", "ps_cross", "ps_circle" }, IconsIn(HomeText.DecorateHelp(DeviceKind.PlayStation)));
+        Assert.Equal(new[] { "ns_ls", "ns_r", "ns_l", "ns_b", "ns_a" }, IconsIn(HomeText.DecorateHelp(DeviceKind.Nintendo)));
+        Assert.Contains("[/img] choose", HomeText.ShopHelp(DeviceKind.Xbox));
+        Assert.Contains("[/img] place / pick up", HomeText.DecorateHelp(DeviceKind.PlayStation));
+        Assert.Equal(new[] { "key_tab" }, IconsIn(HomeText.PickUpTitle(DeviceKind.KeyboardMouse)));
+        Assert.Equal(new[] { "ps_l1" }, IconsIn(HomeText.PickUpTitle(DeviceKind.PlayStation)));
+        Assert.Contains("[img=40]", HomeText.ShopHelp(DeviceKind.Xbox, 40));
+        Assert.DoesNotContain("[img=28]", HomeText.ShopHelp(DeviceKind.Xbox, 40));
+    }
+
+    [Fact]
+    public void TheIconsTheHintsNameExistAsFiles()
+    {
+        string root = RepoRoot();
+        foreach (var device in AllDevices)
+            foreach (var text in ButtonTexts(device))
+                foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(text, @"\](res://[^\[]+)\["))
+                    Assert.True(System.IO.File.Exists(System.IO.Path.Combine(root, m.Groups[1].Value["res://".Length..])), m.Groups[1].Value);
+    }
+
+    private static string RepoRoot()
+    {
+        var dir = new System.IO.DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !System.IO.File.Exists(System.IO.Path.Combine(dir.FullName, "project.godot")))
+            dir = dir.Parent;
+        return dir?.FullName ?? throw new InvalidOperationException("project.godot not found");
+    }
+
+    [Fact]
+    public void TheDeviceFollowsActiveDeviceEveryChange()
+    {
+        var (home, bus) = Started();
+        Assert.Equal(DeviceKind.KeyboardMouse, home.Device);
+        bus.Publish(new ActiveDevice(DeviceKind.PlayStation));
+        Assert.Equal(DeviceKind.PlayStation, home.Device);
+        Assert.Contains("ps_square", HomeText.Prompt(HomePrompt.Enter, home.Device));
+        bus.Publish(new ActiveDevice(DeviceKind.KeyboardMouse));
+        Assert.Equal(DeviceKind.KeyboardMouse, home.Device);
     }
 
     // The house and placing furniture
@@ -426,7 +523,7 @@ public class HomeModuleTests
         StandAt(bus, HomeRoom.BookPosition + new Vector3(0f, 0f, -0.8f));
         home.Tick(Step);
         Assert.Equal(HomePrompt.Decorate, home.Prompt);
-        Assert.Equal("E / X: Decorate", HomeText.Prompt(HomePrompt.Decorate));
+        Assert.Equal("Decorate", HomeText.PromptVerb(HomePrompt.Decorate));
         PressInteract(bus);
         home.Tick(Step);
         Assert.True(home.Decorating);
@@ -625,7 +722,7 @@ public class HomeModuleTests
         StandAt(bus, spot);
         home.Tick(Step);
         Assert.Equal(HomePrompt.Wardrobe, home.Prompt);
-        Assert.Equal("E / X: Wardrobe", HomeText.Prompt(HomePrompt.Wardrobe));
+        Assert.Equal("Wardrobe", HomeText.PromptVerb(HomePrompt.Wardrobe));
         PressInteract(bus);
         home.Tick(Step);
         Assert.Equal(1, bus.OpenWardrobes);
