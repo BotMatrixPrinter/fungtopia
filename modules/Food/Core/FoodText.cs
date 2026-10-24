@@ -13,15 +13,18 @@ public static class FoodText
 
     public const string StallName = "Mushroom Munchies";
 
-    /// <summary>The stall's prompt (BBCode): the Interact button of <paramref name="device"/> and "Food" ("E: Food", "X: Food").</summary>
+    /// <summary>Number keys' size in pixels in the corner of the food bar's slots (keyboard only).</summary>
+    public const int SlotKeyIconSize = 26;
+
+    /// <summary>The stall's prompt (BBCode): the icon of <paramref name="device"/>'s Interact button and "Food".</summary>
     public static string Prompt(DeviceKind device, int iconSize = PromptIconSize) =>
         $"{Prompts.Rich(PromptAction.Interact, device, iconSize)} Food";
 
-    /// <summary>The menu's hint line (BBCode) for <paramref name="device"/>: Up / Down choose, E / A buy, Q / B close.</summary>
+    /// <summary>The menu's hint line (BBCode), <paramref name="device"/>'s icons only: Up / Down choose, E / A buy, Esc / B close.</summary>
     public static string MenuHelp(DeviceKind device, int iconSize = HelpIconSize) =>
         $"{Prompts.Rich(PromptAction.MenuUp, device, iconSize)}{Prompts.Rich(PromptAction.MenuDown, device, iconSize)} choose{Gap}"
         + $"{Prompts.Rich(Select(device), device, iconSize)} buy{Gap}"
-        + $"{Image(Close(device), iconSize)} close";
+        + $"{Prompts.Rich(PromptAction.Back, device, iconSize)} close";
 
     /// <summary>The food bar's hint (BBCode): the eat button and the select buttons.</summary>
     public static string BarHelp(DeviceKind device, int iconSize = HelpIconSize) =>
@@ -57,9 +60,9 @@ public static class FoodText
     private static PromptAction Select(DeviceKind device) =>
         device == DeviceKind.KeyboardMouse ? PromptAction.Interact : PromptAction.Confirm;
 
-    /// <summary>Close: Q on the keyboard, the Back button (B / Circle / A) on a gamepad.</summary>
-    private static string Close(DeviceKind device) =>
-        device == DeviceKind.KeyboardMouse ? Prompts.GlyphDirectory + "key_q.svg" : Prompts.Icon(PromptAction.Back, device);
+    /// <summary>The corner icon of food bar slot <paramref name="kind"/> (BBCode): its number key on the keyboard, nothing on a gamepad.</summary>
+    public static string SlotKey(int kind, DeviceKind device, int iconSize = SlotKeyIconSize) =>
+        device == DeviceKind.KeyboardMouse ? Image(Key(kind + 1), iconSize) : "";
 
     /// <summary>The icon of number key <paramref name="number"/> (1..3, selecting a food on the keyboard).</summary>
     public static string Key(int number) => $"{Prompts.GlyphDirectory}key_{number}.svg";

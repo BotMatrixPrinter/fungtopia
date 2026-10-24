@@ -37,8 +37,11 @@ public partial class FoodPanels : CanvasLayer
     private StyleBoxFlat _rowStyle = null!, _rowSelectedStyle = null!, _slotStyle = null!, _slotSelectedStyle = null!;
 
     private DeviceKind _shownDevice = (DeviceKind)(-1);
-    private bool _shownPrompt = true;
+    private bool _shownPrompt;
     private int _shownCoins = -1, _shownSelection = -1, _shownAnswer = -1, _shownBag = -1;
+
+    // The bar's hint text is 16 pixels; its icons are a little smaller than the menu's.
+    private const int BarIconSize = 22;
 
     private static Font? s_font;
 
@@ -160,9 +163,9 @@ public partial class FoodPanels : CanvasLayer
             _shownDevice = food.Device;
             SetRich(_promptLabel, FoodText.Prompt(food.Device));
             SetRich(_menuHelp, FoodText.MenuHelp(food.Device));
-            SetRich(_barHelp, FoodText.BarHelp(food.Device, 22));
+            SetRich(_barHelp, FoodText.BarHelp(food.Device, BarIconSize));
             for (int kind = 0; kind < FoodKinds.Count; kind++)
-                SetRich(_slotKeys[kind], food.Device == DeviceKind.KeyboardMouse ? $"[img=26]{FoodText.Key(kind + 1)}[/img]" : "");
+                SetRich(_slotKeys[kind], FoodText.SlotKey(kind, food.Device));
         }
 
         bool prompt = food.StallPrompt;

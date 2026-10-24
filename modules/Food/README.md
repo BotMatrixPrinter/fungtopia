@@ -46,8 +46,8 @@ Contract (`Places.FoodSpot`). Presses are acted on at the next tick.
   `HealPlayer(2)`, `HealPlayer(6)` or `HealPlayer(HealPlayer.Full)` (999).
 - **The stall's menu.** `OpenFoodMenu` opens it (`MenuOpen`; not while defeated or on the start
   screen). Pip owns the prompt and the talking; until Pip exists, Interact within 1.5 m of
-  `Places.FoodSpot` also opens it, with the prompt "[Interact] Food" (`StallPrompt`: "E Food" on the
-  keyboard, "X Food" on an Xbox pad). Once any `OpenFoodMenu` has arrived (`CookPresent`) the module
+  `Places.FoodSpot` also opens it, with the prompt "[Interact] Food" (`StallPrompt`: the E key's icon and "Food" on
+  the keyboard, the X button's icon on an Xbox pad, Square's on a PlayStation pad). Once any `OpenFoodMenu` has arrived (`CookPresent`) the module
   stops doing that. The menu lists the three foods with price, healing and how many you carry
   (`FoodText.MenuLine`, e.g. "Mushroom Soup   12 M¢   +3 ♥   2/9"); `Navigate(y, seconds)` (Up /
   Down, wrapping, repeating while held) moves the highlight (`MenuSelection`); Interact or
@@ -80,12 +80,17 @@ No allocations per tick.
 
 ## View
 
+Every prompt and hint is a `RichTextLabel` of `FoodText`'s BBCode (`Prompt`, `MenuHelp`, `BarHelp`,
+`SlotKey`), made of `Prompts.Rich` icons of the `ActiveDevice` in use (`FoodModule.Device`) and
+words, never key names as text; the labels fit their content, so the panels grow with the icon
+size. They are rebuilt the frame the device changes.
+
 `FoodPanels`, in the game's panel style (rounded cream panels, ink outline, a pink title tab):
 
 - **Prompt** above the bottom center: the Interact icon and "Food", while `StallPrompt`.
 - **Menu** (left middle): "Mushroom Munchies", the wallet's coins, a row per food with its picture,
   name, price, healing and "n/9" (the highlighted row in pink; rows you cannot afford or are full
-  faded), the answer to the last purchase, and the hint line (Up / Down choose, E / A buy, Q / B close,
+  faded), the answer to the last purchase, and the hint line (Up / Down choose, E / A buy, Esc / B close,
   the active device's icons only).
 - **Food bar** (bottom center): the three foods' pictures with their counts, the selected one
   framed in pink and a little bigger, kinds you do not carry faded, the number keys 1 / 2 / 3 on the
@@ -115,6 +120,6 @@ the middle, glowing spores) and `Crumb` (for the crumbs). No faces: only creatur
 ## Screenshots
 
 `./screenshot.sh modules/Food/Godot/Preview.tscn` shows the menu over a stocked food bar (after a
-"Not enough M¢"); `FOOD_PREVIEW=bar` the food bar alone, `FOOD_PREVIEW=eat` a soup halfway eaten
+"Not enough M¢"); `FOOD_PREVIEW=bar` the food bar and the stall's prompt, `FOOD_PREVIEW=eat` a soup halfway eaten
 with crumbs, `FOOD_PREVIEW=eaten` the "+3 ♥" just after. `FOOD_PREVIEW_DEVICE=xbox` (or
 `playstation`, `nintendo`, `generic`) shows that pad's buttons. The player is a simple stand-in.

@@ -265,13 +265,114 @@ public class FoodModuleTests
         Player(10, at: Places.FoodSpot.Position);
         Tick();
         Assert.True(_food.StallPrompt);
-        Assert.Contains("Food", FoodText.Prompt(DeviceKind.KeyboardMouse));
-        Assert.Contains("key_e", FoodText.Prompt(DeviceKind.KeyboardMouse));
-        Assert.Contains("xbox_x", FoodText.Prompt(DeviceKind.Xbox));
         Press(interact: true);
         Assert.True(_food.MenuOpen);
         Assert.False(_food.StallPrompt);
         Assert.True(_bus.Last<UiFocus>().Open);
+    }
+
+    // Each device's icon files start with these; Generic pads show the Xbox buttons.
+    private static string[] OwnIcons(DeviceKind device) => device switch
+    {
+        DeviceKind.KeyboardMouse => new[] { "key_", "mouse_" },
+        DeviceKind.PlayStation => new[] { "ps_" },
+        DeviceKind.Nintendo => new[] { "ns_" },
+        _ => new[] { "xbox_" },
+    };
+
+    /// <summary>The icons' file names in <paramref name="bbcode"/>, and its text with the icons taken out.</summary>
+    private static (List<string> Icons, string Words) Split(string bbcode)
+    {
+        var icons = new List<string>();
+        var words = new System.Text.StringBuilder();
+        int at = 0;
+        foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(bbcode, @"\[img=\d+\]res://modules/Input/Glyphs/([a-z0-9_]+)\.svg\[/img\]"))
+        {
+            words.Append(bbcode, at, m.Index - at);
+            icons.Add(m.Groups[1].Value);
+            at = m.Index + m.Length;
+        }
+        words.Append(bbcode, at, bbcode.Length - at);
+        return (icons, words.ToString());
+    }
+
+    private static string[] AllPromptTexts(DeviceKind device) => new[]
+    {
+        FoodText.Prompt(device), FoodText.MenuHelp(device), FoodText.BarHelp(device),
+        FoodText.SlotKey(0, device), FoodText.SlotKey(1, device), FoodText.SlotKey(2, device),
+    };
+
+    [Theory]
+    [InlineData(DeviceKind.KeyboardMouse)]
+    [InlineData(DeviceKind.Xbox)]
+    [InlineData(DeviceKind.PlayStation)]
+    [InlineData(DeviceKind.Nintendo)]
+    [InlineData(DeviceKind.Generic)]
+    public void PromptsShowOnlyTheActiveDevicesIconsAndNoKeyNames(DeviceKind device)
+    {
+        var own = OwnIcons(device);
+        foreach (string text in AllPromptTexts(device))
+        {
+            var (icons, words) = Split(text);
+            foreach (string icon in icons)
+                Assert.True(own.Any(icon.StartsWith), $"{device} shows {icon}");
+            // Only icons and words: no "E / X: Talk", "Esc/(B)" or "[img" left as text.
+            foreach (string word in words.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                Assert.Contains(word, new[] { "Food", "choose", "buy", "close", "eat" });
+        }
+    }
+
+    [Theory]
+    [InlineData(DeviceKind.KeyboardMouse, "key_e", "key_up key_down", "key_e", "key_esc", "key_f", "key_1 key_2 key_3")]
+    [InlineData(DeviceKind.Xbox, "xbox_x", "xbox_dpad_up xbox_dpad_down", "xbox_a", "xbox_b", "xbox_dpad_up", "xbox_dpad_left xbox_dpad_right")]
+    [InlineData(DeviceKind.Generic, "xbox_x", "xbox_dpad_up xbox_dpad_down", "xbox_a", "xbox_b", "xbox_dpad_up", "xbox_dpad_left xbox_dpad_right")]
+    [InlineData(DeviceKind.PlayStation, "ps_square", "ps_dpad_up ps_dpad_down", "ps_cross", "ps_circle", "ps_dpad_up", "ps_dpad_left ps_dpad_right")]
+    [InlineData(DeviceKind.Nintendo, "ns_y", "ns_dpad_up ns_dpad_down", "ns_b", "ns_a", "ns_dpad_up", "ns_dpad_left ns_dpad_right")]
+    public void PromptsUseTheDevicesButtons(DeviceKind device, string interact, string choose, string buy, string close, string eat, string pick)
+    {
+        var prompt = Split(FoodText.Prompt(device));
+        Assert.Equal(new[] { interact }, prompt.Icons);
+        Assert.Equal(" Food", prompt.Words);
+        var menu = Split(FoodText.MenuHelp(device));
+        Assert.Equal($"{choose} {buy} {close}".Split(' '), menu.Icons);
+        Assert.Equal("choose buy close", string.Join(' ', menu.Words.Split(' ', StringSplitOptions.RemoveEmptyEntries)));
+        var bar = Split(FoodText.BarHelp(device));
+        Assert.Equal($"{eat} {pick}".Split(' '), bar.Icons);
+        Assert.Equal("eat choose", string.Join(' ', bar.Words.Split(' ', StringSplitOptions.RemoveEmptyEntries)));
+        var slots = Enumerable.Range(0, FoodKinds.Count).SelectMany(kind => Split(FoodText.SlotKey(kind, device)).Icons);
+        Assert.Equal(device == DeviceKind.KeyboardMouse ? pick.Split(' ') : Array.Empty<string>(), slots);
+    }
+
+    [Theory]
+    [InlineData(28)]
+    [InlineData(64)]
+    public void PromptIconsTakeTheAskedSize(int size)
+    {
+        foreach (string text in new[] { FoodText.Prompt(DeviceKind.PlayStation, size), FoodText.MenuHelp(DeviceKind.Xbox, size), FoodText.BarHelp(DeviceKind.KeyboardMouse, size), FoodText.SlotKey(0, DeviceKind.KeyboardMouse, size) })
+        {
+            Assert.NotEmpty(Split(text).Icons);
+            Assert.Equal(Split(text).Icons.Count, System.Text.RegularExpressions.Regex.Matches(text, $@"\[img={size}\]").Count);
+        }
+    }
+
+    [Fact]
+    public void TheShownDeviceFollowsActiveDeviceEveryChange()
+    {
+        Assert.Equal(DeviceKind.KeyboardMouse, _food.Device);
+        foreach (var device in new[] { DeviceKind.Xbox, DeviceKind.PlayStation, DeviceKind.KeyboardMouse, DeviceKind.Nintendo })
+        {
+            _bus.Publish(new ActiveDevice(device));
+            Tick();
+            Assert.Equal(device, _food.Device);
+        }
+        // Also while the menu is open (the Input module keeps publishing it then).
+        Player(10);
+        _bus.Publish(new OpenFoodMenu());
+        Tick();
+        Assert.True(_food.MenuOpen);
+        _bus.Publish(new ActiveDevice(DeviceKind.PlayStation));
+        Tick();
+        Assert.Equal(DeviceKind.PlayStation, _food.Device);
     }
 
     [Fact]
