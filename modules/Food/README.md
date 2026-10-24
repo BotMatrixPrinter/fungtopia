@@ -9,8 +9,7 @@ the food bag, the stall's menu and eating. The bag is saved with the game throug
   `OpenFoodMenu` and `FoodKinds` (the kinds' numbers).
 - `Core/` — `Fungtopia.Food.Core`: `FoodModule`, the module's one `IModule`; `FoodCatalog` (names,
   prices, healing), `FoodText` (the texts, and the prompts and hint lines as RichTextLabel BBCode with
-  button icons per device), `FoodSave` (the saved bag's JSON), `MenuRepeat` (a held menu direction:
-  one step at once, repeating after a short delay).
+  button icons per device) and `FoodSave` (the saved bag's JSON).
 - `Godot/` — `Main.tscn` with `FoodView` (the eating effect, pictures of the foods), `FoodPanels`
   (prompt, menu and food bar, a `CanvasLayer` on layer 11), `FoodModels` (loads food.glb at run time,
   toon materials); `Preview.tscn` (for screenshots); `Shaders/` (toon surface, ink outline).
@@ -33,7 +32,7 @@ Test it with `./test.sh Food` from the repository root.
 ## Core
 
 `FoodModule` reads `Fungtopia.Player.PlayerState`, `Fungtopia.Input.PlayerInput` (`Interact`, `Eat`,
-`FoodSelect`, `FoodCycle`), `Fungtopia.Input.ActiveDevice` (for the prompts),
+`FoodSelect`, `FoodCycle`), `Fungtopia.Input.ActiveDevice` (for the prompts), `Fungtopia.Input.MenuNav` (the menu's steps),
 `Fungtopia.Wallet.WalletState` and `SpendResult`, `OpenFoodMenu`,
 `Fungtopia.StartScreen.StartScreenState` and `Fungtopia.Save.CollectSave` and `RestorePart`; it
 publishes `FoodBag`, `FoodEaten`, `Fungtopia.Player.HealPlayer`, `Fungtopia.Wallet.SpendCoins`,
@@ -49,8 +48,10 @@ Contract (`Places.FoodSpot`). Presses are acted on at the next tick.
   `Places.FoodSpot` also opens it, with the prompt "[Interact] Food" (`StallPrompt`: the E key's icon and "Food" on
   the keyboard, the X button's icon on an Xbox pad, Square's on a PlayStation pad). Once any `OpenFoodMenu` has arrived (`CookPresent`) the module
   stops doing that. The menu lists the three foods with price, healing and how many you carry
-  (`FoodText.MenuLine`, e.g. "Mushroom Soup   12 M¢   +3 ♥   2/9"); `Navigate(y, seconds)` (Up /
-  Down, wrapping, repeating while held) moves the highlight (`MenuSelection`); Interact or
+  (`FoodText.MenuLine`, e.g. "Mushroom Soup   12 M¢   +3 ♥   2/9"); each `MenuNav` step with
+  `Vertical` -1 / +1 moves the highlight (`MenuSelection`) one row up / down, wrapping; the Input
+  module paces them (one at once, then one per 0.2 s while held), so a short flick moves exactly one
+  row (`Horizontal` steps and steps while the menu is closed change nothing); Interact or
   `Confirm()` (Enter, gamepad A) buys it: one `SpendCoins(RequestId, price, name)` (request ids from
   `FirstRequestId`, 8240000), and when its `SpendResult` is `Ok` one more is in the bag.
   `LastBuyResult` is `Bought`, `TooFewCoins` ("Not enough M¢") or `Full` (9 carried already; no
@@ -100,11 +101,12 @@ The pictures are the foods' models rendered in small off-screen viewports. While
 `FoodView` shows the food held up in front of the player's face, shrinking bite by bite, with crumbs
 falling; when the meal is done a burst of crumbs and a pink "+3 ♥" (the hearts actually healed,
 `FoodText.Healed`: "+½ ♥" for 1 health) rises over the player's head and fades. Buttons the view
-reads itself while the menu is open (E / X arrive through the Input module's Interact):
+reads itself while the menu is open (E / X arrive through the Input module's Interact, Choose as its
+`MenuNav`):
 
 | Action | Keyboard | Gamepad |
 | --- | --- | --- |
-| Choose | Up / Down, W / S (held: repeats) | D-pad Up / Down, left stick |
+| Choose (`MenuNav`) | Up / Down, W / S (held: one per 0.2 s) | D-pad Up / Down, left stick |
 | Buy | E or Enter | A / Cross (X / Square, Interact, works too) |
 | Close | Q or Esc | B / Circle |
 

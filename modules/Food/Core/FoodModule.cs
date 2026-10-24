@@ -32,7 +32,7 @@ public enum BuyResult
 public sealed class FoodModule : IModule, IMessageHandler<PlayerState>, IMessageHandler<PlayerInput>,
     IMessageHandler<SpendResult>, IMessageHandler<WalletState>, IMessageHandler<OpenFoodMenu>,
     IMessageHandler<StartScreenState>, IMessageHandler<CollectSave>, IMessageHandler<RestorePart>,
-    IMessageHandler<ActiveDevice>
+    IMessageHandler<ActiveDevice>, IMessageHandler<MenuNav>
 {
     /// <summary>The <see cref="SavePart.Module"/> name of the Food module's part.</summary>
     public const string SaveName = "Food";
@@ -64,7 +64,6 @@ public sealed class FoodModule : IModule, IMessageHandler<PlayerState>, IMessage
     private int _pendingKind;
     private float _eatTime;
     private bool _menuFocus, _eatFocus;
-    private MenuRepeat _navigation;
 
     /// <summary>How many of <paramref name="kind"/> are in the bag (0..9).</summary>
     public int Count(int kind) => FoodCatalog.Valid(kind) ? _counts[kind] : 0;
@@ -140,6 +139,7 @@ public sealed class FoodModule : IModule, IMessageHandler<PlayerState>, IMessage
         bus.Subscribe<CollectSave>(this);
         bus.Subscribe<RestorePart>(this);
         bus.Subscribe<ActiveDevice>(this);
+        bus.Subscribe<MenuNav>(this);
     }
 
     public void Tick(in TickContext context)
@@ -209,6 +209,13 @@ public sealed class FoodModule : IModule, IMessageHandler<PlayerState>, IMessage
     public void Handle(in WalletState message) => Coins = message.Coins;
 
     public void Handle(in ActiveDevice message) => Device = message.Kind;
+
+    /// <summary>The Input module's paced menu step: Up / Down move the open menu's highlight one row (the Input module does the repeating).</summary>
+    public void Handle(in MenuNav message)
+    {
+        if (MenuOpen && message.Vertical != 0)
+            MoveMenuSelection(message.Vertical);
+    }
 
     public void Handle(in StartScreenState message) => StartScreenOpen = message.Open;
 
@@ -281,7 +288,6 @@ public sealed class FoodModule : IModule, IMessageHandler<PlayerState>, IMessage
     public void Back()
     {
         MenuOpen = false;
-        _navigation.Reset();
     }
 
     /// <summary>The view's confirm button (Enter, gamepad A): buys at the next tick like Interact, only while the menu is open.</summary>
@@ -296,18 +302,6 @@ public sealed class FoodModule : IModule, IMessageHandler<PlayerState>, IMessage
     {
         int n = FoodKinds.Count;
         MenuSelection = ((MenuSelection + Math.Sign(step)) % n + n) % n;
-    }
-
-    /// <summary>The direction held in the menu (y down, -1, 0 or 1) after <paramref name="seconds"/>: steps the highlight, repeating while held.</summary>
-    public void Navigate(int y, float seconds)
-    {
-        if (!MenuOpen)
-        {
-            _navigation.Reset();
-            return;
-        }
-        if (_navigation.Step(0, Math.Sign(y), seconds))
-            MoveMenuSelection(y);
     }
 
     /// <summary>Buys the highlighted food.</summary>

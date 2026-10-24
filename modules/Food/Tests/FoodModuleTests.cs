@@ -222,19 +222,93 @@ public class FoodModuleTests
         Assert.Empty(_bus.All<SpendCoins>());
     }
 
-    [Fact]
-    public void NavigateStepsTheHighlightOnceThenRepeatsWhileHeld()
+    /// <summary>
+    /// Ticks <paramref name="ticks"/> times with a menu direction held, publishing the
+    /// <see cref="MenuNav"/> the Input module would: a step on the first tick, then one every
+    /// 0.2 s (12 ticks at 60 a second), no step on the ticks between.
+    /// </summary>
+    private void HoldNav(int vertical, int ticks, int horizontal = 0)
     {
+        for (int i = 0; i < ticks; i++)
+        {
+            bool step = i % 12 == 0;
+            _bus.Publish(step ? new MenuNav(vertical, horizontal) : new MenuNav(0, 0));
+            Tick();
+        }
+    }
+
+    [Fact]
+    public void HeldMenuNavMovesTheHighlightOneRowPerFifthOfASecond()
+    {
+        Player(10);
         _food.OpenMenu();
-        _food.Navigate(1, 0.016f);
+        Tick();
+        // Held Down for 0.5 s: steps at 0, 0.2 and 0.4 s.
+        HoldNav(1, 1);
         Assert.Equal(1, _food.MenuSelection);
-        _food.Navigate(1, 0.1f); // still within the repeat delay
-        Assert.Equal(1, _food.MenuSelection);
-        _food.Navigate(1, 0.3f);
+        for (int i = 1; i < 12; i++) // the ticks between steps move nothing
+        {
+            _bus.Publish(new MenuNav(0, 0));
+            Tick();
+            Assert.Equal(1, _food.MenuSelection);
+        }
+        _bus.Publish(new MenuNav(1, 0)); // 0.2 s
+        Tick();
         Assert.Equal(2, _food.MenuSelection);
-        _food.Navigate(0, 0.016f);
-        _food.Navigate(-1, 0.016f);
+        _bus.Publish(new MenuNav(1, 0)); // 0.4 s, wrapping
+        Tick();
+        Assert.Equal(0, _food.MenuSelection);
+
+        // Held Up for 0.5 s (30 ticks): three steps, wrapping 0 -> 2 -> 1 -> 0.
+        HoldNav(-1, 30);
+        Assert.Equal(0, _food.MenuSelection);
+        HoldNav(-1, 13);
         Assert.Equal(1, _food.MenuSelection);
+        Assert.True(_food.MenuOpen);
+    }
+
+    [Fact]
+    public void AShortFlickMovesTheHighlightExactlyOneRow()
+    {
+        Player(10);
+        _food.OpenMenu();
+        Tick();
+        _bus.Publish(new MenuNav(1, 0));
+        Tick();
+        for (int i = 0; i < 60; i++)
+        {
+            _bus.Publish(new MenuNav(0, 0));
+            Tick();
+        }
+        Assert.Equal(1, _food.MenuSelection);
+    }
+
+    [Fact]
+    public void MenuNavMovesNothingWithTheMenuClosedOrSideways()
+    {
+        Player(10);
+        HoldNav(1, 30);
+        Assert.Equal(0, _food.MenuSelection);
+        _food.OpenMenu();
+        HoldNav(0, 30, horizontal: 1);
+        Assert.True(_food.MenuOpen);
+        Assert.Equal(0, _food.MenuSelection);
+        // The food bar's selection is not moved by menu steps either.
+        Assert.Equal(0, _food.Selected);
+    }
+
+    [Fact]
+    public void BuyingBuysTheRowMenuNavHighlighted()
+    {
+        Player(10);
+        _bus.Coins = 50;
+        _food.OpenMenu();
+        Tick();
+        HoldNav(1, 1);
+        _food.Confirm();
+        Tick();
+        Assert.Equal(FoodCatalog.Price(FoodKinds.Soup), _bus.Last<SpendCoins>().Amount);
+        Assert.Equal(1, _food.Count(FoodKinds.Soup));
     }
 
     // The menu: Pip, the stall fallback, UiFocus

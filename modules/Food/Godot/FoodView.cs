@@ -124,7 +124,6 @@ public partial class FoodView : Node3D, IModuleView
             _healed.Scale = Vector3.One * (t < 0.15f ? 0.6f + 0.4f * t / 0.15f : 1f);
         }
 
-        _food.Navigate(HeldUpDown(), dt);
         _panels.Refresh(_food);
     }
 
@@ -211,31 +210,12 @@ public partial class FoodView : Node3D, IModuleView
     {
         if (_food == null || !_food.MenuOpen)
             return;
-        // E / X come through the Input module as Interact; Up / Down are read each frame (Navigate).
+        // E / X come through the Input module as Interact; Up / Down come as MenuNav (Core).
         if (Pressed(e, Key.Q, JoyButton.B) || Pressed(e, Key.Escape, JoyButton.B))
             _food.Back();
         else if (Pressed(e, Key.Enter, JoyButton.A) || Pressed(e, Key.KpEnter, JoyButton.A))
             _food.Confirm();
     }
-
-    /// <summary>Up (-1) or Down (+1) held now on the arrow keys, W / S, the first pad's D-pad or left stick.</summary>
-    private static int HeldUpDown()
-    {
-        int y = 0;
-        if (Held(Key.Up, Key.W, JoyButton.DpadUp)) y--;
-        if (Held(Key.Down, Key.S, JoyButton.DpadDown)) y++;
-        if (y == 0)
-        {
-            float sy = Godot.Input.GetJoyAxis(0, JoyAxis.LeftY);
-            if (MathF.Abs(sy) >= StickThreshold) y = MathF.Sign(sy);
-        }
-        return y;
-    }
-
-    private const float StickThreshold = 0.5f;
-
-    private static bool Held(Key arrow, Key letter, JoyButton button) =>
-        Godot.Input.IsKeyPressed(arrow) || Godot.Input.IsPhysicalKeyPressed(letter) || Godot.Input.IsJoyButtonPressed(0, button);
 
     private static bool Pressed(InputEvent e, Key key, JoyButton button) => e switch
     {
