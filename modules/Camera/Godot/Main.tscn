@@ -1,0 +1,10 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://modules/Camera/Godot/CameraView.cs" id="1_camera"]
+
+[node name="CameraView" type="Camera3D"]
+current = true
+fov = 70.0
+near = 0.1
+far = 400.0
+script = ExtResource("1_camera")
