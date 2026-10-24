@@ -15,7 +15,8 @@ namespace Fungtopia.Player;
 /// Town, walks relative to the camera, turns smoothly, jumps, follows the ground, slides along
 /// trunks, buildings and the edge of the walkable ground, stands still while a dialogue is open,
 /// takes damage, stays down after defeat until the next <see cref="TeleportPlayer"/>.
-/// Hidden and still until the start screen's <see cref="GameStart"/>, which picks the character.
+/// Hidden until the start screen opens; shown standing idle at the home door, facing the camera's
+/// front view, while it is open; in play from its <see cref="GameStart"/>, which picks the character.
 /// Publishes <see cref="PlayerState"/> every tick and <see cref="PlayerDefeated"/> once per defeat.
 /// </summary>
 public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessageHandler<DamagePlayer>,
@@ -39,6 +40,7 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
     private bool _talking;
     private float _bowDraw;
     private bool _screenOpen;
+    private bool _started;
 
     /// <summary>The setting that picks the character (Girl by default) until <see cref="GameStart"/> picks it.</summary>
     public CharacterKind Character { get; set; } = CharacterKind.Girl;
@@ -51,13 +53,17 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
     public bool Alive { get; private set; } = true;
 
     /// <summary>
-    /// False until <see cref="GameStart"/> arrives: the view hides the player, and input and
-    /// damage are ignored. Input is also ignored while <see cref="StartScreenState.Open"/>.
+    /// Whether the view draws the player: while <see cref="StartScreenState.Open"/> (standing idle
+    /// at the home door for character creation) and from <see cref="GameStart"/> on; false only
+    /// before the start screen opens.
     /// </summary>
-    public bool Visible { get; private set; }
+    public bool Visible => _started || _screenOpen;
 
-    /// <summary>Whether the player takes input: shown and the start screen closed.</summary>
-    private bool InPlay => Visible && !_screenOpen;
+    /// <summary>Whether <see cref="GameStart"/> has come: until then damage is ignored.</summary>
+    public bool Started => _started;
+
+    /// <summary>Whether the player takes input (and draws the bow): started and the start screen closed.</summary>
+    private bool InPlay => _started && !_screenOpen;
 
     /// <summary>The camera's yaw as the player knows it (Godot's convention, like <see cref="Facing"/>).</summary>
     public float CameraYaw { get; private set; }
@@ -157,7 +163,8 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
 
     public void Handle(in DialogueState message) => _talking = message.Open;
 
-    public void Handle(in BowState message) => _bowDraw = message.Draw;
+    /// <summary>Out of play (behind the start screen) the bow stays on the back: idle only.</summary>
+    public void Handle(in BowState message) => _bowDraw = InPlay ? message.Draw : 0f;
 
     public void Handle(in StartScreenState message) => _screenOpen = message.Open;
 
@@ -177,13 +184,13 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
         string.Equals(a.Shoes, b.Shoes, StringComparison.Ordinal) && string.Equals(a.Head, b.Head, StringComparison.Ordinal) &&
         string.Equals(a.Face, b.Face, StringComparison.Ordinal) && string.Equals(a.Back, b.Back, StringComparison.Ordinal);
 
-    /// <summary>The first one picks the character and shows the player at the home door; later ones are ignored.</summary>
+    /// <summary>The first one picks the character and puts the player in play at the home door; later ones are ignored.</summary>
     public void Handle(in GameStart message)
     {
-        if (Visible)
+        if (_started)
             return;
         Character = message.Character == GameStart.Boy ? CharacterKind.Boy : CharacterKind.Girl;
-        Visible = true;
+        _started = true;
         _input = default;
         _jumpQueued = false;
         PlaceAt(Places.HomeDoor.Position, Places.HomeDoor.Yaw);
@@ -191,7 +198,7 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
 
     public void Handle(in DamagePlayer message)
     {
-        if (!Visible || !Alive || message.Amount <= 0 || InvulnerableSeconds > 0f)
+        if (!_started || !Alive || message.Amount <= 0 || InvulnerableSeconds > 0f)
             return;
         Health = Math.Max(0, Health - message.Amount);
         InvulnerableSeconds = InvulnerableAfterHit;

@@ -41,12 +41,18 @@ positive turns left; the direction of yaw `a` is `(-sin a, 0, -cos a)`.
 `Places`). The Player Contract references the Map Contract (for `Area`). The game starts at
 `Places.HomeDoor`, facing out.
 
-- **Start screen.** Until the first `GameStart` the player is hidden (`Visible` false: the view
-  hides the model) and stands still at the home door: `PlayerInput` and `DamagePlayer` are
-  ignored. `GameStart` sets `Character` from its `Character` (`GameStart.Girl` 0 or `Boy` 1,
-  replacing the setting), puts the player at `Places.HomeDoor` and shows it; later `GameStart`s
-  are ignored. While `StartScreenState.Open` is true input is ignored too. It still publishes
-  `PlayerState` every tick. Without the StartScreen module the player never appears.
+- **Start screen.** The player is hidden (`Visible` false: the view hides the model) only before
+  the start screen opens. While `StartScreenState.Open` is true it is shown standing idle at
+  `Places.HomeDoor`, facing out (`Places.HomeDoor.Yaw`): the Camera's front view is built from
+  that facing (yaw `Facing` + π), so the character faces the camera on character creation.
+  Meanwhile `PlayerInput` is ignored (no walking, jumping, turning or aim) and `BowState` counts
+  as no draw (the bow stays on the back); until the first `GameStart` (`Started`) `DamagePlayer`
+  is ignored too. The character shown is the `Character` setting (Girl by default): the
+  StartScreen Contract tells the chosen character only at `GameStart`; it is dressed live from
+  the Wardrobe's `AppearanceState` (the look step's `SetLook` / `Equip`). `GameStart` sets
+  `Character` from its `Character` (`GameStart.Girl` 0 or `Boy` 1, replacing the setting) and
+  puts the player at `Places.HomeDoor` in play; later `GameStart`s are ignored. It still
+  publishes `PlayerState` every tick. Without the StartScreen module the player never appears.
 
 Each tick:
 
@@ -106,7 +112,8 @@ latest input's aim). No allocations per tick.
 `PlayerView` sets the Core's `Character` from its exported `Character` property (`"Girl"` in
 `Main.tscn`), which the user argument `--character=boy` overrides (for example
 `godot --path . -- --character=boy`), until the start screen's choice replaces it. The model is
-hidden while `Visible` is false (behind the start screen). The frame `AppearanceVersion` changes
+hidden while `Visible` is false (before the start screen opens); on the start screen it stands
+idle (no motion, no aim, no bow drawn), so the look step shows it. The frame `AppearanceVersion` changes
 (or the character does) it redresses the model with the look (`CharacterModel.Apply`), so the
 wardrobe screen and character creation show each pick at once. It places the model between the last two ticks
 (`Engine.GetPhysicsInterpolationFraction`), turned to `Facing`; a teleport jumps instead of

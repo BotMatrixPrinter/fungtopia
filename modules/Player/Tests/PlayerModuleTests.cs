@@ -143,28 +143,94 @@ public class PlayerModuleTests
     }
 
     [Fact]
-    public void IsHiddenAndStillBeforeGameStart()
+    public void IsHiddenOnlyBeforeTheStartScreenOpens()
     {
         var (bus, player) = BehindTheStartScreen();
         Assert.False(player.Visible);
+        player.Tick(new TickContext(0, Step));
+        Assert.False(player.Visible);
+        Assert.False(player.Started);
+        // The start screen's first state shows the character; it stays shown while open.
+        for (int i = 1; i < 60; i++)
+        {
+            TickOpen(bus, player, i, Idle);
+            Assert.True(player.Visible);
+        }
+        Assert.False(player.Started);
+        // "Start!": still shown, now in play.
+        PressStart(bus, GameStart.Girl);
+        Assert.True(player.Visible);
+        Assert.True(player.Started);
+        player.Tick(new TickContext(60, Step));
+        Assert.True(player.Visible);
+    }
+
+    [Fact]
+    public void StandsIdleAtTheHomeDoorFacingTheCameraWhileTheStartScreenIsOpen()
+    {
+        var (bus, player) = BehindTheStartScreen();
+        // Every kind of input and some damage: all ignored while open.
         var input = new PlayerInput(new Vector2(0.6f, 0.8f), new Vector2(0.3f, 0f), true, true, true, Vector3.Normalize(new Vector3(1f, 0f, -1f)));
         for (int i = 0; i < 120; i++)
         {
+            bus.Publish(new BowState(0.8f, 0));
             TickOpen(bus, player, i, input);
             player.Handle(new DamagePlayer(3, Vector3.Zero));
+            Assert.True(player.Visible);
         }
-        Assert.False(player.Visible);
         Assert.Equal(120, bus.States.Count);
+        var house = Buildings.First(BuildingKind.PlayerHouse);
         Assert.All(bus.States, s =>
         {
             Assert.Equal(Places.HomeDoor.Position, s.Position);
             Assert.Equal(Places.HomeDoor.Yaw, s.Facing);
             Assert.Equal(Vector3.Zero, s.Velocity);
             Assert.True(s.Grounded);
+            Assert.True(s.Alive);
             Assert.Equal(10, s.Health);
+            // Facing out of the house, toward the square.
+            AssertDirection(house.Front, FacingDirection(s.Facing));
         });
+        // The Camera's front view looks back along the facing (yaw Facing + π, give or take its
+        // 15° orbit) from in front of the chest: the facing points from the feet at the camera.
+        float cameraYaw = player.Facing + MathF.PI;
+        var cameraView = FacingDirection(cameraYaw);
+        var cameraAt = Flat(player.Position) - cameraView * 2.5f;
+        AssertDirection(cameraAt - Flat(player.Position), FacingDirection(player.Facing));
+        AssertDirection(Flat(player.Position) - cameraAt, cameraView);
+        // Idle only: no walking, no jump, no aim, the bow on the back, no hit flash.
         Assert.Equal(0f, player.CameraYaw);
         Assert.False(player.HasAim);
+        Assert.Equal(0f, player.Archery.Weight);
+        Assert.False(ArcheryPose.ArrowVisible(player.Archery));
+        Assert.Equal(0f, player.InvulnerableSeconds);
+    }
+
+    [Theory]
+    [InlineData(CharacterKind.Girl)]
+    [InlineData(CharacterKind.Boy)]
+    public void WhileTheStartScreenIsOpenItIsTheSettingsCharacterDressedLiveByTheWardrobe(CharacterKind setting)
+    {
+        // The StartScreen Contract tells the character only at GameStart: until then the setting.
+        var (bus, player) = BehindTheStartScreen();
+        player.Character = setting;
+        TickOpen(bus, player, 0, Idle);
+        Assert.Equal(setting, bus.States[^1].Character);
+        Assert.False(player.Look.Custom);
+        int version = player.AppearanceVersion;
+        // The look step sends SetLook / Equip; the Wardrobe publishes the new AppearanceState.
+        bus.Publish(Dressed("striped_tee", bottom: "shorts", shoes: "sneakers", skin: 3, hairStyle: 1, hairColor: 2, eyeColor: 4));
+        TickOpen(bus, player, 1, Idle);
+        Assert.Equal(version + 1, player.AppearanceVersion);
+        Assert.Equal(setting, player.Look.Character);
+        Assert.Equal(Looks.SkinTones[3], player.Look.SkinColor);
+        Assert.Equal(ModelOf("striped_tee"), player.Look.Top);
+        bus.Publish(Dressed("overalls_top", bottom: "overalls", shoes: "rain_boots", skin: 1, hairStyle: 1, hairColor: 2, eyeColor: 4));
+        TickOpen(bus, player, 2, Idle);
+        Assert.Equal(version + 2, player.AppearanceVersion);
+        Assert.Equal(Looks.SkinTones[1], player.Look.SkinColor);
+        Assert.Equal(ModelOf("overalls"), player.Look.Bottom);
+        Assert.True(player.Visible);
     }
 
     [Fact]

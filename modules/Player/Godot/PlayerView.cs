@@ -10,7 +10,8 @@ namespace Fungtopia.Player.View;
 /// archery pose (<see cref="PlayerModule.Archery"/>, aimed along the input's aim).
 /// The character setting is <see cref="Character"/> ("Girl" or "Boy"), which the command-line
 /// user argument <c>--character=boy</c> (after <c>--</c>) overrides, and the start screen's
-/// choice replaces once the game starts. Hidden until then (<see cref="PlayerModule.Visible"/>).
+/// choice replaces once the game starts. Hidden until the start screen opens, then shown standing
+/// idle at the home door for character creation (<see cref="PlayerModule.Visible"/>).
 /// Dressed by <see cref="PlayerModule.Look"/> (the Wardrobe's <c>AppearanceState</c>), redressed
 /// the frame it changes, so the wardrobe screen shows each pick at once.
 /// </summary>
@@ -82,7 +83,7 @@ public partial class PlayerView : Node3D, IModuleView
             _model.Apply(look);
             _dressedVersion = _player.AppearanceVersion;
         }
-        // Hidden behind the start screen until GameStart (which also picks the character).
+        // Hidden only before the start screen opens; on it the character stands idle for creation.
         _model.Visible = _player.Visible;
         if (!_model.Visible)
             return;
