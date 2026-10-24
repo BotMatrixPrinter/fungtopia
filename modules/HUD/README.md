@@ -9,9 +9,11 @@ cream spots and an ink outline), soft colors and a bold friendly font.
 - **Mushroom Coins** (top right): `WalletState.Coins` as "M¢ 1,250" next to a gold mushroom
   coin (a little spotted mushroom on it, with no face: only creatures have eyes). Each `CoinsEarned` pops the counter (a 0.35 s swell to 1.35×) and floats a gold "+50"
   that rises 70 px into it and fades out over 1.2 s (the latest 4 at a time).
-- **Bow draw ring** (center): a ring around the crosshair dot filling clockwise from the top with
-  `BowState.Draw` (clamped to 0..1), pink turning gold, with a gold halo at full draw; only the
-  dot shows while the bow is relaxed.
+- **Crosshair and bow draw ring** (center): a dot with a ring around it filling clockwise from the
+  top with `BowState.Draw` (clamped to 0..1), pink turning gold, with a gold halo at full draw.
+  It shows only while the bow is in use: it fades in (0.1 s) once `Draw` rises above 0, stays
+  while drawing and for 0.5 s after `Draw` is back to 0 (so you see where the shot went), then
+  fades out (0.1 s); hidden otherwise (walking, talking, menus).
 - **Clock** (under the hearts): a cream pill with "Day 3  2:05 PM" from `TimeOfDay` (`Day`, the
   minute of `Hour`) and a badge: a smiling sun on sky blue by day, a sleepy crescent moon on navy
   while `IsNight`.
@@ -38,8 +40,8 @@ cream spots and an ink outline), soft colors and a bold friendly font.
   and `CoinsEarned`, `Fungtopia.Bow.BowState`, `Fungtopia.DayNight.TimeOfDay` and `WokeUp`,
   `Fungtopia.NPCs.QuestState` (using `Fungtopia.Map.Area`) and `Fungtopia.StartScreen.StartScreenState`, runs the animations on the fixed ticks
   without allocating, and gives the view each value at a fraction between the last two ticks
-  (`HeartsShake(f)`, `CoinsPopScale(f)`, `Floater(i).Rise(f)`, `DrawRing(f)`, `FaintFade(f)`,
-  `WakeTextAlpha(f)`, `BannerSlide(f)`, `QuestPopScale(f)`…), plus `Hidden`, `BannerArea`/`BannerCount`/`BannerSpooky`,
+  (`HeartsShake(f)`, `CoinsPopScale(f)`, `Floater(i).Rise(f)`, `DrawRing(f)`, `CrosshairAlpha(f)`, `FaintFade(f)`,
+  `WakeTextAlpha(f)`, `BannerSlide(f)`, `QuestPopScale(f)`…), plus `Hidden`, `CrosshairVisible`, `BannerArea`/`BannerCount`/`BannerSpooky`,
   `Day`/`ClockMinute`/`IsNight`, `WakeDay` and the quest (`QuestActive`, `QuestTitle`,
   `QuestProgress`, `QuestGoal`, `QuestComplete`, `QuestVersion` counting its changes).
   `HudText` says which places are spooky (`IsSpooky`) and makes the texts ("M¢ 1,250", "+50", "You fainted...", "Mushroom Town", "Day 3",
@@ -51,7 +53,7 @@ cream spots and an ink outline), soft colors and a bold friendly font.
   banner, the quest at 3/5), or with `HUD_PREVIEW=night` (moon, quest complete), `fainted`,
   `woke` (the wake-up text as the screen comes back) or `deep` (entering the Deep Forest).
 - `Tests/` — `HudModuleTests.cs`: xUnit tests of `HudModule` and `HudText` with a fake
-  `IMessageBus`: hearts, coins, the draw ring, the faint and wake-up, the banner (and the spooky
+  `IMessageBus`: hearts, coins, the draw ring and when the crosshair shows, the faint and wake-up, the banner (and the spooky
   Deep Forest one), the clock, the quest tracker, hiding under the start screen, determinism and no allocations per tick.
 
 The font is the system's first of Nunito, Fredoka, Baloo 2, Varela Round, Comic Neue, Quicksand,

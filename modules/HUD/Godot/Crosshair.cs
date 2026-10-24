@@ -3,23 +3,24 @@ using Godot;
 
 namespace Fungtopia.HUD.View;
 
-/// <summary>The center crosshair: a soft dot, and around it the bow draw ring filling clockwise.</summary>
+/// <summary>
+/// The center crosshair: a soft dot, and around it the bow draw ring filling clockwise. The view
+/// shows it (fading through <c>Modulate</c>) only while the bow is in use.
+/// </summary>
 public partial class Crosshair : Control
 {
     public const float Radius = 30f;
     private const float Width = 7f;
 
     private float _draw = -1f;
-    private bool _visible;
 
     public Crosshair() => MouseFilter = MouseFilterEnum.Ignore;
 
-    public void Show(float draw, bool visible)
+    public void Show(float draw)
     {
-        if (draw == _draw && visible == _visible)
+        if (draw == _draw)
             return;
         _draw = draw;
-        _visible = visible;
         QueueRedraw();
     }
 
@@ -27,8 +28,6 @@ public partial class Crosshair : Control
     {
         DrawCircle(Vector2.Zero, 6f, HudStyle.Ink);
         DrawCircle(Vector2.Zero, 3.5f, HudStyle.Cream);
-        if (!_visible)
-            return;
         DrawArc(Vector2.Zero, Radius, 0f, MathF.Tau, 48, new Color(HudStyle.Ink, 0.7f), Width + 5f, true);
         DrawArc(Vector2.Zero, Radius, 0f, MathF.Tau, 48, new Color(HudStyle.Cream, 0.55f), Width, true);
         if (_draw <= 0f)

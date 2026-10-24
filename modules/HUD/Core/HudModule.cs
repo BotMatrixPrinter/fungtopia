@@ -13,7 +13,7 @@ namespace Fungtopia.HUD;
 /// <summary>
 /// The HUD's state: hearts from <see cref="PlayerState"/> (shaking on a hit), Mushroom Coins from
 /// <see cref="WalletState"/> (popping, with a floating "+50" per <see cref="CoinsEarned"/>), the bow
-/// draw ring from <see cref="BowState"/>, the fade to black after <see cref="PlayerDefeated"/> and the
+/// crosshair and draw ring from <see cref="BowState"/> (only while the bow is in use), the fade to black after <see cref="PlayerDefeated"/> and the
 /// wake-up text after <see cref="WokeUp"/>, the place-name banner when <see cref="PlayerState.Area"/>
 /// changes, the clock from <see cref="TimeOfDay"/> and the quest tracker from <see cref="QuestState"/>;
 /// all of it hidden while <see cref="StartScreenState.Open"/>.
@@ -42,6 +42,8 @@ public sealed class HudModule : IModule,
     public const float WakeTextOutSeconds = 1f;
     public const float BannerSeconds = 3f;
     public const float BannerSlideSeconds = 0.45f;
+    public const float CrosshairLingerSeconds = 0.5f;
+    public const float CrosshairFadeSeconds = 0.1f;
 
     private IMessageBus? _bus;
     private float _step = 1f / 60f;
@@ -52,6 +54,8 @@ public sealed class HudModule : IModule,
     private readonly float[] _floaterElapsed = new float[FloaterCapacity];
 
     private float _drawLatest, _drawPrevious, _drawCurrent;
+    private float _sinceDrawn = float.PositiveInfinity;
+    private float _crosshairPrevious, _crosshairCurrent;
     private float _fadePrevious, _fadeCurrent;
     private float _wakeElapsed = float.PositiveInfinity;
     private float _bannerElapsed = float.PositiveInfinity;
@@ -135,6 +139,15 @@ public sealed class HudModule : IModule,
 
         _drawPrevious = _drawCurrent;
         _drawCurrent = _drawLatest;
+
+        // The crosshair shows while the bow is drawn and lingers a moment after the shot.
+        _sinceDrawn = _drawCurrent > 0f ? 0f : _sinceDrawn + dt;
+        _crosshairPrevious = _crosshairCurrent;
+        float aim = _sinceDrawn <= CrosshairLingerSeconds ? 1f : 0f;
+        float fade = dt / CrosshairFadeSeconds;
+        _crosshairCurrent = _crosshairCurrent < aim
+            ? MathF.Min(aim, _crosshairCurrent + fade)
+            : MathF.Max(aim, _crosshairCurrent - fade);
 
         _fadePrevious = _fadeCurrent;
         float target = Fainted ? 1f : 0f;
@@ -264,7 +277,15 @@ public sealed class HudModule : IModule,
     /// <summary>How much of the ring around the crosshair is filled (the bow's draw, 0 to 1).</summary>
     public float DrawRing(float fraction) => _drawPrevious + (_drawCurrent - _drawPrevious) * Math.Clamp(fraction, 0f, 1f);
 
-    public bool DrawRingVisible => _drawCurrent > 0f || _drawPrevious > 0f;
+    /// <summary>
+    /// Opacity of the whole crosshair (dot and ring), 0 to 1: it fades in over
+    /// <see cref="CrosshairFadeSeconds"/> once the bow is drawn, stays while drawing and for
+    /// <see cref="CrosshairLingerSeconds"/> after the draw returns to 0, then fades out.
+    /// </summary>
+    public float CrosshairAlpha(float fraction) =>
+        _crosshairPrevious + (_crosshairCurrent - _crosshairPrevious) * Math.Clamp(fraction, 0f, 1f);
+
+    public bool CrosshairVisible => _crosshairCurrent > 0f || _crosshairPrevious > 0f;
 
     public bool DrawFull => _drawCurrent >= 1f;
 

@@ -267,13 +267,11 @@ public class HudModuleTests
     {
         Tick();
         Assert.Equal(0f, _hud.DrawRing(1f));
-        Assert.False(_hud.DrawRingVisible);
 
         Send(new BowState(0.5f, 0));
         Tick();
         Assert.Equal(0.5f, _hud.DrawRing(1f), 5);
         Assert.Equal(0.25f, _hud.DrawRing(0.5f), 5);
-        Assert.True(_hud.DrawRingVisible);
         Assert.False(_hud.DrawFull);
 
         Send(new BowState(1f, 1));
@@ -294,6 +292,91 @@ public class HudModuleTests
         Send(new BowState(float.NaN, 0));
         Tick();
         Assert.Equal(0f, _hud.DrawRing(1f));
+    }
+
+    // Crosshair visibility
+
+    [Fact]
+    public void CrosshairIsHiddenWhileTheBowIsNotInUse()
+    {
+        Assert.False(_hud.CrosshairVisible);
+        // Walking around, talking, menus: the bow stays relaxed.
+        for (int i = 0; i < 300; i++)
+        {
+            Send(Player(10));
+            Send(new BowState(0f, 0));
+            Tick();
+            Assert.False(_hud.CrosshairVisible);
+            Assert.Equal(0f, _hud.CrosshairAlpha(0f));
+            Assert.Equal(0f, _hud.CrosshairAlpha(1f));
+        }
+    }
+
+    [Fact]
+    public void CrosshairFadesInQuicklyOnceTheBowIsDrawn()
+    {
+        Send(new BowState(0.05f, 0));
+        Tick();
+        Assert.True(_hud.CrosshairVisible);
+        Assert.Equal(0f, _hud.CrosshairAlpha(0f), 5);
+        float first = _hud.CrosshairAlpha(1f);
+        Assert.InRange(first, 0.1f, 0.25f); // one tick of a 0.1 s fade
+        Assert.Equal(first * 0.5f, _hud.CrosshairAlpha(0.5f), 5);
+
+        Tick(2); // 0.05 s in: still fading
+        Assert.InRange(_hud.CrosshairAlpha(1f), 0.3f, 0.7f);
+
+        Tick(Ticks(HudModule.CrosshairFadeSeconds));
+        Assert.Equal(1f, _hud.CrosshairAlpha(0f));
+        Assert.Equal(1f, _hud.CrosshairAlpha(1f));
+    }
+
+    [Fact]
+    public void CrosshairStaysWhileDrawingAndLingersHalfASecondAfterTheShot()
+    {
+        for (int i = 0; i < 90; i++) // 1.5 s of drawing up to full
+        {
+            Send(new BowState(Math.Min(1f, i / 40f + 0.01f), 0));
+            Tick();
+        }
+        Assert.Equal(1f, _hud.CrosshairAlpha(1f));
+
+        Send(new BowState(0f, 1)); // the shot: the draw is back to 0
+        for (int i = 0; i < 27; i++) // 0.45 s later it still shows, fully
+        {
+            Tick();
+            Assert.Equal(1f, _hud.CrosshairAlpha(1f));
+            Assert.True(_hud.CrosshairVisible);
+        }
+
+        Tick(6); // 0.55 s: fading out
+        Assert.True(_hud.CrosshairVisible);
+        Assert.InRange(_hud.CrosshairAlpha(1f), 0.05f, 0.95f);
+
+        Tick(Ticks(HudModule.CrosshairFadeSeconds)); // gone by about 0.65 s
+        Assert.False(_hud.CrosshairVisible);
+        Assert.Equal(0f, _hud.CrosshairAlpha(0f));
+        Assert.Equal(0f, _hud.CrosshairAlpha(1f));
+
+        Tick(120);
+        Assert.False(_hud.CrosshairVisible);
+    }
+
+    [Fact]
+    public void DrawingAgainWhileLingeringKeepsTheCrosshair()
+    {
+        Send(new BowState(0.8f, 0));
+        Tick(Ticks(HudModule.CrosshairFadeSeconds));
+        Send(new BowState(0f, 1));
+        Tick(20); // a third of a second after the shot
+        Send(new BowState(0.3f, 1)); // the next draw
+        Tick(60);
+        Assert.Equal(1f, _hud.CrosshairAlpha(1f));
+        Send(new BowState(0f, 2));
+        Tick(27);
+        Assert.Equal(1f, _hud.CrosshairAlpha(1f)); // the linger starts again from this shot
+        Tick(Ticks(HudModule.CrosshairFadeSeconds) + 6);
+        Assert.False(_hud.CrosshairVisible);
     }
 
     // Fainting
@@ -643,6 +726,7 @@ public class HudModuleTests
                 values.Add(hud.HeartsShake(0.3f));
                 values.Add(hud.CoinsPopScale(0.3f));
                 values.Add(hud.DrawRing(0.3f));
+                values.Add(hud.CrosshairAlpha(0.3f));
                 values.Add(hud.Floater(0).Rise(0.3f));
                 values.Add(hud.BannerSlide(0.3f));
                 values.Add(hud.QuestPopScale(0.3f));
@@ -708,7 +792,7 @@ public class HudModuleTests
             _hud.Handle(full); _hud.Handle(hit); _hud.Handle(wallet); _hud.Handle(earned);
             _hud.Handle(bow); _hud.Handle(defeated); _hud.Tick(context);
             _hud.Handle(open); _hud.Handle(closed); _hud.Handle(deep); _hud.Handle(forest);
-            _ = _hud.Hidden; _ = _hud.BannerSpooky;
+            _ = _hud.Hidden; _ = _hud.BannerSpooky; _ = _hud.CrosshairVisible; _hud.CrosshairAlpha(0.5f);
             _hud.HeartsShake(0.5f); _hud.CoinsPopScale(0.5f); _hud.FaintFade(0.5f);
             _hud.BannerSlide(0.5f); _hud.WakeTextAlpha(0.5f); _hud.FaintTextAlpha(0.5f); _hud.QuestPopScale(0.5f);
         }

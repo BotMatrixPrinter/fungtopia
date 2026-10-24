@@ -258,11 +258,12 @@ public partial class HudView : CanvasLayer, IModuleView
         _banner.Position = new Vector2((viewport.X - BannerWidth) * 0.5f, Mathf.Lerp(-PanelHeight - 16f, Margin, slide));
 
         _crosshair.Position = viewport * 0.5f;
-        _crosshair.Show(_hud.DrawRing(f), _hud.DrawRingVisible);
+        _crosshair.Show(_hud.DrawRing(f));
+        _crosshair.Modulate = new Color(1, 1, 1, _hud.CrosshairAlpha(f));
 
         float fade = _hud.FaintFade(f);
         _fade.Visible = fade > 0f;
-        _crosshair.Visible = fade <= 0f && !_hud.Waking;
+        _crosshair.Visible = _hud.CrosshairVisible && fade <= 0f && !_hud.Waking;
         _fade.Color = new Color(Black, fade);
         float faintText = _hud.FaintTextAlpha(f);
         _fainted.Visible = faintText > 0f;
