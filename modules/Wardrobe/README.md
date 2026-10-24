@@ -8,7 +8,7 @@ Some clothes are rewards. Adding a piece of clothing is one `Catalog` entry plus
 - `Contract/` — `Fungtopia.Wardrobe.Contract` (namespace `Fungtopia.Wardrobe`), see below.
 - `Core/` — `Fungtopia.Wardrobe.Core`: `WardrobeModule`, the module's one `IModule`.
 - `Godot/` — `Main.tscn` with `WardrobeView` (the screens); `WardrobeScreen`, `ShopScreen` and their
-  frame `ScreenPanel`; `AbbyPortrait` (Abby drawn in the shop's header); `IconStudio` (renders each
+  frame `ScreenPanel`; `CapButton` (the big mushroom Done / Buy buttons); `AbbyPortrait` (Abby drawn in the shop's header); `IconStudio` (renders each
   model's little icon in its own `SubViewport`); `ToonGlb` (loads the .glb files toon-shaded with ink
   outlines); `Mannequin` and `Preview.tscn` (for screenshots only); `Shaders/`.
 - `Models/` — `kit.py` (shared Blender helpers and the rig's sizes), `Clothes/<id>.py` and
@@ -28,8 +28,9 @@ Test it with `./test.sh Wardrobe` from the repository root.
 | `Catalog` | | `Items`, `Count`, `IndexOf(id)`, `TryGet(id, out item)`, `StarterOutfits` (3 `StarterOutfit`s: `Name`, `Fit`, `Top`, `Bottom`, `Shoes`, `Head`), `DefaultOutfit(character)` (the Girl starts in the Mushroom Dress outfit, the Boy in Sunny Stripes), `SpiderSilkScarf`, `LadybugBackpack` (the reward ids). |
 | `Looks` | | `SkinTones` (6, light to deep), `HairStyles` (6 `HairStyle`: `Id`, `Name`, `ModelPath`: short, bob, pigtails, ponytail, top bun like Abby's, curly), `HairColors` (8, pink and mint among them) and `HairColorNames`, `EyeColors` (6) and `EyeColorNames`, `Valid(...)`. Colors are `Vector3` RGB 0..1, the same kind of value as a Blender swatch. |
 | `Attach` | | How models sit on the Player rig (below): part names `Head`, `Body`, `LegL`, `LegR` and their pivots. |
-| `AppearanceState` | Wardrobe, every tick | `Skin`, `HairStyle`, `HairColor`, `EyeColor` (indices into `Looks`), `Top`, `Bottom`, `Shoes`, `Head`, `Face`, `Back` (worn item ids, empty for none; `Bottom` is empty under a dress); `Worn(slot)`. |
+| `AppearanceState` | Wardrobe, every tick | `Skin`, `HairStyle`, `HairColor`, `EyeColor` (indices into `Looks`), `Top`, `Bottom`, `Shoes`, `Head`, `Face`, `Back` (shown item ids, empty for none: what is worn, with the item tried on in the shop in its slot; `Bottom` is empty under a dress); `Worn(slot)`. |
 | `WardrobeState` | Wardrobe, every tick | `Open` (a screen is open: the player should stand still and the camera frame them), `Shop` (it is Abby's shop). |
+| `PreviewYaw` | Wardrobe, every tick a screen is open | `Yaw`: how the player turned the character to look at it, radians in [-π, π); 0 faces the camera, positive turns its front to the screen's right (counterclockwise seen from above); 0 each time a screen opens. The Player module should turn the character by it while `WardrobeState.Open`. |
 | `SetLook` | anyone (character creation) | `Skin`, `HairStyle`, `HairColor`, `EyeColor`; ignored when any is out of range. |
 | `Equip` | anyone | `ItemId` puts on an owned item that fits, in its own slot; an empty `ItemId` takes off `EquipSlot` (`Equip.Unequip(slot)`). Others are ignored. |
 | `GrantItem` | anyone (quests) | `ItemId`, `Why`: gives the item (unknown or already owned: nothing). |
@@ -68,6 +69,15 @@ messages above; it publishes `Fungtopia.Wallet.SpendCoins`.
   that fits and is not owned. On the next tick it publishes `SpendCoins` (`RequestId` from
   `RequestIdBase`, the price, the name); a matching `SpendResult` with `Ok` adds the item
   (`LastBuy` = `Bought`), otherwise nothing changes (`NotEnough`, the view's "Not enough M¢").
+- **Trying on.** `TryOn(id)` (the shop's highlighted card) shows a shop item that fits on the
+  character in its slot while the shop is open (`TryingOn`), without wearing it: `Appearance`
+  shows it, `Worn(slot)` does not. An empty or other id, closing or reopening a screen show what
+  is worn again. An item bought while tried on is put on and stays on.
+- **Turning.** While a screen is open each tick turns `Yaw` and publishes it as `PreviewYaw`:
+  `SetTurnButtons(left, right)` (Q / LB, E / RB, held) turn at `TurnRadiansPerSecond` (3), else
+  `SetTurnStick(x)` (the right stick) past `StickDeadZone` (0.2) up to that speed, plus
+  `Drag(pixels)` (a mouse drag, added up between ticks, `DragRadiansPerPixel` 0.01; ignored while
+  closed). Opening a screen sets `Yaw` to 0.
 - **Screens.** `OpenWardrobe` / `OpenShop` open them, `Close()` (Done, Esc, B) closes them.
 - `Coins` (the latest `WalletState`), `Owns`, `Worn(slot)`, `BottomHidden`, `CanBuy`, `Appearance`
   are for the view. No allocations per tick.
@@ -75,19 +85,31 @@ messages above; it publishes `Fungtopia.Wallet.SpendCoins`.
 ## View
 
 `WardrobeView` builds the screens the first time one opens and shows the wardrobe or the shop on a
-canvas layer (20), on the right of the screen: the Player module draws the character live behind
-the panel and the Camera frames it while `WardrobeState.Open` (their jobs). While a screen is open
-the mouse pointer is free and the view takes all input before the Input module (so the game does
-not walk, jump or open the map): mouse clicks (hit-tested on the buttons), arrows / W A S D /
-d-pad / left stick move the focus, Enter / Space / A choose, Q / E / Page Up / Page Down / LB / RB
-change tabs, Esc / B is Done.
+canvas layer (20), styled like the start screen's "Make your look": a big cream heading, the
+rounded cream panel and big mushroom buttons (Done; Buy in the shop) under it, all on the right
+half of the screen (scaled down on narrow screens so it never crosses the middle). The left half
+is left free: the Player module draws the character there and the Camera frames it while
+`WardrobeState.Open` (their jobs). While a screen is open the mouse pointer is free and the view
+takes the input events before the Input module (so the game does not jump, talk or open the map):
+
+| Action | Mouse | Keyboard | Gamepad |
+| --- | --- | --- | --- |
+| Turn the character | Drag on the left half | Q / E (held) | Right stick, LB / RB (held) |
+| Move the focus | Hover a shop card | Arrows, W A S D, Tab | D-pad, left stick |
+| Choose | Click | Enter, Space | A |
+| Tabs (wardrobe) | Click a tab | Page Up / Page Down | LT / RT |
+| Done | Done | Esc | B |
+
+The Input module still polls held W A S D for `PlayerInput.Move`: the character stands still only
+if the Player module ignores `Move` while `WardrobeState.Open` (its job).
 
 - **Wardrobe:** tabs Look / Top / Bottom / Shoes / Head / Face / Back. Look has round swatches for
   skin, hair color and eyes and icon cards for the hair styles; each slot tab has "None" and the
   owned items that fit, with their icons. A pick applies at once (mint card: worn).
 - **Abby's shop:** Abby (big dark eyes, happy smile, tall top bun, triangle dress), the wallet's
-  M¢, and every shop item that fits with its icon and price; owned ones are greyed "Owned". Picking
-  a card selects it and focuses Buy; the answer shows under it ("Not enough M¢" or "Thank you!").
+  M¢, and every shop item that fits with its icon and price; owned ones are greyed "Owned". The
+  highlighted card (focused or hovered; else the picked one) is tried on the character. Picking a
+  card selects it and focuses Buy; the answer shows under it ("Not enough M¢" or "Thank you!").
 
 ## Models
 
@@ -106,6 +128,7 @@ on clothes.
 ## Screenshots
 
 `./screenshot.sh modules/Wardrobe/Godot/Preview.tscn` shows the wardrobe screen (Top tab) beside a
-dressed mannequin (the Player's rig with the hair, skin and items applied); `WARDROBE_PREVIEW`
-picks `look` (the Look tab), `shop` (Abby's shop after buying the Flower Clip and failing to afford
-the Triangle Party Dress) or `items` (four outfits side by side).
+dressed mannequin (the Player's rig with the hair, skin and items applied), turned by `PreviewYaw`
+from a simulated mouse drag; `WARDROBE_PREVIEW` picks `look` (the Look tab), `shop` (Abby's shop
+after buying the Flower Clip, trying on the Triangle Party Dress it fails to afford) or `items`
+(four outfits side by side).

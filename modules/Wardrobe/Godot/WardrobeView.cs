@@ -6,12 +6,13 @@ namespace Fungtopia.Wardrobe.View;
 
 /// <summary>
 /// Shows the Wardrobe Core's screens: the <see cref="WardrobeScreen"/> while the wardrobe is
-/// open, Abby's <see cref="ShopScreen"/> while the shop is, on a canvas layer over the game (the
-/// Player module draws the character behind the panel, the camera frames it). While a screen is
-/// open the mouse is free and this view takes the input before the Input module: mouse clicks
-/// (hit-tested here, so they are not taken to recapture the mouse), arrows / W A S D / d-pad /
-/// left stick to move the focus, Enter / Space / A to choose, Q / E / LB / RB for tabs, Esc / B
-/// for Done.
+/// open, Abby's <see cref="ShopScreen"/> while the shop is, on a canvas layer over the right half
+/// of the game (the Player module draws the character on the left, the camera frames it). While
+/// a screen is open the mouse is free and this view takes the input before the Input module:
+/// mouse clicks (hit-tested here, so they are not taken to recapture the mouse), a mouse drag on
+/// the left half, Q / E, LB / RB and the right stick to turn the character (the Core's
+/// <see cref="PreviewYaw"/>), arrows / W A S D / d-pad / left stick to move the focus, Enter /
+/// Space / A to choose, Page Up / Page Down / LT / RT for tabs, Esc / B for Done.
 /// </summary>
 public partial class WardrobeView : Node, IModuleView
 {
@@ -21,7 +22,13 @@ public partial class WardrobeView : Node, IModuleView
     private WardrobeScreen? _wardrobeScreen;
     private ShopScreen? _shopScreen;
     private ScreenPanel? _shown;
+    private const int Pad = 0;
+    private const float TriggerThreshold = 0.5f;
+
     private Vector2 _stick;
+    private float _triggerLeft;
+    private float _triggerRight;
+    private bool _dragging;
 
     public void Bind(IModule module) => _wardrobe = (WardrobeModule)module;
 
@@ -61,6 +68,17 @@ public partial class WardrobeView : Node, IModuleView
         {
             _shown.Place(GetViewport().GetVisibleRect().Size);
             _shown.Refresh();
+            // Held turning: Q / LB to the left, E / RB to the right, or the right stick.
+            _wardrobe.SetTurnButtons(
+                GodotInput.IsPhysicalKeyPressed(Key.Q) || GodotInput.IsJoyButtonPressed(Pad, JoyButton.LeftShoulder),
+                GodotInput.IsPhysicalKeyPressed(Key.E) || GodotInput.IsJoyButtonPressed(Pad, JoyButton.RightShoulder));
+            _wardrobe.SetTurnStick(GodotInput.GetJoyAxis(Pad, JoyAxis.RightX));
+        }
+        else
+        {
+            _dragging = false;
+            _wardrobe.SetTurnButtons(false, false);
+            _wardrobe.SetTurnStick(0f);
         }
     }
 
@@ -85,7 +103,9 @@ public partial class WardrobeView : Node, IModuleView
             return;
         switch (e)
         {
-            case InputEventMouseMotion:
+            case InputEventMouseMotion motion:
+                if (_dragging)
+                    _wardrobe.Drag(motion.Relative.X);
                 return; // hover highlights through the GUI
             case InputEventMouseButton { ButtonIndex: MouseButton.Left, Pressed: true } click:
                 if (ButtonAt(_shown, click.Position) is Button hit)
@@ -93,13 +113,18 @@ public partial class WardrobeView : Node, IModuleView
                     hit.GrabFocus();
                     hit.EmitSignal(BaseButton.SignalName.Pressed);
                 }
+                else if (click.Position.X < GetViewport().GetVisibleRect().Size.X * 0.5f)
+                    _dragging = true; // the left half: drag to turn the character
+                break;
+            case InputEventMouseButton { ButtonIndex: MouseButton.Left, Pressed: false }:
+                _dragging = false;
                 break;
             case InputEventKey { Pressed: true } key:
                 switch (key.PhysicalKeycode)
                 {
                     case Key.Escape: _wardrobe.Close(); break;
-                    case Key.Q or Key.Pageup: _shown.StepTab(-1); break;
-                    case Key.E or Key.Pagedown: _shown.StepTab(1); break;
+                    case Key.Pageup: _shown.StepTab(-1); break;
+                    case Key.Pagedown: _shown.StepTab(1); break;
                     case Key.Enter or Key.KpEnter or Key.Space: Press(); break;
                     case Key.Up or Key.W: Move(Side.Top); break;
                     case Key.Down or Key.S: Move(Side.Bottom); break;
@@ -113,8 +138,6 @@ public partial class WardrobeView : Node, IModuleView
                 {
                     case JoyButton.A: Press(); break;
                     case JoyButton.B: _wardrobe.Close(); break;
-                    case JoyButton.LeftShoulder: _shown.StepTab(-1); break;
-                    case JoyButton.RightShoulder: _shown.StepTab(1); break;
                     case JoyButton.DpadUp: Move(Side.Top); break;
                     case JoyButton.DpadDown: Move(Side.Bottom); break;
                     case JoyButton.DpadLeft: Move(Side.Left); break;
@@ -123,6 +146,9 @@ public partial class WardrobeView : Node, IModuleView
                 break;
             case InputEventJoypadMotion { Axis: JoyAxis.LeftX or JoyAxis.LeftY } motion:
                 Stick(motion);
+                break;
+            case InputEventJoypadMotion { Axis: JoyAxis.TriggerLeft or JoyAxis.TriggerRight } trigger:
+                Trigger(trigger);
                 break;
         }
         // Nothing reaches the game (walking, jumping, the map) while a screen is open.
@@ -141,6 +167,19 @@ public partial class WardrobeView : Node, IModuleView
             Move(_stick.X > 0 ? Side.Right : Side.Left);
         if (Mathf.Abs(old.Y) < 0.6f && Mathf.Abs(_stick.Y) >= 0.6f)
             Move(_stick.Y > 0 ? Side.Bottom : Side.Top);
+    }
+
+    /// <summary>LT / RT: one tab back or on per pull past the threshold.</summary>
+    private void Trigger(InputEventJoypadMotion motion)
+    {
+        bool left = motion.Axis == JoyAxis.TriggerLeft;
+        float old = left ? _triggerLeft : _triggerRight;
+        if (left)
+            _triggerLeft = motion.AxisValue;
+        else
+            _triggerRight = motion.AxisValue;
+        if (old < TriggerThreshold && motion.AxisValue >= TriggerThreshold)
+            _shown!.StepTab(left ? -1 : 1);
     }
 
     private void Press()

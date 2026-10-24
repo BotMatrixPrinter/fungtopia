@@ -453,3 +453,19 @@ public readonly struct WardrobeState
         Shop = shop;
     }
 }
+
+/// <summary>
+/// Published by the Wardrobe module every tick while the wardrobe or the shop screen is open:
+/// how the player has turned the character to look at it (drag on the left half, Q / E, LB / RB,
+/// the right stick). The Player module turns the character by it while <see cref="WardrobeState.Open"/>.
+/// </summary>
+public readonly struct PreviewYaw
+{
+    /// <summary>
+    /// Radians in [-π, π): 0 faces the camera, positive turns the character's front towards the
+    /// screen's right (counterclockwise seen from above). 0 each time a screen opens.
+    /// </summary>
+    public readonly float Yaw;
+
+    public PreviewYaw(float yaw) => Yaw = yaw;
+}

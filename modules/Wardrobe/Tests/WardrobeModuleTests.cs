@@ -170,6 +170,7 @@ public class WardrobeModuleTests
         public readonly List<WardrobeState> States = new();
         public readonly List<SpendCoins> Spends = new();
         public readonly List<ItemReceived> Received = new();
+        public readonly List<PreviewYaw> Yaws = new();
         public int? Coins;
 
         public void Subscribe<T>(IMessageHandler<T> handler) where T : struct
@@ -185,6 +186,8 @@ public class WardrobeModuleTests
                 Appearances.Add(appearance);
             if (message is WardrobeState state)
                 States.Add(state);
+            if (message is PreviewYaw yaw)
+                Yaws.Add(yaw);
             if (message is ItemReceived received)
                 Received.Add(received);
             if (message is SpendCoins spend)
@@ -366,6 +369,203 @@ public class WardrobeModuleTests
     }
 
     [Fact]
+    public void PreviewYawIsPublishedOnlyWhileAScreenIsOpenAndStartsFacingTheCamera()
+    {
+        var bus = new FakeBus();
+        var wardrobe = Started(bus);
+        wardrobe.SetTurnButtons(false, true);
+        wardrobe.Tick(Step);
+        Assert.Empty(bus.Yaws);                    // closed: nothing, and no turning
+
+        bus.Publish(new OpenWardrobe());
+        wardrobe.SetTurnButtons(false, false);
+        wardrobe.Tick(Step);
+        wardrobe.Tick(Step);
+        Assert.Equal(new[] { 0f, 0f }, bus.Yaws.ConvertAll(y => y.Yaw));
+        wardrobe.Close();
+        wardrobe.Tick(Step);
+        Assert.Equal(2, bus.Yaws.Count);
+
+        bus.Publish(new OpenShop());
+        wardrobe.Tick(Step);
+        Assert.Equal(3, bus.Yaws.Count);           // the shop turns the character too
+        Assert.Equal(0f, bus.Yaws[^1].Yaw);
+    }
+
+    [Fact]
+    public void TurnButtonsTurnAtTheTurnSpeed()
+    {
+        var bus = new FakeBus();
+        var wardrobe = Started(bus);
+        bus.Publish(new OpenWardrobe());
+        float step = WardrobeModule.TurnRadiansPerSecond / 60f;
+
+        wardrobe.SetTurnButtons(false, true);      // E / RB: the front turns to the right
+        for (int i = 0; i < 10; i++)
+            wardrobe.Tick(Step);
+        Assert.Equal(10 * step, bus.Yaws[^1].Yaw, 4);
+        for (int i = 1; i < 10; i++)
+            Assert.Equal(step, bus.Yaws[i].Yaw - bus.Yaws[i - 1].Yaw, 4);
+
+        wardrobe.SetTurnButtons(true, false);      // Q / LB: back to the left
+        for (int i = 0; i < 15; i++)
+            wardrobe.Tick(Step);
+        Assert.Equal(-5 * step, bus.Yaws[^1].Yaw, 4);
+
+        wardrobe.SetTurnButtons(true, true);       // both: no turn
+        wardrobe.Tick(Step);
+        Assert.Equal(-5 * step, bus.Yaws[^1].Yaw, 4);
+        Assert.Equal(wardrobe.Yaw, bus.Yaws[^1].Yaw);
+    }
+
+    [Fact]
+    public void TheRightStickTurnsPastItsDeadZoneAndTheButtonsWin()
+    {
+        var bus = new FakeBus();
+        var wardrobe = Started(bus);
+        bus.Publish(new OpenShop());
+        float full = WardrobeModule.TurnRadiansPerSecond / 60f;
+
+        wardrobe.SetTurnStick(0.15f);              // inside the dead zone
+        wardrobe.Tick(Step);
+        Assert.Equal(0f, bus.Yaws[^1].Yaw);
+
+        wardrobe.SetTurnStick(1f);
+        wardrobe.Tick(Step);
+        Assert.Equal(full, bus.Yaws[^1].Yaw, 4);
+
+        wardrobe.SetTurnStick(-0.6f);              // half way between the dead zone and full
+        wardrobe.Tick(Step);
+        Assert.Equal(full - 0.5f * full, bus.Yaws[^1].Yaw, 4);
+
+        wardrobe.SetTurnStick(-1f);
+        wardrobe.SetTurnButtons(false, true);      // E held with the stick left: E wins
+        wardrobe.Tick(Step);
+        Assert.Equal(1.5f * full, bus.Yaws[^1].Yaw, 4);
+    }
+
+    [Fact]
+    public void MouseDragTurnsAtTheNextTickAndYawWraps()
+    {
+        var bus = new FakeBus();
+        var wardrobe = Started(bus);
+        wardrobe.Drag(500f);                       // closed: ignored
+        bus.Publish(new OpenWardrobe());
+        wardrobe.Tick(Step);
+        Assert.Equal(0f, bus.Yaws[^1].Yaw);
+
+        wardrobe.Drag(30f);
+        wardrobe.Drag(20f);
+        Assert.Equal(0f, wardrobe.Yaw);            // applied on the tick
+        wardrobe.Tick(Step);
+        Assert.Equal(50f * WardrobeModule.DragRadiansPerPixel, bus.Yaws[^1].Yaw, 4);
+        wardrobe.Tick(Step);
+        Assert.Equal(0.5f, bus.Yaws[^1].Yaw, 4);   // a drag is used once
+
+        wardrobe.Drag(-100f);
+        wardrobe.Tick(Step);
+        Assert.Equal(-0.5f, bus.Yaws[^1].Yaw, 4);
+
+        // Past half a turn it wraps round to the other side, staying in [-π, π).
+        wardrobe.Drag(-300f);
+        wardrobe.Tick(Step);
+        Assert.Equal(-3.5f + MathF.Tau, bus.Yaws[^1].Yaw, 4);
+        wardrobe.Drag(float.NaN);
+        wardrobe.Tick(Step);
+        Assert.InRange(bus.Yaws[^1].Yaw, -MathF.PI, MathF.PI);
+
+        // Reopening faces the camera again.
+        wardrobe.Close();
+        bus.Publish(new OpenWardrobe());
+        wardrobe.Tick(Step);
+        Assert.Equal(0f, bus.Yaws[^1].Yaw);
+    }
+
+    [Fact]
+    public void TryingOnShowsTheItemAndRevertsWhenNotBought()
+    {
+        var bus = new FakeBus { Coins = 100 };
+        var wardrobe = Started(bus, CharacterKind.Girl);   // the Mushroom Dress, Mary-Janes, Big Bow
+        bus.Publish(new Equip("shorts"));                  // kept under the dress
+        wardrobe.TryOn("mushroom_hat");                    // shop not open: nothing
+        wardrobe.Tick(Step);
+        Assert.Equal("big_bow", bus.Appearances[^1].Head);
+
+        bus.Publish(new OpenShop());
+        wardrobe.TryOn("mushroom_hat");
+        wardrobe.Tick(Step);
+        Assert.Equal("mushroom_hat", bus.Appearances[^1].Head);
+        Assert.Equal("spotted_dress", bus.Appearances[^1].Top);
+        Assert.Equal(Catalog.IndexOf("big_bow"), wardrobe.Worn(Slot.Head));   // still worn underneath
+
+        // Another highlighted item: the hat goes back to the bow.
+        wardrobe.TryOn("jeans");
+        wardrobe.Tick(Step);
+        Assert.Equal("big_bow", bus.Appearances[^1].Head);
+        Assert.Equal("", bus.Appearances[^1].Bottom);      // under the dress
+        wardrobe.TryOn("sweater_vest");                    // a top instead of the dress shows the bottom
+        wardrobe.Tick(Step);
+        Assert.Equal(("sweater_vest", "shorts"), (bus.Appearances[^1].Top, bus.Appearances[^1].Bottom));
+
+        // Not enough M¢ for it: still only tried on.
+        wardrobe.TryOn("party_dress");
+        wardrobe.Buy("party_dress");
+        wardrobe.Tick(Step);
+        Assert.Equal(BuyResult.NotEnough, wardrobe.LastBuy);
+        Assert.Equal("party_dress", bus.Appearances[^1].Top);
+
+        // Nothing highlighted, or a non-shop item: what is worn.
+        wardrobe.TryOn("");
+        wardrobe.Tick(Step);
+        Assert.Equal("spotted_dress", bus.Appearances[^1].Top);
+        wardrobe.TryOn("striped_tee");
+        wardrobe.Tick(Step);
+        Assert.Equal("spotted_dress", bus.Appearances[^1].Top);
+        Assert.Equal(-1, wardrobe.TryingOn);
+
+        // Closing the shop takes off what was not bought.
+        wardrobe.TryOn("round_glasses");
+        wardrobe.Tick(Step);
+        Assert.Equal("round_glasses", bus.Appearances[^1].Face);
+        wardrobe.Close();
+        wardrobe.Tick(Step);
+        Assert.Equal("", bus.Appearances[^1].Face);
+        Assert.Equal(-1, wardrobe.TryingOn);
+        wardrobe.TryOn("round_glasses");                   // closed: ignored
+        wardrobe.Tick(Step);
+        Assert.Equal("", bus.Appearances[^1].Face);
+    }
+
+    [Fact]
+    public void TryingOnOnlyItemsThatFit()
+    {
+        var bus = new FakeBus();
+        var wardrobe = Started(bus, CharacterKind.Boy);
+        bus.Publish(new OpenShop());
+        wardrobe.TryOn("flower_dress");                    // girl only
+        wardrobe.Tick(Step);
+        Assert.Equal("striped_tee", bus.Appearances[^1].Top);
+        wardrobe.TryOn("no_such_item");
+        Assert.Equal(-1, wardrobe.TryingOn);
+    }
+
+    [Fact]
+    public void AnItemBoughtWhileTriedOnStaysOn()
+    {
+        var bus = new FakeBus { Coins = 1000 };
+        var wardrobe = Started(bus, CharacterKind.Girl);
+        bus.Publish(new OpenShop());
+        wardrobe.TryOn("star_sunglasses");
+        wardrobe.Buy("star_sunglasses");
+        wardrobe.Tick(Step);
+        Assert.Equal(BuyResult.Bought, wardrobe.LastBuy);
+        wardrobe.Close();
+        wardrobe.Tick(Step);
+        Assert.Equal("star_sunglasses", bus.Appearances[^1].Face);
+        Assert.Equal(Catalog.IndexOf("star_sunglasses"), wardrobe.Worn(Slot.Face));
+    }
+
+    [Fact]
     public void BuyingWithEnoughCoinsAddsTheItem()
     {
         var bus = new FakeBus { Coins = 1000 };
@@ -519,6 +719,8 @@ public class WardrobeModuleTests
             wardrobe.Tick(Step);
         var equip = new Equip("beanie");
         var kill = Kill(1, MonsterKind.Caterpillar);
+        wardrobe.Drag(1f);
+        wardrobe.TryOn("skirt");
         long before = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < 1000; i++)
         {
@@ -526,8 +728,17 @@ public class WardrobeModuleTests
             wardrobe.Handle(kill);
             wardrobe.Tick(Step);
         }
+        // Open, turning and trying on.
+        wardrobe.Handle(new OpenShop());
+        wardrobe.SetTurnStick(0.7f);
+        for (int i = 0; i < 1000; i++)
+        {
+            wardrobe.Drag(3f);
+            wardrobe.TryOn("skirt");
+            wardrobe.Tick(Step);
+        }
         Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
-        Assert.Equal(2200, bus.Published);
+        Assert.Equal(2200 + 3000, bus.Published);
     }
 
     /// <summary>A bus that only counts what is published (no allocation).</summary>

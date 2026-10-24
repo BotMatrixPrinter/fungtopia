@@ -22,8 +22,10 @@ public enum BuyResult
 /// <see cref="SetLook"/>, <see cref="Equip"/>, <see cref="GrantItem"/>, <see cref="OpenWardrobe"/>
 /// and <see cref="OpenShop"/>; gives the Spider Silk Scarf and the Ladybug Backpack for the first
 /// Mushroom Tarantula and Mushroom Ladybug defeated; buys in Abby's shop with
-/// <see cref="SpendCoins"/>. Publishes <see cref="AppearanceState"/> and <see cref="WardrobeState"/>
-/// every tick, <see cref="ItemReceived"/> for each new item. No allocations per tick.
+/// <see cref="SpendCoins"/>, trying the highlighted item on first. Publishes <see cref="AppearanceState"/>
+/// and <see cref="WardrobeState"/> every tick, <see cref="PreviewYaw"/> every tick a screen is open
+/// (the character turned by the view's drag, keys and stick), <see cref="ItemReceived"/> for each
+/// new item. No allocations per tick.
 /// </summary>
 public sealed class WardrobeModule : IModule, IMessageHandler<SetLook>, IMessageHandler<Equip>,
     IMessageHandler<GrantItem>, IMessageHandler<OpenWardrobe>, IMessageHandler<OpenShop>,
@@ -37,6 +39,15 @@ public sealed class WardrobeModule : IModule, IMessageHandler<SetLook>, IMessage
     public const string TarantulaReason = "First Mushroom Tarantula";
     public const string LadybugReason = "First Mushroom Ladybug";
 
+    /// <summary>Turning speed with Q / E, LB / RB or the right stick fully pushed, radians a second.</summary>
+    public const float TurnRadiansPerSecond = 3f;
+
+    /// <summary>Turning per pixel of mouse drag.</summary>
+    public const float DragRadiansPerPixel = 0.01f;
+
+    /// <summary>The right stick turns only past this deflection (then from 0 to full speed).</summary>
+    public const float StickDeadZone = 0.2f;
+
     private const int Slots = 6;
 
     private readonly bool[] _owned = new bool[Catalog.Count];
@@ -47,6 +58,11 @@ public sealed class WardrobeModule : IModule, IMessageHandler<SetLook>, IMessage
     private int _buyQueued = -1;
     private int _buyPending = -1;
     private int _requestId = RequestIdBase;
+    private int _tryOn = -1;
+    private bool _turnLeft;
+    private bool _turnRight;
+    private float _turnStick;
+    private float _drag;
 
     public WardrobeModule()
     {
@@ -83,6 +99,12 @@ public sealed class WardrobeModule : IModule, IMessageHandler<SetLook>, IMessage
 
     public long Ticks { get; private set; }
 
+    /// <summary>How the character is turned on the open screen (the <see cref="PreviewYaw"/> published), radians.</summary>
+    public float Yaw { get; private set; }
+
+    /// <summary>The shop item tried on (an index in <see cref="Catalog.Items"/>, or -1): shown, not worn.</summary>
+    public int TryingOn => _tryOn;
+
     /// <summary>Whether the player owns item <paramref name="index"/> of <see cref="Catalog.Items"/>.</summary>
     public bool Owns(int index) => (uint)index < (uint)_owned.Length && _owned[index];
 
@@ -98,9 +120,20 @@ public sealed class WardrobeModule : IModule, IMessageHandler<SetLook>, IMessage
     /// <summary>Whether the bottom is hidden by a dress.</summary>
     public bool BottomHidden => _worn[(int)Slot.Top] >= 0 && Catalog.Items[_worn[(int)Slot.Top]].Dress;
 
-    /// <summary>What the player looks like now (the <see cref="AppearanceState"/> published each tick).</summary>
-    public AppearanceState Appearance => new(Skin, HairStyle, HairColor, EyeColor,
-        Id(Slot.Top), BottomHidden ? "" : Id(Slot.Bottom), Id(Slot.Shoes), Id(Slot.Head), Id(Slot.Face), Id(Slot.Back));
+    /// <summary>
+    /// What the player looks like now (the <see cref="AppearanceState"/> published each tick): what
+    /// they wear, with the item tried on in the shop in its slot.
+    /// </summary>
+    public AppearanceState Appearance
+    {
+        get
+        {
+            int top = Shown(Slot.Top);
+            bool dress = top >= 0 && Catalog.Items[top].Dress;
+            return new(Skin, HairStyle, HairColor, EyeColor, Id(top), dress ? "" : Id(Shown(Slot.Bottom)),
+                Id(Shown(Slot.Shoes)), Id(Shown(Slot.Head)), Id(Shown(Slot.Face)), Id(Shown(Slot.Back)));
+        }
+    }
 
     public void Start(IMessageBus bus)
     {
@@ -130,6 +163,42 @@ public sealed class WardrobeModule : IModule, IMessageHandler<SetLook>, IMessage
         }
         _bus.Publish(Appearance);
         _bus.Publish(new WardrobeState(Open, Shop));
+        if (Open)
+        {
+            Turn((float)context.StepSeconds);
+            _bus.Publish(new PreviewYaw(Yaw));
+        }
+    }
+
+    /// <summary>
+    /// The turn buttons held now (the view, every frame): <paramref name="left"/> Q / LB,
+    /// <paramref name="right"/> E / RB. Each tick they turn the character at <see cref="TurnRadiansPerSecond"/>.
+    /// </summary>
+    public void SetTurnButtons(bool left, bool right)
+    {
+        _turnLeft = left;
+        _turnRight = right;
+    }
+
+    /// <summary>The right stick's x now (-1 left .. 1 right; the view, every frame). The buttons win when both are used.</summary>
+    public void SetTurnStick(float x) => _turnStick = float.IsFinite(x) ? Math.Clamp(x, -1f, 1f) : 0f;
+
+    /// <summary>A mouse drag on the left half of the screen, in pixels (right positive); added up and applied at the next tick.</summary>
+    public void Drag(float pixels)
+    {
+        if (Open && float.IsFinite(pixels))
+            _drag += pixels;
+    }
+
+    /// <summary>
+    /// Shows shop item <paramref name="id"/> on the character (highlighted in the open shop) instead
+    /// of what is worn in its slot; an empty or other id shows what is worn again. Only shop items
+    /// that fit, only while the shop is open; closing the shop takes it off unless it was bought.
+    /// </summary>
+    public void TryOn(string id)
+    {
+        int index = Catalog.IndexOf(id ?? "");
+        _tryOn = Open && Shop && index >= 0 && Catalog.Items[index].Source == Sources.Shop && FitsCharacter(index) ? index : -1;
     }
 
     /// <summary>Buys item <paramref name="id"/> in the open shop at the next tick (the view's Buy button).</summary>
@@ -153,6 +222,8 @@ public sealed class WardrobeModule : IModule, IMessageHandler<SetLook>, IMessage
     {
         Open = false;
         Shop = false;
+        _tryOn = -1;
+        _drag = 0f;
     }
 
     /// <summary>Puts on starter outfit <paramref name="outfit"/> (character creation): its slots, the rest empty but face and back.</summary>
@@ -235,6 +306,8 @@ public sealed class WardrobeModule : IModule, IMessageHandler<SetLook>, IMessage
         for (int s = 0; s < Slots; s++)
             if (_worn[s] >= 0 && !FitsCharacter(_worn[s]))
                 _worn[s] = -1;
+        if (_tryOn >= 0 && !FitsCharacter(_tryOn))
+            _tryOn = -1;
     }
 
     public void Handle(in WalletState message) => Coins = message.Coins;
@@ -250,6 +323,12 @@ public sealed class WardrobeModule : IModule, IMessageHandler<SetLook>, IMessage
         {
             LastBuy = BuyResult.Bought;
             Give(index, ShopReason);
+            // Bought while trying it on: it stays on.
+            if (index == _tryOn)
+            {
+                _worn[(int)Catalog.Items[index].Slot] = index;
+                _outfitChosen = true;
+            }
         }
         else
         {
@@ -282,7 +361,27 @@ public sealed class WardrobeModule : IModule, IMessageHandler<SetLook>, IMessage
         Shop = shop;
         LastBuy = BuyResult.None;
         LastBuyItem = -1;
+        _tryOn = -1;
+        _drag = 0f;
+        Yaw = 0f;
     }
+
+    private void Turn(float seconds)
+    {
+        float axis = (_turnRight ? 1f : 0f) - (_turnLeft ? 1f : 0f);
+        if (axis == 0f && Math.Abs(_turnStick) > StickDeadZone)
+            axis = Math.Sign(_turnStick) * (Math.Abs(_turnStick) - StickDeadZone) / (1f - StickDeadZone);
+        float yaw = Yaw + axis * TurnRadiansPerSecond * seconds + _drag * DragRadiansPerPixel;
+        _drag = 0f;
+        // Wrapped to [-π, π).
+        yaw -= MathF.Tau * MathF.Floor((yaw + MathF.PI) / MathF.Tau);
+        if (yaw >= MathF.PI)
+            yaw -= MathF.Tau;
+        Yaw = yaw;
+    }
+
+    /// <summary>The item shown in <paramref name="slot"/>: the one tried on, else the one worn.</summary>
+    private int Shown(Slot slot) => _tryOn >= 0 && Catalog.Items[_tryOn].Slot == slot ? _tryOn : _worn[(int)slot];
 
     private void Give(int index, string why)
     {
@@ -293,5 +392,5 @@ public sealed class WardrobeModule : IModule, IMessageHandler<SetLook>, IMessage
         _bus?.Publish(new ItemReceived(Catalog.Items[index].Id, why));
     }
 
-    private string Id(Slot slot) => _worn[(int)slot] is var i && i >= 0 ? Catalog.Items[i].Id : "";
+    private static string Id(int index) => index >= 0 ? Catalog.Items[index].Id : "";
 }

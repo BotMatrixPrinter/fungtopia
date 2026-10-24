@@ -7,12 +7,14 @@ namespace Fungtopia.Wardrobe.View;
 /// <summary>
 /// A stand-alone scene for screenshots: <c>./screenshot.sh modules/Wardrobe/Godot/Preview.tscn</c>.
 /// A real <see cref="WardrobeModule"/> on a bus with a stand-in wallet (420 M¢), a dressed
-/// <see cref="Mannequin"/> on the left and the <see cref="WardrobeView"/> on the right. The
-/// environment variable WARDROBE_PREVIEW picks: "wardrobe" (default, the Top tab), "look" (the
-/// Look tab), "shop" (Abby's shop after one purchase and a "Not enough M¢") or "items" (four
-/// outfits side by side, no panel).
+/// <see cref="Mannequin"/> on the left, turned by the Core's <see cref="PreviewYaw"/> (here a
+/// simulated mouse drag), and the <see cref="WardrobeView"/> on the right. The environment
+/// variable WARDROBE_PREVIEW picks: "wardrobe" (default, the Top tab), "look" (the Look tab),
+/// "shop" (Abby's shop after one purchase, trying on the Triangle Party Dress it cannot afford)
+/// or "items" (four outfits side by side, no panel).
 /// </summary>
-public partial class WardrobePreview : Node3D, IMessageHandler<SpendCoins>, IMessageHandler<AppearanceState>
+public partial class WardrobePreview : Node3D, IMessageHandler<SpendCoins>, IMessageHandler<AppearanceState>,
+    IMessageHandler<PreviewYaw>
 {
     private readonly MessageBus _bus = new();
     private readonly WardrobeModule _wardrobe = new();
@@ -31,6 +33,7 @@ public partial class WardrobePreview : Node3D, IMessageHandler<SpendCoins>, IMes
         _wardrobe.Start(_bus);
         _bus.Subscribe<SpendCoins>(this);
         _bus.Subscribe<AppearanceState>(this);
+        _bus.Subscribe<PreviewYaw>(this);
         Stage();
 
         if (_mode == "items")
@@ -38,7 +41,7 @@ public partial class WardrobePreview : Node3D, IMessageHandler<SpendCoins>, IMes
             ShowOutfits();
             return;
         }
-        _mannequin = new Mannequin { Position = new Vector3(0, 0, 0), RotationDegrees = new Vector3(0, 200, 0) };
+        _mannequin = new Mannequin { Position = new Vector3(0, 0, 0), RotationDegrees = new Vector3(0, 180, 0) };
         AddChild(_mannequin);
         var camera = new Camera3D { Fov = 40f, Current = true };
         AddChild(camera);
@@ -79,12 +82,17 @@ public partial class WardrobePreview : Node3D, IMessageHandler<SpendCoins>, IMes
             {
                 _view.Shop.Select(Catalog.IndexOf("party_dress"));
                 _view.Shop.Buy();
+                // Nothing highlighted but the pick: the dress is tried on.
+                GetViewport().GuiReleaseFocus();
             }
             else if (_mode == "look")
                 _view.Wardrobe?.SelectTab(0);
             else
                 _view.Wardrobe?.SelectTab(1);
         }
+        // A drag to the left on the left half of the screen, a little each frame.
+        if (_frame is > 3 and <= 33)
+            _wardrobe.Drag(_mode == "shop" ? 1.2f : -1.4f);
         _wardrobe.Tick(new TickContext(_frame, delta));
         if (_frame % 20 == 1)
             _mannequin.Apply(_look);
@@ -100,6 +108,13 @@ public partial class WardrobePreview : Node3D, IMessageHandler<SpendCoins>, IMes
     }
 
     public void Handle(in AppearanceState message) => _look = message;
+
+    /// <summary>The rig faces -Z, so π faces the camera; the yaw turns it from there.</summary>
+    public void Handle(in PreviewYaw message)
+    {
+        if (_mannequin != null)
+            _mannequin.Rotation = new Vector3(0f, Mathf.Pi + message.Yaw, 0f);
+    }
 
     private void ShowOutfits()
     {

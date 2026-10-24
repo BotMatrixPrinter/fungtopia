@@ -5,8 +5,10 @@ namespace Fungtopia.Wardrobe.View;
 
 /// <summary>
 /// Abby's clothing shop in Mushroom Town: every shop item that fits the character, with its icon
-/// and price in Mushroom Coins (M¢); owned ones are marked. Picking a card selects it, Buy pays
-/// through the wallet; "Not enough M¢" when the wallet says no.
+/// and price in Mushroom Coins (M¢); owned ones are marked. The highlighted card's item (else the
+/// picked one) is tried on: the character on the left shows it until the highlight moves on or
+/// the shop closes, and keeps it once bought. Picking a card selects it, Buy pays through the
+/// wallet; "Not enough M¢" when the wallet says no.
 /// </summary>
 public partial class ShopScreen : ScreenPanel
 {
@@ -16,24 +18,24 @@ public partial class ShopScreen : ScreenPanel
     private readonly List<int> _cardItems = new();
     private readonly Label _selected;
     private readonly Label _status;
-    private readonly Button _buy = new() { Text = "Buy", CustomMinimumSize = new Vector2(200, 64), FocusMode = FocusModeEnum.All };
+    private readonly CapButton _buy = new("Buy", WardrobeStyle.Gold, new Vector2(240, 104), 40);
     private int _selection = -1;
     private string _shownKey = "";
 
     public ShopScreen(WardrobeModule core, IconStudio icons)
-        : base(core, icons, "Enter  A: pick, then Buy    Esc  B: done")
+        : base(core, icons, "Abby's Clothes", Hints)
     {
         var top = new HBoxContainer();
         top.AddThemeConstantOverride("separation", 18);
-        top.AddChild(new AbbyPortrait());
-        var titles = new VBoxContainer { Alignment = BoxContainer.AlignmentMode.Center, SizeFlagsHorizontal = SizeFlags.ExpandFill };
-        var title = WardrobeStyle.Label("Abby's Clothes", 46, Colors.White, 10);
-        title.HorizontalAlignment = HorizontalAlignment.Left;
-        titles.AddChild(title);
-        var hello = WardrobeStyle.Label("\"Hi hi! Find something cute!\"", 22, WardrobeStyle.Cream, 6);
+        // Abby drawn smaller, so the three rows of cards fit.
+        var abby = new Control { CustomMinimumSize = new Vector2(88, 108), MouseFilter = MouseFilterEnum.Ignore };
+        abby.AddChild(new AbbyPortrait { Scale = new Vector2(0.72f, 0.72f) });
+        top.AddChild(abby);
+        var hello = WardrobeStyle.Label("\"Hi hi! Try things on and find something cute!\"", 24, WardrobeStyle.Ink);
         hello.HorizontalAlignment = HorizontalAlignment.Left;
-        titles.AddChild(hello);
-        top.AddChild(titles);
+        hello.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        hello.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        top.AddChild(hello);
         var purse = new PanelContainer { SizeFlagsVertical = SizeFlags.ShrinkCenter };
         purse.AddThemeStyleboxOverride("panel", WardrobeStyle.Box(WardrobeStyle.Gold, 26, 4, null, 14));
         _coins = WardrobeStyle.Label("M¢ 0", 30, WardrobeStyle.Ink);
@@ -42,27 +44,38 @@ public partial class ShopScreen : ScreenPanel
         Header.AddChild(top);
 
         _grid.AddThemeConstantOverride("h_separation", 12);
-        _grid.AddThemeConstantOverride("v_separation", 12);
+        _grid.AddThemeConstantOverride("v_separation", 10);
         _grid.SizeFlagsVertical = SizeFlags.ExpandFill;
         Body.AddChild(_grid);
 
         var texts = new VBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill, Alignment = BoxContainer.AlignmentMode.Center };
-        _selected = WardrobeStyle.Label("Pick something!", 26, WardrobeStyle.Ink);
+        _selected = WardrobeStyle.Label("Pick something!", 24, WardrobeStyle.Ink);
         _selected.HorizontalAlignment = HorizontalAlignment.Left;
-        _status = WardrobeStyle.Label("", 24, WardrobeStyle.Warn);
+        _status = WardrobeStyle.Label("", 22, WardrobeStyle.Warn);
         _status.HorizontalAlignment = HorizontalAlignment.Left;
         texts.AddChild(_selected);
         texts.AddChild(_status);
-        // The footer: what is picked and the answer, the hint below them, Buy and Done.
+        // The footer: what is picked and the answer, the hint below them; Buy beside Done.
         Footer.RemoveChild(Hint);
-        Hint.AddThemeConstantOverride("line_spacing", 0);
         texts.AddChild(Hint);
         Footer.AddChild(texts);
-        Footer.MoveChild(texts, 0);
-        WardrobeStyle.Style(_buy, WardrobeStyle.Gold, 28, 30);
         _buy.Pressed += Buy;
-        Footer.AddChild(_buy);
-        Footer.MoveChild(_buy, 1);
+        Buttons.AddChild(_buy);
+        Buttons.MoveChild(_buy, 0);
+    }
+
+    /// <summary>The controls, shown at the bottom of the panel.</summary>
+    public const string Hints = "Turn: drag left, Q / E, LB / RB, stick    Pick: Enter / A, then Buy    Done: Esc / B";
+
+    /// <summary>The item the highlighted card shows (an index in <see cref="Catalog.Items"/>), else the picked one, else -1.</summary>
+    public int Highlighted
+    {
+        get
+        {
+            var focus = GetViewport()?.GuiGetFocusOwner();
+            int card = focus is Button b ? _cards.IndexOf(b) : -1;
+            return card >= 0 ? _cardItems[card] : _selection;
+        }
     }
 
     public override Control FirstFocus() => _cards.Count > 0 ? _cards[0] : DoneButton;
@@ -83,6 +96,8 @@ public partial class ShopScreen : ScreenPanel
 
     public override void Refresh()
     {
+        int tried = Highlighted;
+        Core.TryOn(tried >= 0 ? Catalog.Items[tried].Id : "");
         _coins.Text = WardrobeStyle.Coins(Core.Coins);
         string key = $"{Core.ReceivedCount}|{Core.Character}|{_selection}";
         if (key != _shownKey)
@@ -129,8 +144,10 @@ public partial class ShopScreen : ScreenPanel
             int index = i;
             bool owned = Core.Owns(i);
             var fill = i == _selection ? WardrobeStyle.Mint : owned ? new Color(0.9f, 0.88f, 0.86f) : WardrobeStyle.Card;
-            var card = CardButton(Icons.Icon(items[i].ModelPath), items[i].Name, null, fill, new Vector2(156, 196),
-                owned ? "Owned ✓" : $"{items[i].Price} M¢", owned ? WardrobeStyle.Soft : new Color(0.8f, 0.5f, 0.1f), 86f);
+            var card = CardButton(Icons.Icon(items[i].ModelPath), items[i].Name, null, fill, new Vector2(136, 166),
+                owned ? "Owned ✓" : $"{items[i].Price} M¢", owned ? WardrobeStyle.Soft : new Color(0.8f, 0.5f, 0.1f), 58f);
+            // Hovering a card highlights it (and tries it on), like moving the focus to it.
+            card.MouseEntered += () => card.GrabFocus();
             card.Pressed += () =>
             {
                 Select(index);
