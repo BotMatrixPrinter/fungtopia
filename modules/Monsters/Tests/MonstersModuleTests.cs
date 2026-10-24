@@ -164,21 +164,74 @@ public class MonstersModuleTests
         Assert.Equal(4, Array.FindAll(hard, s => s.Kind == MonsterKind.Tarantula).Length);
         Assert.Equal(4, Array.FindAll(hard, s => s.Kind == MonsterKind.Ladybug).Length);
         foreach (var s in hard)
-        {
-            Assert.Equal(Area.DeepForest, Areas.At(s.Position.X, s.Position.Z));
-            Assert.True(DeepForestLayout.Bounds.Contains(s.Position.X, s.Position.Z, s.Radius));
+            AssertOnFreeDeepForestGround(s);
+        foreach (var s in hard)
             Assert.True(AtSpawnSpot(s.Position), $"{s.Kind} at {s.Position} is not at a spawn spot");
-        }
-        // Each at its own spot.
+        // Each at its own spot, spread over the area.
         for (int i = 0; i < hard.Length; i++)
         for (int j = i + 1; j < hard.Length; j++)
-            Assert.True(Flat(hard[i].Position, hard[j].Position) >= 15f);
+            Assert.True(Flat(hard[i].Position, hard[j].Position) >= 15f, $"hard monsters {i} and {j} start bunched up");
+        Assert.Contains(hard, s => s.Position.Z < -20f);
+        Assert.Contains(hard, s => s.Position.Z > 20f);
+        Assert.Contains(hard, s => s.Position.X < -230f);
+        Assert.Contains(hard, s => s.Position.X > -170f);
         // None of the normal ones in the Deep Forest.
         Assert.DoesNotContain(states, s => !MonsterRewards.IsHard(s.Kind) && Areas.At(s.Position.X, s.Position.Z) == Area.DeepForest);
         Assert.Equal(18, Array.Find(states, s => s.Kind == MonsterKind.Tarantula).MaxHealth);
         Assert.Equal(25, Array.Find(states, s => s.Kind == MonsterKind.Ladybug).MaxHealth);
         Assert.Equal(MonsterKind.Tarantula, monsters.Monsters[FirstTarantula].Kind);
         Assert.Equal(MonsterKind.Ladybug, monsters.Monsters[FirstLadybug].Kind);
+    }
+
+    /// <summary>Alive, in the Deep Forest, on walkable ground clear of every obstacle, feet at ground height.</summary>
+    private static void AssertOnFreeDeepForestGround(in MonsterState s)
+    {
+        var p = s.Position;
+        Assert.True(s.Alive, $"{s.Kind} {s.MonsterId} is not alive");
+        Assert.Equal(Area.DeepForest, Areas.At(p.X, p.Z));
+        Assert.True(DeepForestLayout.Bounds.Contains(p.X, p.Z, s.Radius), $"{s.Kind} at {p} is not inside the Deep Forest");
+        Assert.True(Areas.Walkable(p.X, p.Z, s.Radius), $"{s.Kind} at {p} is not on walkable ground");
+        Assert.False(Ground.Blocks(p.X, p.Z, s.Radius), $"{s.Kind} at {p} is inside an obstacle");
+        Assert.Equal(Ground.HeightAt(p.X, p.Z), p.Y, 4);
+    }
+
+    [Theory]
+    [InlineData(7u)]
+    [InlineData(42u)]
+    [InlineData(0x5EEDF00Du)]
+    public void HardMonstersRoamTheWholeDeepForestOnFreeGround(uint seed)
+    {
+        var (monsters, bus) = Started(seed);
+        bus.SendPlayer(Places.HomeDoor.Position); // far away: nobody to chase
+        bus.Record = false;
+        var start = monsters.States.ToArray();
+        var farthest = new float[MonstersModule.Count];
+        var lastMinute = monsters.States.ToArray();
+        int quietMinutes = 0;
+        for (int t = 1; t <= 60 * 480; t++)
+        {
+            monsters.Tick(new TickContext(t, Step));
+            var states = monsters.States;
+            for (int i = MonstersModule.NormalCount; i < MonstersModule.Count; i++)
+            {
+                AssertOnFreeDeepForestGround(states[i]);
+                farthest[i] = MathF.Max(farthest[i], Flat(states[i].Position, start[i].Position));
+            }
+            if (t % 3600 != 0)
+                continue;
+            // Every minute each of them has moved on.
+            for (int i = MonstersModule.NormalCount; i < MonstersModule.Count; i++)
+                if (Flat(states[i].Position, lastMinute[i].Position) < 3f)
+                    quietMinutes++;
+            lastMinute = states.ToArray();
+        }
+        Assert.True(quietMinutes <= 4, $"{quietMinutes} minutes a hard monster hardly moved");
+        // Each leaves its spawn clearing and wanders far over the area, ladybugs too.
+        for (int i = MonstersModule.NormalCount; i < MonstersModule.Count; i++)
+            Assert.True(farthest[i] >= 25f, $"{start[i].Kind} {i} only got {farthest[i]} m from where it appeared");
+        var end = monsters.States[MonstersModule.NormalCount..].ToArray();
+        Assert.Equal(4, Array.FindAll(end, s => s.Kind == MonsterKind.Ladybug && s.Alive).Length);
+        Assert.Equal(4, Array.FindAll(end, s => s.Kind == MonsterKind.Tarantula && s.Alive).Length);
     }
 
     [Fact]
@@ -699,7 +752,8 @@ public class MonstersModuleTests
         bus.Hit(oldId, 100);
         Run(monsters, bus, 19.9);
         Assert.False(m.Alive);
-        Run(monsters, bus, 0.2);
+        for (int t = 0; t < 12 && !m.Alive; t++)
+            Run(monsters, bus, Step); // stop on the tick it comes back, before it walks off
         Assert.True(m.Alive);
         Assert.Equal(kind, m.Kind);
         Assert.NotEqual(oldId, m.Id);

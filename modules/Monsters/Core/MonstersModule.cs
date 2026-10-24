@@ -46,6 +46,10 @@ public sealed class MonstersModule : IModule, IMessageHandler<PlayerState>, IMes
     public const float SpawnSpacing = 18f;
     /// <summary>Monsters keep this far inside their area's edge.</summary>
     public const float EdgeMargin = 3f;
+    /// <summary>A Deep Forest monster's next roaming goal is at least this far away (meters).</summary>
+    public const float RoamMinDistance = 20f;
+    /// <summary>... and at most this far.</summary>
+    public const float RoamMaxDistance = 60f;
     /// <summary>Fastest turn, radians per second (the view shows <see cref="Monster.Facing"/>).</summary>
     public const float TurnSpeed = 6f;
 
@@ -362,9 +366,14 @@ public sealed class MonstersModule : IModule, IMessageHandler<PlayerState>, IMes
             m.WanderSeconds -= dt;
             if (m.WanderSeconds <= 0f)
             {
-                m.WanderSeconds = 2f + 3f * _rng.NextFloat();
-                m.Resting = _rng.NextFloat() < 0.3f;
-                m.Heading = (_rng.NextFloat() * 2f - 1f) * MathF.PI;
+                if (stats.Home == Area.DeepForest)
+                    Roam(m, stats);
+                else
+                {
+                    m.WanderSeconds = 2f + 3f * _rng.NextFloat();
+                    m.Resting = _rng.NextFloat() < 0.3f;
+                    m.Heading = (_rng.NextFloat() * 2f - 1f) * MathF.PI;
+                }
             }
             if (!bounds.Contains(start.X, start.Z, EdgeMargin + 3f))
             {
@@ -379,7 +388,8 @@ public sealed class MonstersModule : IModule, IMessageHandler<PlayerState>, IMes
         m.Facing = TurnToward(m.Facing, m.Heading, TurnSpeed * dt);
         float x = start.X - MathF.Sin(m.Heading) * speed * dt;
         float z = start.Z - MathF.Cos(m.Heading) * speed * dt;
-        Resolve(ref x, ref z, stats.Radius, bounds);
+        if (!Resolve(ref x, ref z, stats.Radius, bounds))
+            (x, z) = (start.X, start.Z); // wedged between obstacles: stay put this tick
         var end = new Vector3(x, Ground.HeightAt(x, z), z);
         m.Position = end;
         m.Velocity = (end - start) / dt;
@@ -462,7 +472,8 @@ public sealed class MonstersModule : IModule, IMessageHandler<PlayerState>, IMes
             m.Heading = MathF.Atan2(-v.X, -v.Z);
         m.Facing = TurnToward(m.Facing, m.Heading, TurnSpeed * 2f * dt);
         float x = start.X + v.X * dt, z = start.Z + v.Z * dt;
-        Resolve(ref x, ref z, stats.Radius, bounds);
+        if (!Resolve(ref x, ref z, stats.Radius, bounds))
+            (x, z) = (start.X, start.Z);
         var end = new Vector3(x, Ground.HeightAt(x, z), z);
         m.Position = end;
         m.Velocity = (end - start) / dt;
@@ -544,22 +555,67 @@ public sealed class MonstersModule : IModule, IMessageHandler<PlayerState>, IMes
     {
         var stats = StatsOf(m.Kind);
         float x = m.Position.X + dx, z = m.Position.Z + dz;
-        Resolve(ref x, ref z, stats.Radius, Areas.Bounds(stats.Home));
+        if (!Resolve(ref x, ref z, stats.Radius, Areas.Bounds(stats.Home)))
+            return; // no room that way
         m.Position = new Vector3(x, Ground.HeightAt(x, z), z);
+    }
+
+    /// <summary>
+    /// A Deep Forest monster's next stretch of wandering: it walks toward a roaming goal, a free spot
+    /// <see cref="RoamMinDistance"/>..<see cref="RoamMaxDistance"/> away somewhere in its area, so
+    /// it does not stay in its spawn clearing. Each stretch re-aims at the goal (a little off, so it
+    /// winds around the trunks), and a new goal comes when it got there or got stuck on the way.
+    /// </summary>
+    private void Roam(Monster m, in KindStats stats)
+    {
+        var p = m.Position;
+        float moved = HorizontalDistance(m.RoamFrom.X, m.RoamFrom.Y, p);
+        bool stuck = !m.Resting && moved < stats.WanderSpeed * m.RoamStretch * 0.3f;
+        if (!m.HasGoal || stuck || HorizontalDistance(m.Goal.X, m.Goal.Y, p) < 3f)
+            m.HasGoal = RoamGoal(p, stats, out m.Goal);
+        m.WanderSeconds = m.RoamStretch = 3f + 3f * _rng.NextFloat();
+        m.RoamFrom = new Vector2(p.X, p.Z);
+        m.Resting = !stuck && _rng.NextFloat() < 0.15f;
+        float jitter = (_rng.NextFloat() * 2f - 1f) * (stuck ? MathF.PI : 0.35f);
+        m.Heading = m.HasGoal && !stuck
+            ? WrapAngle(MathF.Atan2(p.X - m.Goal.X, p.Z - m.Goal.Y) + jitter)
+            : WrapAngle(m.Heading + jitter); // stuck: try another way for a stretch
+    }
+
+    private bool RoamGoal(Vector3 from, in KindStats stats, out Vector2 goal)
+    {
+        var b = Areas.Bounds(stats.Home);
+        float margin = EdgeMargin + 4f;
+        for (int attempt = 0; attempt < 40; attempt++)
+        {
+            float x = b.MinX + margin + _rng.NextFloat() * (b.MaxX - b.MinX - 2f * margin);
+            float z = b.MinZ + margin + _rng.NextFloat() * (b.MaxZ - b.MinZ - 2f * margin);
+            float d = HorizontalDistance(x, z, from);
+            if (d >= RoamMinDistance && d <= RoamMaxDistance && Areas.Walkable(x, z, stats.Radius + 1f)
+                && !Ground.Blocks(x, z, stats.Radius + 1f))
+            {
+                goal = new Vector2(x, z);
+                return true;
+            }
+        }
+        goal = default;
+        return false;
     }
 
     /// <summary>
     /// Pushes (x, z) out of every obstacle of <see cref="Ground.Obstacles"/> it overlaps and keeps
     /// it inside <paramref name="bounds"/> (its area), <see cref="EdgeMargin"/> from the edge.
+    /// False when it is still in an obstacle after that (wedged between two): the caller keeps the
+    /// spot it came from.
     /// </summary>
-    private static void Resolve(ref float x, ref float z, float radius, in AreaBounds bounds)
+    private static bool Resolve(ref float x, ref float z, float radius, in AreaBounds bounds)
     {
         for (int pass = 0; pass < 3; pass++)
         {
             x = Math.Clamp(x, bounds.MinX + EdgeMargin, bounds.MaxX - EdgeMargin);
             z = Math.Clamp(z, bounds.MinZ + EdgeMargin, bounds.MaxZ - EdgeMargin);
             if (!Ground.Blocks(x, z, radius))
-                return;
+                return true;
             foreach (var o in Ground.Obstacles)
             {
                 float dx = x - o.X, dz = z - o.Z, r = o.Radius + radius;
@@ -580,6 +636,7 @@ public sealed class MonstersModule : IModule, IMessageHandler<PlayerState>, IMes
         }
         x = Math.Clamp(x, bounds.MinX + EdgeMargin, bounds.MaxX - EdgeMargin);
         z = Math.Clamp(z, bounds.MinZ + EdgeMargin, bounds.MaxZ - EdgeMargin);
+        return !Ground.Blocks(x, z, radius);
     }
 
     /// <summary>
@@ -613,6 +670,7 @@ public sealed class MonstersModule : IModule, IMessageHandler<PlayerState>, IMes
         m.ActionSeconds = 0f;
         m.Heading = m.Facing = (_rng.NextFloat() * 2f - 1f) * MathF.PI;
         m.WanderSeconds = 0f;
+        m.HasGoal = false;
         m.Chasing = false;
     }
 
@@ -783,6 +841,12 @@ public sealed class Monster
     internal int PoisonSource;
     internal float ShellCarry;
     internal Vector3 LungeVelocity;
+    /// <summary>A Deep Forest monster's roaming goal (x, z) while <see cref="HasGoal"/>.</summary>
+    internal Vector2 Goal;
+    internal bool HasGoal;
+    /// <summary>Where its current stretch of roaming began (x, z), and how long the stretch is.</summary>
+    internal Vector2 RoamFrom;
+    internal float RoamStretch;
 
     internal MonsterState ToState() => new(Id, Kind, Position, Radius, Health, MaxHealth, Alive, Poisoned);
 }

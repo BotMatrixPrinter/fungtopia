@@ -18,6 +18,8 @@ public partial class MonstersView : Node3D, IModuleView
     private float[] _currentFacing = Array.Empty<float>();
     private int[] _ids = Array.Empty<int>();
     private long _seenTicks = -1;
+    private Camera3D? _preview;
+    private int _previewIndex = -1;
 
     public void Bind(IModule module) => _monsters = (MonstersModule)module;
 
@@ -42,6 +44,38 @@ public partial class MonstersView : Node3D, IModuleView
             _ids[i] = monsters[i].Id;
         }
         _seenTicks = _monsters.Ticks;
+        BuildPreviewCamera();
+    }
+
+    /// <summary>
+    /// Screenshots only: MONSTERS_FOLLOW=&lt;slot&gt; (0..19, 12..19 the hard ones) makes a camera current
+    /// that looks at that monster from a few meters away, wherever it wanders.
+    /// </summary>
+    private void BuildPreviewCamera()
+    {
+        if (!int.TryParse(OS.GetEnvironment("MONSTERS_FOLLOW"), out int index) || index < 0 || index >= _models.Length)
+            return;
+        _previewIndex = index;
+        _preview = new Camera3D { Name = "MonstersFollowCamera", Fov = 60f, Far = 400f };
+        AddChild(_preview);
+    }
+
+    private void FollowWithPreview()
+    {
+        if (_preview == null)
+            return;
+        if (!_preview.Current)
+            _preview.MakeCurrent();
+        var target = _models[_previewIndex].GlobalPosition;
+        var eye = target + new Vector3(3.5f, 2.2f, 4.5f);
+        _preview.LookAtFromPosition(eye, target + Vector3.Up * 0.5f, Vector3.Up);
+        foreach (var node in GetParent().GetChildren())
+        {
+            if (node is CanvasLayer layer && layer.Visible)
+                layer.Visible = false;
+            else if (node is Control control && control.Visible)
+                control.Visible = false;
+        }
     }
 
     public override void _Process(double delta)
@@ -91,6 +125,7 @@ public partial class MonstersView : Node3D, IModuleView
             model.Animate((float)delta, speed, m.HurtSeconds, m.Poisoned, m.SinceBite, m.Alive, m.DeadSeconds,
                 m.MaxHealth > 0 ? (float)m.Health / m.MaxHealth : 1f, m.Action, m.ActionSeconds);
         }
+        FollowWithPreview();
     }
 
     private static Vector3 ToGodot(System.Numerics.Vector3 v) => new(v.X, v.Y, v.Z);

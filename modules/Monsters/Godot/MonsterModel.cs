@@ -148,19 +148,24 @@ public partial class MonsterModel : Node3D
         {
             mesh.CastShadow = GeometryInstance3D.ShadowCastingSetting.On;
             for (int i = 0; i < mesh.Mesh.GetSurfaceCount(); i++)
-                mesh.SetSurfaceOverrideMaterial(i, ToonMaterial(mesh.Mesh.SurfaceGetMaterial(i)));
+                mesh.SetSurfaceOverrideMaterial(i, ToonMaterial(mesh.Mesh.SurfaceGetMaterial(i), Kind));
             _meshes.Add(mesh);
         }
         foreach (var child in node.GetChildren())
             CollectMeshes(child);
     }
 
-    /// <summary>The toon material for a glTF material: its color, an ink outline unless it is a small detail.</summary>
-    private static ShaderMaterial ToonMaterial(Material? source)
+    /// <summary>
+    /// The toon material for a glTF material: its color, an ink outline unless it is a small detail.
+    /// The Deep Forest's monsters get a soft rim glow, and the ladybug's red shell and the little
+    /// mushroom caps on it glow a little, so they read in the gloom and the fog.
+    /// </summary>
+    private static ShaderMaterial ToonMaterial(Material? source, MonsterKind kind)
     {
         string name = source?.ResourceName ?? "";
         var color = source is BaseMaterial3D standard ? standard.AlbedoColor : Colors.White;
-        string key = name + color.ToHtml();
+        bool hard = kind is MonsterKind.Tarantula or MonsterKind.Ladybug;
+        string key = (hard ? kind.ToString() : "") + name + color.ToHtml();
         if (s_materials.TryGetValue(key, out var cached))
             return cached;
         s_toon ??= GD.Load<Shader>(Shaders + "toon.gdshader");
@@ -170,6 +175,12 @@ public partial class MonsterModel : Node3D
         material.SetShaderParameter("albedo", color.SrgbToLinear());
         if (name == "EyeShine")
             material.SetShaderParameter("self_light", 0.6f);
+        else if (kind == MonsterKind.Ladybug && name == "LadyShell")
+            material.SetShaderParameter("self_light", 0.32f);
+        else if (kind == MonsterKind.Ladybug && name.StartsWith("Cap", StringComparison.Ordinal))
+            material.SetShaderParameter("self_light", 0.2f);
+        if (hard)
+            material.SetShaderParameter("rim_glow", kind == MonsterKind.Ladybug ? 0.7f : 0.55f);
         if (!NoOutline.Contains(name))
             material.NextPass = s_outline;
         s_materials[key] = material;

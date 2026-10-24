@@ -1,11 +1,14 @@
 // The monsters' toon surface: soft two-band light, a gentle rim, a white hit flash and a green
-// poison tint.
+// poison tint. The Deep Forest's monsters also glow softly at their silhouette (rim_glow) so they
+// read under the canopy's shadow and in the fog.
 shader_type spatial;
 render_mode specular_disabled;
 
 uniform vec3 albedo : source_color = vec3(1.0);
 // Glow of tiny bright bits (the eye sparkles).
 uniform float self_light = 0.0;
+// A soft rim light that does not depend on the sun (it shows in shadow too).
+uniform float rim_glow = 0.0;
 // 0..1: how white the monster flashes when hit; set per monster.
 instance uniform float flash = 0.0;
 // 0..1: how green the monster is from poison; set per monster.
@@ -15,7 +18,9 @@ void fragment() {
 	vec3 sick = mix(albedo, vec3(0.42, 0.9, 0.25) * (0.55 + 0.45 * dot(albedo, vec3(0.33))), 0.6);
 	vec3 color = mix(albedo, sick, poison);
 	ALBEDO = mix(color, vec3(1.0, 0.97, 0.95), flash * 0.75);
-	EMISSION = albedo * self_light + vec3(1.0, 0.85, 0.85) * flash * 0.35 + vec3(0.1, 0.35, 0.05) * poison * 0.4;
+	float edge = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 2.5);
+	EMISSION = albedo * self_light + vec3(1.0, 0.85, 0.85) * flash * 0.35 + vec3(0.1, 0.35, 0.05) * poison * 0.4
+		+ mix(color, vec3(1.0, 0.92, 0.85), 0.35) * edge * rim_glow;
 }
 
 void light() {

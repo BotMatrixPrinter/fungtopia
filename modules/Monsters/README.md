@@ -57,8 +57,13 @@ Contract); it uses the world's `Ground.HeightAt`, `Ground.Obstacles`/`Blocks`, `
   (south, north, west gaps) and 18 m apart (relaxed only if no spot is found). The tarantulas and
   ladybugs (alternating) each take one of the ten `DeepForestLayout.SpawnPoints`, tried from a
   random one, 18 m from other monsters. A respawn also keeps 25 m from the player.
-- **Wandering.** A random heading (or a rest) every 2–5 s at wander speed; near the edge of its
-  area it heads back to the middle. They slide around obstacles and never leave their area.
+- **Wandering.** Caterpillars and ants take a random heading (or a rest) every 2–5 s at wander
+  speed. Tarantulas and ladybugs roam the whole Deep Forest: each walks toward a goal, a free spot
+  20–60 m away (`RoamMinDistance`, `RoamMaxDistance`), re-aiming at it (a little off) every 3–6 s
+  with a short rest now and then, and picks a new goal when it gets there or is stuck behind
+  trunks. Near the edge of its area a monster heads back to the middle. They slide around
+  obstacles, never stop inside one (wedged between two, a monster stays put that tick) and never
+  leave their area.
 - **Chasing.** Within their chase range (horizontal) of the alive player they head for it at chase
   speed. Caterpillars and ants stop just inside reach; within 1.5 m they bite with `DamagePlayer`
   (`From` = the monster's position) at once and then every 1.2 s while in reach.
@@ -98,7 +103,8 @@ legs with a bobbing striped abdomen, the tarantula skitters on two alternating s
 sinks and wiggles as it crouches and flies up in an arc (0.9 m high) as it leaps, the ladybug
 waddles with a rocking shell, tucks in its head and legs as it curls and rolls over and over as
 it charges; a head lunge on each bite, a white flash when hit, a green
-tint and rising bubbles while poisoned, a hop, squash and puff of spores on defeat, and a small
+tint and rising bubbles while poisoned, a soft rim glow on the Deep Forest's monsters (and a
+gently glowing red shell and caps on the ladybug) so they read under the canopy and in the fog, a hop, squash and puff of spores on defeat, and a small
 health bar (turned to the camera) above a hurt monster.
 
 ## Models
@@ -126,4 +132,6 @@ ant, a poisoned caterpillar and a hurt ant with health bars, and an ant's defeat
 `MONSTERS_PREVIEW=close` shows a caterpillar and an ant up close; `MONSTERS_PREVIEW=hard` the Deep
 Forest's monsters in gloom (a tarantula skittering, one mid-pounce, a ladybug waddling, one rolling
 in a charge, a hurt poisoned ladybug); `MONSTERS_PREVIEW=hardclose` a tarantula and a ladybug up
-close.
+close. `MONSTERS_FOLLOW=<slot>` (0..19; 12..15 tarantulas, 16..19 ladybugs) in the game makes a
+camera follow that monster and hides the screens over the world, for example
+`MONSTERS_FOLLOW=16 DAYNIGHT_HOUR=12 ./screenshot.sh "" ladybug.png`.
