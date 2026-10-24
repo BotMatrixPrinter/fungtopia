@@ -26,6 +26,12 @@ public sealed class InputModule : IModule, IMessageHandler<UiFocus>
     /// <summary>Mouse motion of at least this many pixels in one event switches to keyboard and mouse.</summary>
     public float MouseSwitchPixels { get; set; } = 2f;
 
+    /// <summary>Left-stick deflection (on its larger axis) past which it counts as a menu push.</summary>
+    public float MenuStickThreshold { get; set; } = 0.5f;
+
+    /// <summary>Shortest time between two <see cref="MenuNav"/> steps, seconds (also the hold repeat).</summary>
+    public double MenuRepeatSeconds { get; set; } = 0.2;
+
     private IMessageBus? _bus;
     private Vector2 _keyboardMove;
     private Vector2 _moveStick;
@@ -44,6 +50,12 @@ public sealed class InputModule : IModule, IMessageHandler<UiFocus>
     private Vector3 _aimOrigin;
     private int[] _openOwners = new int[8];
     private int _openCount;
+    private int _menuButtonsVertical;
+    private int _menuButtonsHorizontal;
+    private double _sinceMenuStep = double.PositiveInfinity;
+
+    /// <summary>The menu step published on the latest tick.</summary>
+    public MenuNav LatestMenuNav { get; private set; }
 
     /// <summary>The input published on the latest tick.</summary>
     public PlayerInput Latest { get; private set; }
@@ -89,6 +101,16 @@ public sealed class InputModule : IModule, IMessageHandler<UiFocus>
 
     /// <summary>Right stick: x right, y up (already flipped from screen-down), each -1..1.</summary>
     public void SetLookStick(Vector2 stick) => _lookStick = Finite(stick);
+
+    /// <summary>
+    /// Digital menu directions held now (D-pad, arrow keys, W A S D): <paramref name="vertical"/> -1 up,
+    /// +1 down; <paramref name="horizontal"/> -1 left, +1 right; 0 for none or both.
+    /// </summary>
+    public void SetMenuButtons(int vertical, int horizontal)
+    {
+        _menuButtonsVertical = Math.Sign(vertical);
+        _menuButtonsHorizontal = Math.Sign(horizontal);
+    }
 
     /// <summary>Adds mouse motion in pixels, x right and y down as screens count them.</summary>
     public void AddMouseMotion(Vector2 pixels)
@@ -216,6 +238,43 @@ public sealed class InputModule : IModule, IMessageHandler<UiFocus>
         _bus.Publish(Latest);
         var device = Device;
         _bus.Publish(device);
+        LatestMenuNav = StepMenu(context.StepSeconds);
+        var nav = LatestMenuNav;
+        _bus.Publish(nav);
+    }
+
+    /// <summary>
+    /// The direction pushed now, on one axis only: the digital buttons when any is held, else the
+    /// left stick's larger axis when it is past <see cref="MenuStickThreshold"/>.
+    /// </summary>
+    private (int Vertical, int Horizontal) MenuDirection()
+    {
+        if (_menuButtonsVertical != 0)
+            return (_menuButtonsVertical, 0);
+        if (_menuButtonsHorizontal != 0)
+            return (0, _menuButtonsHorizontal);
+        float x = _moveStick.X, y = _moveStick.Y;
+        // The stick's y is forward / up; menus count down as +1.
+        if (MathF.Abs(y) >= MathF.Abs(x))
+            return MathF.Abs(y) > MenuStickThreshold ? (y > 0 ? -1 : 1, 0) : (0, 0);
+        return MathF.Abs(x) > MenuStickThreshold ? (0, x > 0 ? 1 : -1) : (0, 0);
+    }
+
+    /// <summary>
+    /// A step fires when a direction is pushed and at least <see cref="MenuRepeatSeconds"/> have
+    /// passed since the last step: at once on a fresh push after a pause, then once per interval
+    /// while held, and never more often however the stick is flicked.
+    /// </summary>
+    private MenuNav StepMenu(double stepSeconds)
+    {
+        if (double.IsFinite(_sinceMenuStep))
+            _sinceMenuStep += stepSeconds;
+        var (vertical, horizontal) = MenuDirection();
+        // A small tolerance, so twelve 1/60 s steps count as a full 0.2 s.
+        if ((vertical == 0 && horizontal == 0) || _sinceMenuStep + 1e-9 < MenuRepeatSeconds)
+            return default;
+        _sinceMenuStep = 0;
+        return new MenuNav(vertical, horizontal);
     }
 
     /// <summary>

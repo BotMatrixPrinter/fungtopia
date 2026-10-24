@@ -135,6 +135,12 @@ public partial class InputView : Control, IModuleView
             GodotInput.GetJoyAxis(Pad, JoyAxis.LeftX), -GodotInput.GetJoyAxis(Pad, JoyAxis.LeftY)));
         _input.SetLookStick(new System.Numerics.Vector2(
             GodotInput.GetJoyAxis(Pad, JoyAxis.RightX), -GodotInput.GetJoyAxis(Pad, JoyAxis.RightY)));
+        // Menu directions: D-pad, arrow keys and W A S D (the left stick comes from SetMoveStick).
+        int menuDown = HeldMenu(Godot.Key.S, Godot.Key.Down, JoyButton.DpadDown)
+            - HeldMenu(Godot.Key.W, Godot.Key.Up, JoyButton.DpadUp);
+        int menuRight = HeldMenu(Godot.Key.D, Godot.Key.Right, JoyButton.DpadRight)
+            - HeldMenu(Godot.Key.A, Godot.Key.Left, JoyButton.DpadLeft);
+        _input.SetMenuButtons(menuDown, menuRight);
         // The recapture click stays held for a few ticks; ignore it until it is released.
         bool held = GodotInput.IsMouseButtonPressed(MouseButton.Left);
         if (!held)
@@ -156,4 +162,8 @@ public partial class InputView : Control, IModuleView
     }
 
     private static float Held(Key key) => GodotInput.IsPhysicalKeyPressed(key) ? 1f : 0f;
+
+    private static int HeldMenu(Key letter, Key arrow, JoyButton dpad) =>
+        GodotInput.IsPhysicalKeyPressed(letter) || GodotInput.IsPhysicalKeyPressed(arrow)
+        || GodotInput.IsJoyButtonPressed(Pad, dpad) ? 1 : 0;
 }

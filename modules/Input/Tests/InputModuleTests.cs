@@ -18,6 +18,7 @@ public class InputModuleTests
     {
         public readonly List<PlayerInput> Published = new();
         public readonly List<ActiveDevice> Devices = new();
+        public readonly List<MenuNav> MenuNavs = new();
         public readonly List<IMessageHandler<UiFocus>> FocusHandlers = new();
         public int OtherMessages;
 
@@ -33,6 +34,8 @@ public class InputModuleTests
                 Published.Add(input);
             else if (message is ActiveDevice device)
                 Devices.Add(device);
+            else if (message is MenuNav nav)
+                MenuNavs.Add(nav);
             else if (message is UiFocus focus)
                 foreach (var handler in FocusHandlers)
                     handler.Handle(focus);
@@ -65,16 +68,18 @@ public class InputModuleTests
     // --- one message per tick ---
 
     [Fact]
-    public void PublishesExactlyOnePlayerInputAndOneActiveDevicePerTick()
+    public void PublishesExactlyOnePlayerInputActiveDeviceAndMenuNavPerTick()
     {
         var bus = new FakeBus();
         var input = Started(bus);
         Assert.Empty(bus.Published);
         Assert.Empty(bus.Devices);
+        Assert.Empty(bus.MenuNavs);
         for (int i = 0; i < 5; i++)
             input.Tick(new TickContext(i, Step));
         Assert.Equal(5, bus.Published.Count);
         Assert.Equal(5, bus.Devices.Count);
+        Assert.Equal(5, bus.MenuNavs.Count);
         Assert.Equal(0, bus.OtherMessages);
     }
 
@@ -1114,5 +1119,197 @@ public class InputModuleTests
         Assert.Contains("JoypadFamily.Detect(GodotInput.GetJoyName(device), GodotInput.GetJoyGuid(device))", source);
         Assert.Contains("MouseButton.WheelUp", source);
         Assert.Contains("MouseButton.WheelDown", source);
+    }
+
+    // --- MenuNav: paced menu steps (12 ticks of 1/60 s = 0.2 s) ---
+
+    /// <summary>Runs <paramref name="ticks"/> ticks with <paramref name="set"/> applied before each and returns the steps published.</summary>
+    private static List<MenuNav> RunMenu(InputModule input, FakeBus bus, ref long tick, int ticks, Action set)
+    {
+        var steps = new List<MenuNav>();
+        for (int i = 0; i < ticks; i++)
+        {
+            set();
+            input.Tick(new TickContext(tick++, Step));
+            steps.Add(bus.MenuNavs[^1]);
+        }
+        return steps;
+    }
+
+    private static int[] StepTicks(List<MenuNav> navs)
+    {
+        var ticks = new List<int>();
+        for (int i = 0; i < navs.Count; i++)
+            if (navs[i].Any)
+                ticks.Add(i);
+        return ticks.ToArray();
+    }
+
+    [Fact]
+    public void MenuNavIsZeroWhileNothingIsPushed()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        long tick = 0;
+        var navs = RunMenu(input, bus, ref tick, 30, () => { });
+        Assert.Empty(StepTicks(navs));
+        Assert.Equal(default, input.LatestMenuNav);
+    }
+
+    [Fact]
+    public void ShortStickFlickGivesOneStepOnTheFirstTick()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        long tick = 0;
+        // Pushed up for 3 ticks (50 ms), then released for a second.
+        var navs = RunMenu(input, bus, ref tick, 3, () => input.SetMoveStick(new Vector2(0, 0.9f)));
+        navs.AddRange(RunMenu(input, bus, ref tick, 60, () => input.SetMoveStick(Vector2.Zero)));
+        Assert.Equal(new[] { 0 }, StepTicks(navs));
+        Assert.Equal(-1, navs[0].Vertical);
+        Assert.Equal(0, navs[0].Horizontal);
+    }
+
+    [Fact]
+    public void HeldStickRepeatsEveryPointTwoSeconds()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        long tick = 0;
+        var navs = RunMenu(input, bus, ref tick, 61, () => input.SetMoveStick(new Vector2(0, -1)));
+        Assert.Equal(new[] { 0, 12, 24, 36, 48, 60 }, StepTicks(navs));
+        foreach (int i in StepTicks(navs))
+            Assert.Equal(1, navs[i].Vertical);
+    }
+
+    [Fact]
+    public void RepeatedFlicksWithinPointTwoSecondsGiveOneStep()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        long tick = 0;
+        var navs = new List<MenuNav>();
+        // Three 2-tick flicks, each followed by a 2-tick release: all inside 12 ticks.
+        for (int flick = 0; flick < 3; flick++)
+        {
+            navs.AddRange(RunMenu(input, bus, ref tick, 2, () => input.SetMoveStick(new Vector2(0, 1))));
+            navs.AddRange(RunMenu(input, bus, ref tick, 2, () => input.SetMoveStick(Vector2.Zero)));
+        }
+        Assert.Equal(new[] { 0 }, StepTicks(navs));
+    }
+
+    [Fact]
+    public void FlickAfterPointTwoSecondsStepsAtOnce()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        long tick = 0;
+        var navs = RunMenu(input, bus, ref tick, 2, () => input.SetMoveStick(new Vector2(0, 1)));
+        navs.AddRange(RunMenu(input, bus, ref tick, 10, () => input.SetMoveStick(Vector2.Zero)));
+        // Tick 12 is 0.2 s after the first step: the new push fires on its first tick.
+        navs.AddRange(RunMenu(input, bus, ref tick, 2, () => input.SetMoveStick(new Vector2(0, -1))));
+        Assert.Equal(new[] { 0, 12 }, StepTicks(navs));
+        Assert.Equal(-1, navs[0].Vertical);
+        Assert.Equal(1, navs[12].Vertical);
+    }
+
+    [Fact]
+    public void FlickTooSoonWaitsUntilPointTwoSecondsIfStillHeld()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        long tick = 0;
+        var navs = RunMenu(input, bus, ref tick, 2, () => input.SetMoveStick(new Vector2(0, 1)));
+        navs.AddRange(RunMenu(input, bus, ref tick, 4, () => input.SetMoveStick(Vector2.Zero)));
+        // Pushed again at tick 6 and held: the next step is at tick 12, not 6.
+        navs.AddRange(RunMenu(input, bus, ref tick, 10, () => input.SetMoveStick(new Vector2(0, 1))));
+        Assert.Equal(new[] { 0, 12 }, StepTicks(navs));
+    }
+
+    [Fact]
+    public void StickUsesItsLargerAxisAndIgnoresWobblesInsideTheThreshold()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        long tick = 0;
+        // Wobbles below 0.5 on both axes never fire.
+        var wobble = new[] { new Vector2(0.4f, 0.3f), new Vector2(-0.45f, 0), new Vector2(0.1f, -0.49f), new Vector2(0.35f, 0.35f) };
+        int w = 0;
+        Assert.Empty(StepTicks(RunMenu(input, bus, ref tick, 40, () => input.SetMoveStick(wobble[w++ % wobble.Length]))));
+
+        // Mostly right, a little down: one step right only.
+        var navs = RunMenu(input, bus, ref tick, 1, () => input.SetMoveStick(new Vector2(0.8f, -0.6f)));
+        Assert.Equal(new MenuNav(0, 1).Horizontal, navs[0].Horizontal);
+        Assert.Equal(0, navs[0].Vertical);
+
+        // Mostly down, a little left: one step down only.
+        RunMenu(input, bus, ref tick, 12, () => input.SetMoveStick(Vector2.Zero));
+        navs = RunMenu(input, bus, ref tick, 1, () => input.SetMoveStick(new Vector2(-0.55f, -0.7f)));
+        Assert.Equal(1, navs[0].Vertical);
+        Assert.Equal(0, navs[0].Horizontal);
+
+        // Left past the threshold.
+        RunMenu(input, bus, ref tick, 12, () => input.SetMoveStick(Vector2.Zero));
+        navs = RunMenu(input, bus, ref tick, 1, () => input.SetMoveStick(new Vector2(-0.6f, 0.2f)));
+        Assert.Equal(-1, navs[0].Horizontal);
+        Assert.Equal(0, navs[0].Vertical);
+    }
+
+    [Theory]
+    [InlineData(-1, 0)] // D-pad / arrow / W up
+    [InlineData(1, 0)]  // down
+    [InlineData(0, -1)] // left
+    [InlineData(0, 1)]  // right
+    public void ButtonsStepOnceForATapAndRepeatWhileHeld(int vertical, int horizontal)
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        long tick = 0;
+        // A 2-tick tap, released, tapped again within 0.2 s: one step.
+        var navs = RunMenu(input, bus, ref tick, 2, () => input.SetMenuButtons(vertical, horizontal));
+        navs.AddRange(RunMenu(input, bus, ref tick, 3, () => input.SetMenuButtons(0, 0)));
+        navs.AddRange(RunMenu(input, bus, ref tick, 2, () => input.SetMenuButtons(vertical, horizontal)));
+        navs.AddRange(RunMenu(input, bus, ref tick, 20, () => input.SetMenuButtons(0, 0)));
+        Assert.Equal(new[] { 0 }, StepTicks(navs));
+        Assert.Equal(vertical, navs[0].Vertical);
+        Assert.Equal(horizontal, navs[0].Horizontal);
+
+        // Held: steps at once and every 12 ticks.
+        navs = RunMenu(input, bus, ref tick, 37, () => input.SetMenuButtons(vertical, horizontal));
+        Assert.Equal(new[] { 0, 12, 24, 36 }, StepTicks(navs));
+        foreach (int i in StepTicks(navs))
+        {
+            Assert.Equal(vertical, navs[i].Vertical);
+            Assert.Equal(horizontal, navs[i].Horizontal);
+        }
+    }
+
+    [Fact]
+    public void ButtonsWinOverTheStickAndShareItsPacing()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        long tick = 0;
+        // Stick flicked up, then the D-pad pressed down 3 ticks later: still one step in 0.2 s.
+        var navs = RunMenu(input, bus, ref tick, 2, () => input.SetMoveStick(new Vector2(0, 1)));
+        navs.AddRange(RunMenu(input, bus, ref tick, 1, () => input.SetMoveStick(Vector2.Zero)));
+        navs.AddRange(RunMenu(input, bus, ref tick, 9, () => input.SetMenuButtons(1, 0)));
+        navs.AddRange(RunMenu(input, bus, ref tick, 1, () => input.SetMoveStick(new Vector2(-1, 0))));
+        Assert.Equal(new[] { 0, 12 }, StepTicks(navs));
+        Assert.Equal(-1, navs[0].Vertical);
+        Assert.Equal(1, navs[12].Vertical);
+        Assert.Equal(0, navs[12].Horizontal);
+    }
+
+    [Fact]
+    public void MenuNavIsPublishedWhileAMenuIsOpen()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        bus.Focus(7, true);
+        long tick = 0;
+        var navs = RunMenu(input, bus, ref tick, 1, () => input.SetMenuButtons(0, 1));
+        Assert.Equal(1, navs[0].Horizontal);
+        Assert.Equal(navs[0], input.LatestMenuNav);
     }
 }

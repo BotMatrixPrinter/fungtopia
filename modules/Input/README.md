@@ -1,7 +1,7 @@
 # Input module
 
-Reads mouse, keyboard and gamepad and publishes one `PlayerInput` and one `ActiveDevice` message per
-fixed tick. Other modules (player, camera, bow) read them from the bus; modules that show button
+Reads mouse, keyboard and gamepad and publishes one `PlayerInput`, one `ActiveDevice` and one `MenuNav`
+message per fixed tick. Other modules (player, camera, bow) read them from the bus; modules that show button
 prompts use `ActiveDevice` with `Prompts` to show only the buttons of the device in use, as icons.
 
 - `Contract/`: `Fungtopia.Input.Contract`, the `PlayerInput` struct (namespace `Fungtopia.Input`):
@@ -32,6 +32,14 @@ prompts use `ActiveDevice` with `Prompts` to show only the buttons of the device
   `Jump`, `Fire` and `Eat` false, `FoodSelect` -1 and `FoodCycle` 0; `Interact` and `OpenMap` are still reported, so menus and dialogue can use
   them. Owners are tracked one by one: an owner that opens twice needs one close, closing an owner
   that is not open changes nothing, and the controls come back when the last open owner closes.
+- `Contract/` also has `MenuNav` (`int Vertical`: -1 up, +1 down, else 0; `int Horizontal`: -1 left,
+  +1 right, else 0; `bool Any`), published every tick (also while a menu is open), so every menu moves
+  its selection at the same pace instead of reading the stick and D-pad itself. A step fires on the tick
+  a direction is first pushed (left stick past `MenuStickThreshold`, 0.5, on its larger axis; D-pad;
+  arrow keys; W A S D), then once per `MenuRepeatSeconds` (0.2 s) while it stays held. Steps are never
+  closer than 0.2 s, however often the stick is flicked; a push 0.2 s or more after the last step fires
+  at once. Stick wobbles inside the threshold never fire. At most one field is non-zero: the stick
+  uses its larger axis, held buttons win over the stick, and vertical wins over horizontal.
 - `Contract/` also has the prompt helpers (see [Prompts](#prompts)): `ActiveDevice` (`DeviceKind Kind`,
   `bool IsGamepad`), `enum DeviceKind { KeyboardMouse, Xbox, PlayStation, Nintendo, Generic }`,
   `enum PromptAction` and `static class Prompts`.
@@ -43,11 +51,13 @@ prompts use `ActiveDevice` with `Prompts` to show only the buttons of the device
 published as `ActiveDevice` every tick (also while a menu is open): `NoteKeyboardMouse()` (a key,
 mouse button or wheel press), `NoteMouseMotion(pixels)` (switches from `MouseSwitchPixels`, 2, in one
 event), `NoteGamepadButton(family)` and `NoteGamepadAxis(family, value)` (switches only past
-`StickDeadZone`). `JoypadFamily.Detect(name, guid)` tells the family from Godot's joypad name
+`StickDeadZone`). `SetMenuButtons(vertical, horizontal)` takes the held D-pad / arrow / WASD menu
+directions; the menu stick is the left stick from `SetMoveStick`, and `LatestMenuNav` is the last step.
+`JoypadFamily.Detect(name, guid)` tells the family from Godot's joypad name
 (PlayStation / DualShock / DualSense / Sony / PS3-5, Nintendo / Switch / Joy-Con / Pro Controller,
 Xbox / XInput / Microsoft) or else the USB vendor in its SDL GUID (054c Sony, 057e Nintendo,
 045e Microsoft); any other pad is Generic. Settings: `StickDeadZone` (0.2), `StickLookRadiansPerSecond` (3),
-  `MouseRadiansPerPixel` (0.003), `TriggerThreshold` (0.5).
+  `MouseRadiansPerPixel` (0.003), `TriggerThreshold` (0.5), `MenuStickThreshold` (0.5), `MenuRepeatSeconds` (0.2).
 - `Godot/`: `Main.tscn` with `InputView`, a full-screen `Control` that ignores the mouse. It
   reads the devices before each tick, reports which device each real input came from (the family of
   each joypad is detected once per connection), casts the aim ray with
@@ -106,7 +116,7 @@ Nintendo pad's bottom button is B and its right one A.
 | FoodPrev | Wheel up | D-pad Left | D-pad Left | D-pad Left | this module (keys 1-3 pick a slot) |
 | FoodNext | Wheel down | D-pad Right | D-pad Right | D-pad Right | this module |
 | Pause | Esc | Menu | Options | + | pause menu |
-| MenuUp / Down / Left / Right | Arrow keys | D-pad | D-pad | D-pad | menus (most also take WASD and the left stick) |
+| MenuUp / Down / Left / Right | Arrow keys | D-pad | D-pad | D-pad | menus, via `MenuNav` (also WASD and the left stick) |
 | TurnLeft | Q | LB | L1 | L | wardrobe |
 | TurnRight | E | RB | R1 | R | wardrobe |
 | Move | W A S D | Left stick | Left stick | Left stick | this module |
