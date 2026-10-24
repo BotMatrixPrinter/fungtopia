@@ -1,5 +1,6 @@
 using System;
 using System.Numerics;
+using Fungtopia.Bow;
 using Fungtopia.Forest;
 using Fungtopia.Input;
 using Fungtopia.Map;
@@ -16,11 +17,12 @@ namespace Fungtopia.Camera;
 /// when the ground or a giant mushroom trunk would block the view and eases back out after.
 /// While the wardrobe, the shop or the start screen is open it swings round to a still front view
 /// of the player standing in the left half of the screen (kept inside the walls at home), and
-/// swings back when they close.
+/// swings back when they close. While the bow is drawn it eases to an aim camera over the left of
+/// the head, looking the same way, so the bow held out to the left shows beside the big head.
 /// Publishes <see cref="CameraPose"/> every tick.
 /// </summary>
 public sealed class CameraModule : IModule, IMessageHandler<PlayerState>, IMessageHandler<PlayerInput>,
-    IMessageHandler<WardrobeState>, IMessageHandler<StartScreenState>
+    IMessageHandler<WardrobeState>, IMessageHandler<StartScreenState>, IMessageHandler<BowState>
 {
     /// <summary>Height of the orbit point above the player's feet, meters.</summary>
     public const float PivotHeight = 1.6f;
@@ -48,7 +50,7 @@ public sealed class CameraModule : IModule, IMessageHandler<PlayerState>, IMessa
     /// <summary>Front view: height of the camera (and the point it looks at) above the feet, meters.</summary>
     public const float ChestHeight = 0.6f;
     /// <summary>The camera's vertical field of view (the view's <c>Camera3D.Fov</c>), radians: 70 degrees.</summary>
-    public const float FieldOfView = 70f * MathF.PI / 180f;
+    public const float FieldOfView = CameraPose.DefaultFieldOfView;
     /// <summary>The screen's width over its height the front view is framed for (1920 x 1080).</summary>
     public const float FrameAspect = 16f / 9f;
     /// <summary>
@@ -69,6 +71,19 @@ public sealed class CameraModule : IModule, IMessageHandler<PlayerState>, IMessa
     /// <summary>Front view at home: the step of the search for a side of the player with room for the camera, radians.</summary>
     public const float RoomSearchStep = 10f * MathF.PI / 180f;
 
+    /// <summary>Aim camera: how far its orbit point sits to the left of the head's center (<see cref="BowGeometry.HeadUp"/>), meters.</summary>
+    public const float AimLeft = 0.9f;
+    /// <summary>Aim camera: how far its orbit point sits above the head's center, meters.</summary>
+    public const float AimRaise = 0.25f;
+    /// <summary>Aim camera: distance from its orbit point to the camera when nothing is in the way, meters.</summary>
+    public const float AimDistance = 2.75f;
+    /// <summary>Aim camera: the vertical field of view at a full draw, radians: 62 degrees.</summary>
+    public const float AimFieldOfView = 62f * MathF.PI / 180f;
+    /// <summary>How long the ease to the aim camera, or back, takes, seconds.</summary>
+    public const float AimTransitionSeconds = 0.25f;
+    /// <summary>How long the aim camera stays after a shot (the draw back at 0), seconds.</summary>
+    public const float AimHoldSeconds = 0.4f;
+
     private const int GroundSamples = 32;
     private const int GroundRefineSteps = 6;
 
@@ -81,6 +96,11 @@ public sealed class CameraModule : IModule, IMessageHandler<PlayerState>, IMessa
     private bool _startOpen;
     private float _transition;
     private float _frontYaw;
+    private float _draw;
+    private float _aimHold;
+    private float _aim;
+    private float _zoom;
+    private float _lastWanted = Distance;
 
     public float Yaw { get; private set; }
     public float Pitch { get; private set; } = StartPitch;
@@ -105,6 +125,32 @@ public sealed class CameraModule : IModule, IMessageHandler<PlayerState>, IMessa
     /// </summary>
     public float FrontYaw => _frontYaw;
 
+    /// <summary>The bow is drawn, or was shot less than <see cref="AimHoldSeconds"/> ago (and no screen wants the front view).</summary>
+    public bool AimWanted => _aimHold > 0f && !FrontViewWanted;
+
+    /// <summary>How far the camera is into the aim camera, eased: 0 the normal orbit, 1 the aim camera.</summary>
+    public float Aiming => SmoothStep(_aim);
+
+    /// <summary>
+    /// The aim camera's orbit point for a head orbit center <paramref name="head"/> (<see cref="PivotHeight"/>
+    /// above the feet) and yaw <paramref name="yaw"/>, nothing in the way: <see cref="AimLeft"/> to the
+    /// left of the head's center and <see cref="AimRaise"/> above it.
+    /// </summary>
+    public static Vector3 AimPivot(Vector3 head, float yaw) =>
+        head + new Vector3(0f, BowGeometry.HeadUp + AimRaise - PivotHeight, 0f) - Right(yaw) * AimLeft;
+
+    /// <summary>
+    /// The aim camera for a player with feet at <paramref name="feet"/>, with nothing in the way:
+    /// <see cref="AimDistance"/> behind <see cref="AimPivot"/> along the view of <paramref name="yaw"/>
+    /// and <paramref name="pitch"/>, looking that same way, at <see cref="AimFieldOfView"/>.
+    /// </summary>
+    public static CameraPose AimView(Vector3 feet, float yaw, float pitch)
+    {
+        Vector3 pivot = AimPivot(feet + new Vector3(0f, PivotHeight, 0f), yaw);
+        return new CameraPose(pivot - ViewDirection(yaw, pitch) * AimDistance,
+            Quaternion.CreateFromYawPitchRoll(yaw, pitch, 0f), yaw, AimFieldOfView);
+    }
+
     /// <summary>Number of ticks run; the view uses it to see new ticks.</summary>
     public long Ticks { get; private set; }
 
@@ -119,6 +165,7 @@ public sealed class CameraModule : IModule, IMessageHandler<PlayerState>, IMessa
         bus.Subscribe<PlayerInput>(this);
         bus.Subscribe<WardrobeState>(this);
         bus.Subscribe<StartScreenState>(this);
+        bus.Subscribe<BowState>(this);
         _head = _feet + new Vector3(0f, PivotHeight, 0f);
         Pose = Compute(float.PositiveInfinity);
     }
@@ -135,6 +182,8 @@ public sealed class CameraModule : IModule, IMessageHandler<PlayerState>, IMessa
     public void Handle(in WardrobeState message) => _wardrobeOpen = message.Open;
 
     public void Handle(in StartScreenState message) => _startOpen = message.Open;
+
+    public void Handle(in BowState message) => _draw = float.IsFinite(message.Draw) ? Math.Clamp(message.Draw, 0f, 1f) : 0f;
 
     public void Handle(in PlayerInput message)
     {
@@ -183,6 +232,15 @@ public sealed class CameraModule : IModule, IMessageHandler<PlayerState>, IMessa
             if (_transition < 1e-4f)
                 _transition = 0f;
         }
+
+        // The aim camera: while drawing, and a moment after the shot.
+        _aimHold = _draw > 0f ? AimHoldSeconds : MathF.Max(0f, _aimHold - dt);
+        float step = dt / AimTransitionSeconds;
+        bool aim = AimWanted;
+        _aim = Math.Clamp(_aim + (aim ? step : -step), 0f, 1f);
+        // The zoom follows the draw, no faster than the ease, so a shot does not jump it.
+        float zoom = aim ? _draw : 0f;
+        _zoom = zoom > _zoom ? MathF.Min(zoom, _zoom + step) : MathF.Max(zoom, _zoom - step);
 
         Pose = Compute(dt);
         _bus.Publish(Pose);
@@ -295,18 +353,32 @@ public sealed class CameraModule : IModule, IMessageHandler<PlayerState>, IMessa
         bool home = AtHome(_feet);
         Vector3 right = Right(Yaw);
         Vector3 shoulder = _head + right * (home ? MathF.Min(ShoulderOffset, RoomFreeLength(_head, right)) : FreeLength(_head, right, ShoulderOffset));
+        float wanted = Distance;
+        float aiming = Aiming;
+        if (aiming > 0f)
+        {
+            // The aim camera's orbit point, left of the head (kept clear of trunks and walls on that side).
+            Vector3 raised = _head + new Vector3(0f, BowGeometry.HeadUp + AimRaise - PivotHeight, 0f);
+            float left = home ? MathF.Min(AimLeft, RoomFreeLength(raised, -right)) : FreeLength(raised, -right, AimLeft);
+            shoulder = Vector3.Lerp(shoulder, raised - right * left, aiming);
+            wanted = Distance + (AimDistance - Distance) * aiming;
+        }
         Vector3 back = -ViewDirection(Yaw, Pitch);
-        float free = home ? MathF.Min(Distance, RoomFreeLength(shoulder, back)) : FreeLength(shoulder, back, Distance);
-        // Pull in at once so the view is never blocked; ease back out.
+        float free = home ? MathF.Min(wanted, RoomFreeLength(shoulder, back)) : FreeLength(shoulder, back, wanted);
+        // Pull in at once so the view is never blocked; ease back out (but follow the aim's own
+        // lengthening at once, so leaving the aim camera is as smooth as entering it).
         if (free <= CurrentDistance || !float.IsFinite(dt))
             CurrentDistance = free;
         else
-            CurrentDistance += (free - CurrentDistance) * (1f - MathF.Exp(-ReturnSharpness * dt));
+            CurrentDistance = MathF.Min(free, MathF.Max(CurrentDistance + (free - CurrentDistance) * (1f - MathF.Exp(-ReturnSharpness * dt)),
+                CurrentDistance + MathF.Max(0f, wanted - _lastWanted)));
+        _lastWanted = wanted;
+        float fov = FieldOfView + (AimFieldOfView - FieldOfView) * SmoothStep(_zoom);
         float framing = Framing;
         if (framing <= 0f)
         {
             var orientation = Quaternion.CreateFromYawPitchRoll(Yaw, Pitch, 0f);
-            return new CameraPose(shoulder + back * CurrentDistance, orientation, Yaw);
+            return new CameraPose(shoulder + back * CurrentDistance, orientation, Yaw, fov);
         }
 
         // Swing round the player: blend the arm's yaw, pitch, length and center, not the
@@ -328,7 +400,7 @@ public sealed class CameraModule : IModule, IMessageHandler<PlayerState>, IMessa
         float distance = CurrentDistance + (frontDistance - CurrentDistance) * framing;
         distance = home ? MathF.Min(distance, RoomFreeLength(center, away)) : FreeLength(center, away, distance);
         float yaw = WrapAngle(armYaw - FrameAngle * framing);
-        return new CameraPose(center + away * distance, Quaternion.CreateFromYawPitchRoll(yaw, pitch, 0f), yaw);
+        return new CameraPose(center + away * distance, Quaternion.CreateFromYawPitchRoll(yaw, pitch, 0f), yaw, fov);
     }
 
     private static float SmoothStep(float t) => t * t * (3f - 2f * t);

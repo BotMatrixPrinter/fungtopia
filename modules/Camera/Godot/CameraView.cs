@@ -28,6 +28,7 @@ public partial class CameraView : Camera3D, IModuleView
         _current = _previous = _camera.Pose;
         _seenTicks = _camera.Ticks;
         Place(_current.Position, _current.Orientation);
+        Fov = Mathf.RadToDeg(_current.FieldOfView);
     }
 
     public override void _Process(double delta)
@@ -47,6 +48,7 @@ public partial class CameraView : Camera3D, IModuleView
         var position = System.Numerics.Vector3.Distance(from, to) > CutDistance ? to : System.Numerics.Vector3.Lerp(from, to, alpha);
         var orientation = System.Numerics.Quaternion.Slerp(_previous.Orientation, _current.Orientation, alpha);
         Place(position, orientation);
+        Fov = Mathf.RadToDeg(_previous.FieldOfView + (_current.FieldOfView - _previous.FieldOfView) * alpha);
     }
 
     private void Place(System.Numerics.Vector3 p, System.Numerics.Quaternion q)

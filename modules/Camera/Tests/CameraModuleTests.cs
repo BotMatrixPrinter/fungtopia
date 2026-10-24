@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
+using Fungtopia.Bow;
 using Fungtopia.Forest;
 using Fungtopia.Input;
 using Fungtopia.Map;
@@ -17,13 +18,14 @@ public class CameraModuleTests
     private const double Step = 1.0 / 60;
     private const float Degree = MathF.PI / 180f;
 
-    /// <summary>Fake of the shell's bus: delivers player, input and screen messages and records every pose published.</summary>
+    /// <summary>Fake of the shell's bus: delivers player, input, bow and screen messages and records every pose published.</summary>
     private sealed class FakeBus : IMessageBus
     {
         private IMessageHandler<PlayerState>? _state;
         private IMessageHandler<PlayerInput>? _input;
         private IMessageHandler<WardrobeState>? _wardrobe;
         private IMessageHandler<StartScreenState>? _start;
+        private IMessageHandler<BowState>? _bow;
         public readonly List<CameraPose> Poses = new(1024);
         public int OtherMessages;
 
@@ -37,6 +39,8 @@ public class CameraModuleTests
                 _wardrobe = wardrobe;
             if (handler is IMessageHandler<StartScreenState> start && typeof(T) == typeof(StartScreenState))
                 _start = start;
+            if (handler is IMessageHandler<BowState> bow && typeof(T) == typeof(BowState))
+                _bow = bow;
         }
 
         public void Publish<T>(in T message) where T : struct
@@ -51,6 +55,8 @@ public class CameraModuleTests
                 _wardrobe?.Handle(in wardrobe);
             else if (message is StartScreenState start)
                 _start?.Handle(in start);
+            else if (message is BowState bow)
+                _bow?.Handle(in bow);
             else
                 OtherMessages++;
         }
@@ -649,6 +655,214 @@ public class CameraModuleTests
         Assert.True(Vector3.Distance(last, bus.Poses[^1].Position) < 0.4f);
     }
 
+    // ---- the aim camera (drawing the bow) ----
+
+    private static readonly int AimTicks = (int)MathF.Ceiling(CameraModule.AimTransitionSeconds * 60f);
+    private static readonly int HoldTicks = (int)MathF.Ceiling(CameraModule.AimHoldSeconds * 60f);
+
+    /// <summary>The chibi head seen as a ball: about 0.86 m wide, plus its ink outline.</summary>
+    private const float HeadOutlineRadius = 0.45f;
+
+    /// <summary>Ticks with the player standing at <paramref name="feet"/> facing the camera's way (as while drawing) and the bow drawn <paramref name="draw"/>.</summary>
+    private static void RunBow(CameraModule camera, FakeBus bus, Vector3 feet, float draw, int ticks)
+    {
+        for (int i = 0; i < ticks; i++)
+        {
+            bus.Publish(new PlayerState(feet, camera.Yaw, Vector3.Zero, true, 10, 10, true, CharacterKind.Girl));
+            bus.Publish(new BowState(draw, 0));
+            camera.Tick(new TickContext(camera.Ticks, Step));
+        }
+    }
+
+    private static void PitchTo(FakeBus bus, CameraModule camera, float pitch) => Look(bus, 0f, pitch - camera.Pitch);
+
+    private static float AngleBetween(Vector3 a, Vector3 b) =>
+        MathF.Acos(Math.Clamp(Vector3.Dot(Vector3.Normalize(a), Vector3.Normalize(b)), -1f, 1f));
+
+    [Fact]
+    public void TheAimOffsetIsLeftOfAndAboveTheHead()
+    {
+        var feet = ForestBounds.PlayerStart;
+        var head = feet + new Vector3(0f, BowGeometry.HeadUp, 0f);
+        foreach (float yaw in new[] { 0f, 1.1f, -2.4f })
+        {
+            Vector3 pivot = CameraModule.AimPivot(feet + new Vector3(0f, CameraModule.PivotHeight, 0f), yaw);
+            Vector3 offset = pivot - head;
+            Assert.Equal(-0.9f, Vector3.Dot(offset, CameraModule.Right(yaw)), 2);   // 0.9 m left
+            Assert.Equal(0.25f, offset.Y, 2);                                         // 0.25 m higher
+            Assert.Equal(0f, Vector3.Dot(offset, CameraModule.Forward(yaw)), 3);      // over the head, not ahead
+        }
+
+        // Drawing in the open clearing, level: the camera is there, 2.5-3 m back.
+        var (camera, bus) = Started();
+        PitchTo(bus, camera, 0f);
+        RunBow(camera, bus, feet, 0f, 30);
+        RunBow(camera, bus, feet, 0.5f, AimTicks + 30);
+        var pose = bus.Poses[^1];
+        Vector3 fromHead = pose.Position - head;
+        Assert.Equal(1f, camera.Aiming, 4);
+        Assert.InRange(Vector3.Dot(fromHead, CameraModule.Right(camera.Yaw)), -0.95f, -0.85f);
+        Assert.InRange(fromHead.Y, 0.2f, 0.3f);
+        Assert.InRange(-Vector3.Dot(fromHead, CameraModule.Forward(camera.Yaw)), 2.5f, 3f);
+        Assert.True(Vector3.Distance(CameraModule.AimView(feet, camera.Yaw, 0f).Position, pose.Position) < 0.02f);
+    }
+
+    [Theory]
+    [InlineData(0f, 0f)]
+    [InlineData(20f, 0f)]
+    [InlineData(-20f, 0f)]
+    [InlineData(20f, 2f)]
+    [InlineData(-20f, -1.3f)]
+    public void TheHeadDoesNotHideTheBowHand(float pitchDegrees, float yaw)
+    {
+        var feet = ForestBounds.PlayerStart;
+        var (camera, bus) = Started();
+        Look(bus, -yaw, 0f);
+        PitchTo(bus, camera, pitchDegrees * Degree);
+        RunBow(camera, bus, feet, 0f, 30);
+        RunBow(camera, bus, feet, 1f, AimTicks + 30);
+        Assert.Equal(pitchDegrees * Degree, camera.Pitch, 4);
+
+        foreach (var pose in new[] { bus.Poses[^1], CameraModule.AimView(feet, camera.Yaw, camera.Pitch) })
+        {
+            Vector3 head = feet + new Vector3(0f, BowGeometry.HeadUp, 0f);
+            Vector3 hold = BowGeometry.HoldPoint(feet, camera.Yaw); // the character faces the aim
+            Vector3 toHead = head - pose.Position, toHold = hold - pose.Position;
+            float outline = MathF.Asin(HeadOutlineRadius / toHead.Length());
+            float apart = AngleBetween(toHead, toHold);
+            Assert.True(apart > outline + 1f * Degree,
+                $"pitch {pitchDegrees}: the hold point is {apart / Degree:F1} degrees from the head's center, its outline {outline / Degree:F1}");
+            // And it is on the screen, beside the head on its left, beyond it.
+            Vector3 s = OnScreen(pose, hold);
+            Assert.True(s.Z > toHead.Length(), "the bow hand is beyond the head");
+            Assert.True(s.X < OnScreen(pose, head).X, "the bow hand shows left of the head");
+            Assert.True(MathF.Abs(s.X) < MathF.Tan(CameraModule.AimFieldOfView / 2f) * CameraModule.FrameAspect, "the bow hand is on the screen");
+            Assert.True(MathF.Abs(s.Y) < MathF.Tan(CameraModule.AimFieldOfView / 2f), "the bow hand is on the screen");
+        }
+    }
+
+    [Fact]
+    public void TheAimCameraLooksTheSameWayAsTheNormalCamera()
+    {
+        var feet = ForestBounds.PlayerStart;
+        var (camera, bus) = Started();
+        Look(bus, 0.7f, 0.2f);
+        RunBow(camera, bus, feet, 0f, 30);
+        var normal = bus.Poses[^1];
+        for (int i = 0; i < AimTicks + HoldTicks + 40; i++)
+        {
+            RunBow(camera, bus, feet, i < 50 ? MathF.Min(1f, i / 36f) : 0f, 1);
+            var pose = bus.Poses[^1];
+            Assert.True(Quaternion.Dot(normal.Orientation, pose.Orientation) > 1f - 1e-6f, $"tick {i}: the view turned");
+            Assert.Equal(normal.Yaw, pose.Yaw, 5);
+        }
+        Vector3 look = Vector3.Transform(-Vector3.UnitZ, bus.Poses[^1].Orientation);
+        Assert.True(Vector3.Distance(CameraModule.ViewDirection(camera.Yaw, camera.Pitch), look) < 1e-4f);
+    }
+
+    [Fact]
+    public void EasesSmoothlyToTheAimCameraAndBackAfterTheShot()
+    {
+        var feet = ForestBounds.PlayerStart;
+        var (camera, bus) = Started();
+        PitchTo(bus, camera, 0f);
+        RunBow(camera, bus, feet, 0f, 60);
+        var normal = bus.Poses[^1];
+        Assert.Equal(CameraModule.FieldOfView, normal.FieldOfView, 5);
+        var aim = CameraModule.AimView(feet, camera.Yaw, 0f);
+
+        // Draw for a full second (full after 0.6 s), shoot, then wait.
+        var trace = new List<CameraPose>();
+        int drawTicks = 60;
+        for (int i = 0; i < drawTicks + HoldTicks + AimTicks + 30; i++)
+        {
+            RunBow(camera, bus, feet, i < drawTicks ? MathF.Min(1f, (i + 1) / 36f) : 0f, 1);
+            trace.Add(bus.Poses[^1]);
+        }
+        var previous = normal;
+        float biggest = 0f;
+        foreach (var pose in trace)
+        {
+            float moved = Vector3.Distance(previous.Position, pose.Position);
+            biggest = MathF.Max(biggest, moved);
+            Assert.True(MathF.Abs(pose.FieldOfView - previous.FieldOfView) < 1f * Degree, "the zoom does not jump");
+            previous = pose;
+        }
+        // About 2.6 m in 0.25 s, eased: no step much over its average.
+        float total = Vector3.Distance(normal.Position, aim.Position);
+        Assert.True(biggest < 2.5f * total / AimTicks, $"a step of {biggest} m");
+
+        // In the aim camera within the ease, zoomed at the full draw.
+        Assert.True(Vector3.Distance(trace[AimTicks + 1].Position, aim.Position) < 0.02f);
+        var full = trace[drawTicks - 1];
+        Assert.True(Vector3.Distance(full.Position, aim.Position) < 0.02f);
+        Assert.Equal(CameraModule.AimFieldOfView, full.FieldOfView, 3);
+        Assert.InRange(CameraModule.AimFieldOfView, 55f * Degree, 66f * Degree); // slightly lower
+        // Halfway through the ease it is halfway there.
+        float half = Vector3.Distance(trace[AimTicks / 2].Position, normal.Position) / total;
+        Assert.InRange(half, 0.3f, 0.7f);
+
+        // Still there for a moment after the shot, then back to the normal camera.
+        Assert.True(Vector3.Distance(trace[drawTicks + HoldTicks - 3].Position, aim.Position) < 0.02f, "holds after the shot");
+        var back = trace[^1];
+        Assert.True(Vector3.Distance(back.Position, normal.Position) < 0.02f, $"back at {back.Position}, normal {normal.Position}");
+        Assert.Equal(CameraModule.FieldOfView, back.FieldOfView, 5);
+        Assert.Equal(0f, camera.Aiming);
+        Assert.Equal(CameraModule.Distance, camera.CurrentDistance, 2);
+    }
+
+    [Fact]
+    public void TheAimCameraPullsInInFrontOfATrunk()
+    {
+        var trunk = FindTrunk();
+        float gap = 0.8f;
+        Vector2 away = Vector2.Normalize(new Vector2(1f, 0.3f));
+        var feet = OnGround(trunk.X + away.X * (trunk.Radius + gap), trunk.Z + away.Y * (trunk.Radius + gap));
+        float yaw = MathF.Atan2(-away.X, -away.Y);
+
+        var (camera, bus) = Started();
+        Look(bus, -yaw, 0f);
+        PitchTo(bus, camera, 0f);
+        RunBow(camera, bus, feet, 1f, AimTicks + 30);
+        var pose = bus.Poses[^1];
+
+        Assert.Equal(1f, camera.Aiming, 4);
+        Assert.True(camera.CurrentDistance < gap + 0.3f, $"distance {camera.CurrentDistance}");
+        float dx = pose.Position.X - trunk.X, dz = pose.Position.Z - trunk.Z;
+        Assert.True(MathF.Sqrt(dx * dx + dz * dz) >= trunk.Radius + CameraModule.Clearance - 0.01f, "camera outside the trunk");
+    }
+
+    [Fact]
+    public void TheAimCameraKeepsAboveTheGroundLookingUp()
+    {
+        var (camera, bus) = Started();
+        var feet = ForestBounds.PlayerStart;
+        Look(bus, 0f, 10f); // +60 degrees
+        RunBow(camera, bus, feet, 1f, AimTicks + 30);
+        var pose = bus.Poses[^1];
+        Assert.True(camera.CurrentDistance < CameraModule.AimDistance - 0.5f, $"distance {camera.CurrentDistance}");
+        Assert.True(pose.Position.Y >= Terrain.HeightAt(pose.Position.X, pose.Position.Z) + CameraModule.Clearance - 0.01f);
+    }
+
+    [Fact]
+    public void TheFrontViewIsNotTurnedIntoTheAimCamera()
+    {
+        var feet = OnGround(0f, 74f);
+        var (camera, bus) = Started();
+        for (int i = 0; i < TransitionTicks + 30; i++)
+        {
+            bus.Publish(new BowState(1f, 0));
+            RunScreens(camera, bus, feet, Facing, true, false, 1);
+        }
+        Assert.False(camera.AimWanted);
+        Assert.Equal(0f, camera.Aiming);
+        var pose = bus.Poses[^1];
+        var front = CameraModule.FrontView(feet, camera.FrontYaw);
+        Assert.True(Vector3.Distance(front.Position, pose.Position) < 0.05f);
+        Assert.Equal(CameraModule.FieldOfView, pose.FieldOfView, 5);
+        AssertFramedInTheLeftHalf(pose, feet);
+    }
+
     // ---- performance ----
 
     [Fact]
@@ -666,6 +880,9 @@ public class CameraModuleTests
         // Into the front view and back.
         for (int i = 0; i < 300; i++)
             RunScreens(camera, bus, OnGround(0f, 74f), Facing, i < 150, false, 1);
+        // Drawing, shooting and back.
+        for (int i = 0; i < 120; i++)
+            RunBow(camera, bus, OnGround(0f, 74f), i < 60 ? i / 36f : 0f, 1);
         // And at home, facing a wall.
         for (int i = 0; i < 300; i++)
             RunScreens(camera, bus, HomeFeet(604.5f, 596.6f), 0f, i < 150, false, 1);
