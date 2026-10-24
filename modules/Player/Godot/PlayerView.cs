@@ -6,7 +6,8 @@ namespace Fungtopia.Player.View;
 
 /// <summary>
 /// Draws the player: the chosen character's model placed between the last two fixed ticks,
-/// turned to face <see cref="PlayerState.Facing"/>, and animated from the player's motion.
+/// turned to face <see cref="PlayerState.Facing"/>, and animated from the player's motion and its
+/// archery pose (<see cref="PlayerModule.Archery"/>, aimed along the input's aim).
 /// The character setting is <see cref="Character"/> ("Girl" or "Boy"), which the command-line
 /// user argument <c>--character=boy</c> (after <c>--</c>) overrides.
 /// </summary>
@@ -20,6 +21,8 @@ public partial class PlayerView : Node3D, IModuleView
     private CharacterModel? _model;
     private PlayerState _previous;
     private PlayerState _current;
+    private ArcheryState _previousArchery = ArcheryState.Relaxed;
+    private ArcheryState _currentArchery = ArcheryState.Relaxed;
     private long _seenTicks = -1;
 
     public void Bind(IModule module) => _player = (PlayerModule)module;
@@ -30,6 +33,7 @@ public partial class PlayerView : Node3D, IModuleView
             return;
         _player.Character = ChosenCharacter();
         _current = _previous = _player.State;
+        _currentArchery = _previousArchery = _player.Archery;
         _seenTicks = _player.Ticks;
         ShowModel(_player.Character);
     }
@@ -59,6 +63,8 @@ public partial class PlayerView : Node3D, IModuleView
             // More than one tick since the last frame: start from the newest only.
             _previous = _player.Ticks == _seenTicks + 1 ? _current : _player.State;
             _current = _player.State;
+            _previousArchery = _player.Ticks == _seenTicks + 1 ? _currentArchery : _player.Archery;
+            _currentArchery = _player.Archery;
             _seenTicks = _player.Ticks;
         }
         if (_current.Character != _model.Kind)
@@ -77,7 +83,11 @@ public partial class PlayerView : Node3D, IModuleView
         float flash = 0f;
         if (_player.InvulnerableSeconds > 0f && _current.Alive)
             flash = (0.5f + 0.5f * MathF.Cos((float)Time.GetTicksMsec() * 0.03f)) * Math.Min(1f, _player.InvulnerableSeconds / 0.35f);
-        _model.Animate((float)delta, speed, _current.Grounded, velocity.Y, flash, _current.Alive);
+        // The pose's blend weight between the ticks, so it glides at any frame rate.
+        var archery = _currentArchery;
+        archery.Weight = Mathf.Lerp(_previousArchery.Weight, _currentArchery.Weight, alpha);
+        var (aimYaw, aimPitch) = ArcheryPose.AimAngles(_player.AimDirection, _player.HasAim, facing);
+        _model.Animate((float)delta, speed, _current.Grounded, velocity.Y, flash, _current.Alive, archery, aimYaw, aimPitch);
     }
 
     private static Vector3 ToGodot(System.Numerics.Vector3 v) => new(v.X, v.Y, v.Z);

@@ -1,5 +1,6 @@
 using System;
 using System.Numerics;
+using Fungtopia.Bow;
 using Fungtopia.Dialogue;
 using Fungtopia.Input;
 using Fungtopia.Map;
@@ -15,7 +16,7 @@ namespace Fungtopia.Player;
 /// Publishes <see cref="PlayerState"/> every tick and <see cref="PlayerDefeated"/> once per defeat.
 /// </summary>
 public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessageHandler<DamagePlayer>,
-    IMessageHandler<TeleportPlayer>, IMessageHandler<DialogueState>
+    IMessageHandler<TeleportPlayer>, IMessageHandler<DialogueState>, IMessageHandler<BowState>
 {
     public const float WalkSpeed = 5f;
     public const float JumpHeight = 1.2f;
@@ -32,6 +33,7 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
     private bool _jumpQueued;
     private bool _defeatPending;
     private bool _talking;
+    private float _bowDraw;
 
     /// <summary>The setting that picks the character (Girl by default).</summary>
     public CharacterKind Character { get; set; } = CharacterKind.Girl;
@@ -55,6 +57,15 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
     /// <summary>Number of ticks run; the view uses it to see new ticks.</summary>
     public long Ticks { get; private set; }
 
+    /// <summary>The archery pose, advanced every tick from the latest <see cref="BowState.Draw"/>.</summary>
+    public ArcheryState Archery { get; private set; } = ArcheryState.Relaxed;
+
+    /// <summary>The latest input's aim (<c>PlayerInput.AimDirection</c>), valid when <see cref="HasAim"/>.</summary>
+    public Vector3 AimDirection => _input.AimDirection;
+
+    /// <summary>The latest input's <c>PlayerInput.HasAim</c>.</summary>
+    public bool HasAim => _input.HasAim;
+
     /// <summary>The state published on the latest tick.</summary>
     public PlayerState State { get; private set; }
 
@@ -66,6 +77,7 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
         bus.Subscribe<DamagePlayer>(this);
         bus.Subscribe<TeleportPlayer>(this);
         bus.Subscribe<DialogueState>(this);
+        bus.Subscribe<BowState>(this);
         State = MakeState();
     }
 
@@ -110,6 +122,8 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
 
     public void Handle(in DialogueState message) => _talking = message.Open;
 
+    public void Handle(in BowState message) => _bowDraw = message.Draw;
+
     public void Handle(in DamagePlayer message)
     {
         if (!Alive || message.Amount <= 0 || InvulnerableSeconds > 0f)
@@ -144,6 +158,7 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
 
         Move(dt);
         _jumpQueued = false;
+        Archery = ArcheryPose.Advance(Archery, _bowDraw, dt);
 
         State = MakeState();
         _bus.Publish(State);

@@ -10,5 +10,6 @@
     <ProjectReference Include="../../Input/Contract/Fungtopia.Input.Contract.csproj" />
     <ProjectReference Include="../../Map/Contract/Fungtopia.Map.Contract.csproj" />
     <ProjectReference Include="../../Dialogue/Contract/Fungtopia.Dialogue.Contract.csproj" />
+    <ProjectReference Include="../../Bow/Contract/Fungtopia.Bow.Contract.csproj" />
   </ItemGroup>
 </Project>

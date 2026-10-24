@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
+using Fungtopia.Bow;
 using Fungtopia.Dialogue;
 using Fungtopia.Input;
 using Fungtopia.Map;
@@ -676,6 +677,276 @@ public class PlayerModuleTests
         Assert.Equal(2, _bus.Defeats.Count);
     }
 
+    // ---- Archery pose (the bow from the back into the hands) ----
+
+    private const float Dt = (float)Step;
+
+    private static ArcheryState Pose(ArcheryState s, float draw, double seconds)
+    {
+        int ticks = (int)Math.Round(seconds / Step);
+        for (int i = 0; i < ticks; i++)
+            s = ArcheryPose.Advance(s, draw, Dt);
+        return s;
+    }
+
+    /// <summary>Draws like the Bow module: Draw rises by dt / 0.6 s up to 1 while Fire is held.</summary>
+    private static ArcheryState DrawFor(ArcheryState s, double seconds)
+    {
+        int ticks = (int)Math.Round(seconds / Step);
+        for (int i = 1; i <= ticks; i++)
+            s = ArcheryPose.Advance(s, Math.Min(1f, i * Dt / 0.6f), Dt);
+        return s;
+    }
+
+    private static void AssertNear(Vector3 expected, Vector3 actual, float tolerance = 1e-4f) =>
+        Assert.True(Vector3.Distance(expected, actual) < tolerance, $"expected {expected}, got {actual}");
+
+    [Theory]
+    [InlineData(0f, ArcheryPose.LongAgo, 0f)]   // idle, never shot: bow on the back
+    [InlineData(0.01f, ArcheryPose.LongAgo, 1f)] // as soon as Draw > 0
+    [InlineData(1f, 0f, 1f)]
+    [InlineData(0f, 0f, 1f)]                    // just released: still in hand
+    [InlineData(0f, 0.59f, 1f)]
+    [InlineData(0f, 0.61f, 0f)]                 // about 0.6 s without drawing: back onto the back
+    public void ArcheryTargetWeightComesFromDrawAndTimeSinceRelease(float draw, float sinceRelease, float expected)
+    {
+        Assert.Equal(expected, ArcheryPose.TargetWeight(draw, sinceRelease));
+    }
+
+    [Fact]
+    public void IdleAndWalkingKeepTheBowOnTheBack()
+    {
+        var s = Pose(ArcheryState.Relaxed, 0f, 2.0);
+        Assert.Equal(0f, s.Weight);
+        Assert.False(ArcheryPose.BowInHand(s));
+        Assert.False(ArcheryPose.ArrowVisible(s));
+        Assert.Equal(0f, ArcheryPose.StringPull(s));
+    }
+
+    [Fact]
+    public void DrawingBlendsIntoTheArcheryPoseInAboutAFifteenthOfASecondWithoutPopping()
+    {
+        var s = ArcheryState.Relaxed;
+        float previous = 0f;
+        for (int i = 1; i <= 9; i++)
+        {
+            s = ArcheryPose.Advance(s, Math.Min(1f, i * Dt / 0.6f), Dt);
+            Assert.True(s.Weight - previous <= Dt / ArcheryPose.BlendSeconds + 1e-5f, $"tick {i} jumps {s.Weight - previous}");
+            Assert.True(s.Weight > previous);
+            previous = s.Weight;
+        }
+        Assert.True(ArcheryPose.BowInHand(s));
+        Assert.True(ArcheryPose.ArrowVisible(s));
+        Assert.Equal(1f, s.Weight, 3); // 0.15 s
+        Assert.Equal(0f, ArcheryPose.Eased(0f));
+        Assert.Equal(1f, ArcheryPose.Eased(1f));
+        Assert.True(ArcheryPose.Eased(0.1f) < 0.1f);
+    }
+
+    [Fact]
+    public void TheStringIsPulledBackByTheDrawWithTheRightHandAndArrowOnIt()
+    {
+        var s = DrawFor(ArcheryState.Relaxed, 0.3);
+        Assert.Equal(0.5f, s.Draw, 3);
+        Assert.Equal(0.5f * BowGeometry.FullDrawPull, ArcheryPose.StringPull(s), 4);
+        var aim = ArcheryPose.BowForward(ArcheryPose.AimLocal(0.2f, 0.1f));
+        var grip = ArcheryPose.HoldLocal;
+        var hand = ArcheryPose.RightHand(s, grip, aim);
+        AssertNear(ArcheryPose.Nock(grip, aim, ArcheryPose.StringPull(s)), hand);
+        // Straight behind the bow along its forward, the string's rest plus the pull.
+        AssertNear(grip - aim * (ArcheryPose.StringRest + 0.5f * BowGeometry.FullDrawPull), hand);
+
+        s = DrawFor(ArcheryState.Relaxed, 1.0);
+        Assert.Equal(1f, s.Draw);
+        AssertNear(grip - aim * (ArcheryPose.StringRest + BowGeometry.FullDrawPull), ArcheryPose.RightHand(s, grip, aim));
+        Assert.True(ArcheryPose.ArrowVisible(s));
+    }
+
+    [Fact]
+    public void ASlightSquashPulsesAsTheDrawReachesFull()
+    {
+        var s = DrawFor(ArcheryState.Relaxed, 0.55);
+        Assert.Equal(0f, ArcheryPose.FullDrawSquash(s));
+        s = DrawFor(ArcheryState.Relaxed, 0.6 + 0.1);
+        float squash = ArcheryPose.FullDrawSquash(s);
+        Assert.True(squash > 0.5f && squash <= 1f, $"squash {squash}");
+        s = Pose(s, 1f, 0.3);
+        Assert.Equal(0f, ArcheryPose.FullDrawSquash(s)); // holding at full stays unsquashed
+        Assert.Equal(1f, s.Weight);
+    }
+
+    [Fact]
+    public void OnReleaseTheStringSnapsTheArrowIsGoneAndTheHandFollowsThrough()
+    {
+        var drawn = DrawFor(ArcheryState.Relaxed, 1.0);
+        var s = ArcheryPose.Advance(drawn, 0f, Dt);
+        Assert.Equal(0f, s.SecondsSinceRelease);
+        Assert.Equal(1f, s.ReleasedDraw);
+        Assert.False(ArcheryPose.ArrowVisible(s));
+        Assert.True(ArcheryPose.BowInHand(s));
+        Assert.Equal(0f, ArcheryPose.FollowThrough(s));
+
+        // The string flies forward past rest (a negative pull) within a few ticks, then settles.
+        float least = float.MaxValue;
+        var t = s;
+        for (int i = 0; i < 12; i++)
+        {
+            t = ArcheryPose.Advance(t, 0f, Dt);
+            least = Math.Min(least, ArcheryPose.StringPull(t));
+        }
+        Assert.True(least < 0f && least > -0.1f, $"least pull {least}");
+        Assert.True(ArcheryPose.StringPull(Pose(s, 0f, 0.1)) < BowGeometry.FullDrawPull * 0.1f);
+        Assert.Equal(0f, ArcheryPose.StringPull(Pose(s, 0f, 0.35)));
+
+        // The right hand follows through, back and out to the right of the aim.
+        var after = Pose(s, 0f, 0.2);
+        Assert.Equal(1f, ArcheryPose.FollowThrough(after));
+        var aim = ArcheryPose.BowForward(ArcheryPose.AimLocal(0f, 0f));
+        var grip = ArcheryPose.HoldLocal;
+        var atRelease = ArcheryPose.RightHand(drawn, grip, aim);
+        var followed = ArcheryPose.RightHand(after, grip, aim);
+        Assert.True(Vector3.Dot(followed - atRelease, -aim) > 0.1f); // back
+        Assert.True(Vector3.Dot(followed - atRelease, Vector3.Cross(aim, Vector3.UnitY)) > 0.05f); // out to the right
+    }
+
+    [Fact]
+    public void TheHeldBowPointsALittleLeftOfTheAimSoTheStringHandIsBesideTheHead()
+    {
+        var aim = ArcheryPose.AimLocal(0.1f, 0.3f);
+        var forward = ArcheryPose.BowForward(aim);
+        Assert.Equal(1f, forward.Length(), 4);
+        var (yaw, pitch) = ArcheryPose.AimAngles(forward, true, 0f);
+        Assert.Equal(0.1f + ArcheryPose.BowSkew, yaw, 4);
+        Assert.Equal(0.3f, pitch, 4);
+        // At full draw the nock is out to the right of the head's middle (x 0), behind the hold point.
+        var nock = ArcheryPose.Nock(ArcheryPose.HoldLocal, ArcheryPose.BowForward(-Vector3.UnitZ), BowGeometry.FullDrawPull);
+        Assert.True(nock.X > 0.3f, $"nock {nock}");
+        Assert.True(nock.Z > ArcheryPose.HoldLocal.Z);
+    }
+
+    [Fact]
+    public void AboutSixTenthsOfASecondAfterReleaseTheBowSwingsBackOntoTheBack()
+    {
+        var s = ArcheryPose.Advance(DrawFor(ArcheryState.Relaxed, 1.0), 0f, Dt);
+        s = Pose(s, 0f, 0.55);
+        Assert.Equal(1f, s.Weight);
+        float previous = s.Weight;
+        for (int i = 0; i < 6; i++)
+        {
+            s = ArcheryPose.Advance(s, 0f, Dt);
+            Assert.True(previous - s.Weight <= Dt / ArcheryPose.BlendSeconds + 1e-5f);
+            previous = s.Weight;
+        }
+        Assert.True(s.Weight < 1f && s.Weight > 0f, $"weight {s.Weight} at 0.65 s");
+        s = Pose(s, 0f, 0.15);
+        Assert.Equal(0f, s.Weight);
+        Assert.False(ArcheryPose.BowInHand(s));
+    }
+
+    [Fact]
+    public void DrawingAgainSoonAfterAShotKeepsTheBowInHand()
+    {
+        var s = ArcheryPose.Advance(DrawFor(ArcheryState.Relaxed, 1.0), 0f, Dt);
+        s = Pose(s, 0f, 0.3);
+        s = DrawFor(s, 0.2);
+        Assert.Equal(1f, s.Weight);
+        Assert.True(ArcheryPose.ArrowVisible(s));
+        Assert.Equal(0f, ArcheryPose.FollowThrough(s));
+    }
+
+    [Theory]
+    [InlineData(0f)]
+    [InlineData(1.3f)]
+    [InlineData(-2.4f)]
+    [InlineData(3.1f)]
+    public void TheBowHandIsAtBowGeometrysHoldPointForAnyFacing(float facing)
+    {
+        var feet = new Vector3(3f, 0.4f, -7f);
+        var back = new Vector3(0f, 0.55f, 0.25f);
+        var grip = ArcheryPose.BowGrip(1f, back);
+        Assert.Equal(ArcheryPose.HoldLocal, grip);
+        AssertNear(BowGeometry.HoldPoint(feet, facing), ArcheryPose.ToWorld(feet, facing, grip));
+        // The model frame's -Z is the facing and +X its right, as BowGeometry has them.
+        AssertNear(feet + new Vector3(-MathF.Sin(facing), 0f, -MathF.Cos(facing)), ArcheryPose.ToWorld(feet, facing, -Vector3.UnitZ));
+        AssertNear(feet + new Vector3(MathF.Cos(facing), 0f, -MathF.Sin(facing)), ArcheryPose.ToWorld(feet, facing, Vector3.UnitX));
+    }
+
+    [Fact]
+    public void TheBowMovesSmoothlyFromTheBackToTheHoldPoint()
+    {
+        var back = new Vector3(0f, 0.55f, 0.25f);
+        AssertNear(back, ArcheryPose.BowGrip(0f, back));
+        var previous = back;
+        for (int i = 1; i <= 100; i++)
+        {
+            var p = ArcheryPose.BowGrip(i / 100f, back);
+            Assert.True(Vector3.Distance(previous, p) < 0.04f, $"jump at {i}");
+            previous = p;
+        }
+        AssertNear(ArcheryPose.HoldLocal, previous);
+        // It swings over the left shoulder, not through the head.
+        Assert.True(ArcheryPose.BowGrip(0.5f, back).X < -0.1f);
+    }
+
+    [Fact]
+    public void AimPitchAndYawAreClamped()
+    {
+        float facing = 0.8f;
+        var forward = new Vector3(-MathF.Sin(facing), 0f, -MathF.Cos(facing));
+        var (yaw, pitch) = ArcheryPose.AimAngles(Vector3.Normalize(forward + Vector3.UnitY * 0.3f), true, facing);
+        Assert.Equal(0f, yaw, 4);
+        Assert.Equal(MathF.Atan(0.3f), pitch, 4);
+        // The local aim turned by the facing is the world aim.
+        AssertNear(Vector3.Normalize(forward + Vector3.UnitY * 0.3f), ArcheryPose.ToWorld(Vector3.Zero, facing, ArcheryPose.AimLocal(yaw, pitch)));
+
+        Assert.Equal(ArcheryPose.MaxAimPitch, ArcheryPose.AimAngles(Vector3.Normalize(forward + Vector3.UnitY * 5f), true, facing).Pitch);
+        Assert.Equal(ArcheryPose.MaxAimPitch, ArcheryPose.AimAngles(Vector3.UnitY, true, facing).Pitch);
+        Assert.Equal(ArcheryPose.MinAimPitch, ArcheryPose.AimAngles(Vector3.Normalize(forward - Vector3.UnitY * 5f), true, facing).Pitch);
+        Assert.Equal(ArcheryPose.MinAimPitch, ArcheryPose.AimAngles(-Vector3.UnitY, true, facing).Pitch);
+
+        // To the left (positive yaw) and far behind: clamped to the side the feet are turning to.
+        var left = new Vector3(-MathF.Sin(facing + 0.3f), 0f, -MathF.Cos(facing + 0.3f));
+        Assert.Equal(0.3f, ArcheryPose.AimAngles(left, true, facing).Yaw, 4);
+        var farRight = new Vector3(-MathF.Sin(facing - 2f), 0f, -MathF.Cos(facing - 2f));
+        Assert.Equal(-ArcheryPose.MaxAimYaw, ArcheryPose.AimAngles(farRight, true, facing).Yaw);
+
+        Assert.Equal((0f, 0f), ArcheryPose.AimAngles(Vector3.UnitY, false, facing));
+        Assert.Equal((0f, 0f), ArcheryPose.AimAngles(new Vector3(float.NaN, 0f, 1f), true, facing));
+        AssertNear(-Vector3.UnitZ, ArcheryPose.AimLocal(0f, 0f));
+        Assert.Equal(1f, ArcheryPose.AimLocal(0.5f, 0.4f).Length(), 4);
+    }
+
+    [Fact]
+    public void ThePlayerAdvancesItsArcheryPoseFromTheBowStateAndKeepsTheAim()
+    {
+        var aim = Vector3.Normalize(new Vector3(0.2f, 0.3f, -1f));
+        Assert.Equal(0f, _player.Archery.Weight);
+        Assert.False(ArcheryPose.BowInHand(_player.Archery));
+        for (int i = 1; i <= 60; i++)
+        {
+            _bus.Publish(new BowState(Math.Min(1f, i * Dt / 0.6f), 0));
+            TickWith(Moving(0f, 1f, fire: true, aim: aim));
+        }
+        Assert.Equal(1f, _player.Archery.Draw);
+        Assert.Equal(1f, _player.Archery.Weight);
+        Assert.True(_player.HasAim);
+        AssertNear(aim, _player.AimDirection);
+        // Walking on while drawing.
+        Assert.True(Flat(_player.Velocity).Length() > 4f);
+
+        _bus.Publish(new BowState(0f, 1));
+        TickWith(Moving(0f, 1f, aim: aim));
+        Assert.Equal(0f, _player.Archery.SecondsSinceRelease);
+        Assert.Equal(1f, _player.Archery.ReleasedDraw);
+        Assert.False(ArcheryPose.ArrowVisible(_player.Archery));
+        for (int i = 0; i < 50; i++)
+        {
+            _bus.Publish(new BowState(0f, 1));
+            TickWith(Idle);
+        }
+        Assert.Equal(0f, _player.Archery.Weight);
+    }
+
     // ---- Performance ----
 
     [Fact]
@@ -693,6 +964,7 @@ public class PlayerModuleTests
             player.Handle(input);
             player.Handle(new DamagePlayer(1, Vector3.Zero));
             player.Handle(new DialogueState(i % 200 < 100, 1));
+            player.Handle(new BowState(i % 60 < 40 ? (i % 60) / 36f : 0f, 0));
             player.Tick(new TickContext(i + 1, Step));
         }
         Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());

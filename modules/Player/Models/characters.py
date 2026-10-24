@@ -10,8 +10,14 @@
 # Meters, feet at the origin, facing Blender +Y (Godot's -Z, forward, after the glTF export).
 # Separate objects, each with its pivot where it moves, so the game can animate them:
 #   Body, Head (pivot at the neck), LegL / LegR (pivot at the hip), ArmL / ArmR (pivot at the
-#   shoulder), BackBow. Materials carry plain colors only; the game draws them toon-shaded with
-#   ink outlines.
+#   shoulder), HandL / HandR (pivot at the hand's center; the game keeps them at the end of the
+#   arms), BackBow, and for shooting: HandBow (the same bow without its string, which the game
+#   draws; pivot at the grip) and NockArrow (the nocked arrow; pivot at its nock). HandBow rests
+#   exactly where BackBow is; its rotation is the sling, so its own frame is the held bow's: grip
+#   at the origin, tips up and down (Godot +-Y), arc bulging forward (Godot -Z), tips behind.
+#   NockArrow's own frame points forward (Godot -Z) from the nock; at rest it stands upright,
+#   hidden inside the body. Materials carry plain colors only; the game draws them toon-shaded
+#   with ink outlines.
 import math
 import os
 
@@ -30,7 +36,16 @@ COLORS = {
     "Wood": (0.62, 0.38, 0.2),
     "String": (0.95, 0.92, 0.82),
     "Shoe": (0.42, 0.24, 0.18),
+    # The nocked arrow, like the Bow module's arrow.glb: a poison mushroom tip.
+    "Shaft": (0.78, 0.6, 0.38),
+    "PoisonCap": (0.56, 0.24, 0.72),
+    "PoisonSpots": (0.55, 0.95, 0.35),
+    "Stem": (0.95, 0.9, 0.78),
+    "Fletch": (0.5, 0.85, 0.45),
 }
+
+# The nocked arrow, nock to tip; the game keeps CharacterModel.cs and ArcheryPose.cs in step.
+NOCK_ARROW_LENGTH = 0.66
 
 KINDS = {
     "girl": {
@@ -76,9 +91,12 @@ def new_mesh_object(name, bm):
 class Part:
     """Gathers shapes into one mesh object with several materials."""
 
-    def __init__(self, name, pivot):
+    def __init__(self, name, pivot, rotation=Matrix.Identity(4)):
+        """rotation: the object's rotation; shapes are still given in world coordinates."""
         self.name = name
         self.pivot = Vector(pivot)
+        self.rotation = rotation
+        self.unrotate = rotation.inverted()
         self.bm = bmesh.new()
         self.materials = []
 
@@ -90,7 +108,7 @@ class Part:
     def _add(self, make, mat, matrix):
         geom = bmesh.new()
         make(geom)
-        geom.transform(matrix)
+        geom.transform(self.unrotate @ matrix)
         slot = self._slot(mat)
         for face in geom.faces:
             face.material_index = slot
@@ -160,6 +178,7 @@ class Part:
         for mat in self.materials:
             obj.data.materials.append(mat)
         obj.location = self.pivot
+        obj.rotation_euler = self.rotation.to_euler()
         return obj
 
 
@@ -255,26 +274,60 @@ def build(kind):
         arm = Part(name, (sx, 0, shoulder_z))
         hand = Vector((sx + side * 0.13, 0.02, shoulder_z - 0.22))
         arm.capsule(mats["Cloth"] if not girl else mats["Skin"], (sx, 0, shoulder_z), hand, 0.05)
-        arm.sphere(mats["Skin"], hand, (0.075, 0.075, 0.075), segments=20, rings=10)
         arm.build()
+        hand_part = Part("Hand" + name[-1], hand)
+        hand_part.sphere(mats["Skin"], hand, (0.075, 0.075, 0.075), segments=20, rings=10)
+        hand_part.build()
 
     # A little wooden bow carried on the back, slung diagonally: the middle of its arc rests
     # against the back, its tips and string stick out behind.
-    back = Part("BackBow", (0, -0.25, (hip_z + neck_z) / 2 + 0.04))
+    # HandBow is the same bow without the string (the game draws it, bent by the draw), with the
+    # sling as its rotation: its own frame is the arc frame below, Godot's held-bow frame.
+    grip = (0, -0.25, (hip_z + neck_z) / 2 + 0.04)
     major, half_arc = 0.42, 0.34 * math.pi
     # Arc frame: local x is depth (the arc's middle at x = 0, tips toward -x), local y the span.
     frame = Matrix(((0, 0, 1, 0), (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 0, 1)))  # x->+Y, y->+Z, z->+X
-    sling = Matrix.Rotation(math.radians(38), 4, "Y") @ frame
-    back.torus(mats["Wood"], back.pivot, major, 0.028,
-               rotation=sling @ Matrix.Translation((-major, 0, 0)), arc=half_arc / math.pi)
-    tips = []
-    for sign in (-1, 1):
-        local = Vector((major * math.cos(half_arc) - major, sign * major * math.sin(half_arc), 0, 1))
-        tips.append(back.pivot + (sling @ local).to_3d())
-    back.capsule(mats["String"], tips[0], tips[1], 0.009, segments=6)
-    for tip in tips:
-        back.sphere(mats["Ribbon"], tip, (0.045, 0.045, 0.04), segments=12, rings=6)
-    back.build()
+    slant = Matrix.Rotation(math.radians(38), 4, "Y")
+    sling = slant @ frame
+    for name in ("BackBow", "HandBow"):
+        bow = Part(name, grip, rotation=slant if name == "HandBow" else Matrix.Identity(4))
+        bow.torus(mats["Wood"], bow.pivot, major, 0.028,
+                  rotation=sling @ Matrix.Translation((-major, 0, 0)), arc=half_arc / math.pi)
+        tips = []
+        for sign in (-1, 1):
+            local = Vector((major * math.cos(half_arc) - major, sign * major * math.sin(half_arc), 0, 1))
+            tips.append(bow.pivot + (sling @ local).to_3d())
+        if name == "BackBow":
+            bow.capsule(mats["String"], tips[0], tips[1], 0.009, segments=6)
+        for tip in tips:
+            bow.sphere(mats["Ribbon"], tip, (0.045, 0.045, 0.04), segments=12, rings=6)
+        bow.build()
+
+    # The nocked arrow: a poison mushroom tip (a purple cap with glowing green spots on a cream
+    # stem), a wooden shaft and soft green fletching. Built pointing up (+Z) from its nock inside
+    # the body, where it hides until the game nocks it; its own frame points +Y (Godot -Z).
+    nock = Vector((0, 0, 0.2))
+    arrow = Part("NockArrow", nock, rotation=Matrix.Rotation(math.pi / 2, 4, "X"))
+    top = nock.z + NOCK_ARROW_LENGTH
+    cap = (0.05, 0.05, 0.055)
+    cap_c = Vector((0, 0, top - cap[2]))
+    arrow.sphere(mats["PoisonCap"], cap_c, cap, cut=(cap_c + Vector((0, 0, -0.012)), Vector((0, 0, -1))))
+    golden = math.pi * (3 - math.sqrt(5))
+    for i in range(6):
+        z = 0.3 + 0.6 * (i + 0.5) / 6
+        r = math.sqrt(1 - z * z)
+        n = Vector((math.cos(i * golden) * r, math.sin(i * golden) * r, z))
+        p = cap_c + Vector((n.x * cap[0], n.y * cap[1], n.z * cap[2]))
+        rot = n.to_track_quat("Z", "Y").to_matrix().to_4x4()
+        arrow.sphere(mats["PoisonSpots"], p, (0.013, 0.013, 0.006), rotation=rot, segments=8, rings=4)
+    arrow.capsule(mats["Stem"], (0, 0, top - cap[2] - 0.04), (0, 0, top - cap[2]), 0.024, segments=12)
+    arrow.capsule(mats["Shaft"], nock, (0, 0, top - cap[2] - 0.04), 0.011, segments=8)
+    for k in range(3):
+        a = k * 2 * math.pi / 3
+        rot = Matrix.Rotation(a, 4, "Z") @ Matrix.Rotation(math.pi / 2, 4, "Y")
+        center = nock + Vector((0, 0, 0.07)) + (Matrix.Rotation(a, 4, "Z") @ Vector((0.028, 0, 0)))
+        arrow.sphere(mats["Fletch"], center, (0.065, 0.006, 0.028), rotation=rot, segments=12, rings=6)
+    arrow.build()
 
     out = os.path.join(HERE, f"{kind}.glb")
     bpy.ops.export_scene.gltf(filepath=out, export_format="GLB", export_apply=True,

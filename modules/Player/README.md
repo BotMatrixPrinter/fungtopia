@@ -7,13 +7,15 @@ of the walkable ground, stands still while talking, takes damage from monsters a
 after defeat until it is teleported (to the clinic the next morning).
 
 - `Contract/` — `Fungtopia.Player.Contract` (namespace `Fungtopia.Player`), see below.
-- `Core/` — `Fungtopia.Player.Core`: `PlayerModule`, the module's one `IModule`.
+- `Core/` — `Fungtopia.Player.Core`: `PlayerModule`, the module's one `IModule`; `ArcheryPose`
+  and `ArcheryState` (the archery pose as pure functions, for the view).
 - `Godot/` — `Main.tscn` with `PlayerView`, which draws the character; `CharacterModel` (the
   model, toon materials and procedural animation); `Preview.tscn` (both characters side by side,
   for screenshots); `Shaders/` (toon surface with hit flash, ink outline).
 - `Models/` — `characters.py`, the Blender script that builds and exports `girl.glb` and
   `boy.glb` next to it.
-- `Tests/` — `PlayerModuleTests.cs`: xUnit tests of `PlayerModule` with a fake `IMessageBus`.
+- `Tests/` — `PlayerModuleTests.cs`: xUnit tests of `PlayerModule` (with a fake `IMessageBus`)
+  and `ArcheryPose`.
 
 Test it with `./test.sh Player` from the repository root.
 
@@ -32,7 +34,7 @@ positive turns left; the direction of yaw `a` is `(-sin a, 0, -cos a)`.
 ## Core
 
 `PlayerModule` reads `Fungtopia.Input.PlayerInput`, `Fungtopia.Dialogue.DialogueState`,
-`TeleportPlayer` and `DamagePlayer`, and the world from the Map Contract (`Ground`, `Areas`,
+`Fungtopia.Bow.BowState`, `TeleportPlayer` and `DamagePlayer`, and the world from the Map Contract (`Ground`, `Areas`,
 `Places`). The Player Contract references the Map Contract (for `Area`). The game starts at
 `Places.HomeDoor`, facing out. Each tick:
 
@@ -54,9 +56,13 @@ positive turns left; the direction of yaw `a` is `(-sin a, 0, -cos a)`.
   as long as it takes: the next `TeleportPlayer` brings it back with full health (DayNight sends
   it the next morning at Dr. Jeremy's clinic).
 
+- **Archery.** `Archery` (an `ArcheryState`) is advanced every tick by `ArcheryPose.Advance`
+  from the latest `BowState.Draw` (see the View for what it means).
+
 Settings and helpers: `Character` (the character setting, Girl by default), `PlaceAt(feet,
 facing)` puts the player on the ground somewhere. The view also reads `CameraYaw`,
-`InvulnerableSeconds`, `DefeatedSeconds` and `Ticks`. No allocations per tick.
+`InvulnerableSeconds`, `DefeatedSeconds`, `Ticks`, `Archery`, `AimDirection` and `HasAim` (the
+latest input's aim). No allocations per tick.
 
 ## View
 
@@ -73,19 +79,46 @@ plus an ink outline, and animates the parts: walk bob, leg and arm swing, body s
 legs tucked in the air, stretch rising and squash on landing, a blinking white flash while
 invulnerable, and tipping over on its back when defeated.
 
+**Archery** (the Bow module draws only the arrows in flight; the character holds and draws the
+bow). `ArcheryPose` (Core, pure functions, positions in the model frame: X right, Y up, -Z the
+facing) says what `CharacterModel` draws:
+
+- Idle and walking (`Weight` 0): the bow stays slung on the back (`BackBow`).
+- As soon as `Draw` > 0 the pose blends in over 0.15 s (`Weight`, eased): `BackBow` is hidden and
+  `HandBow` (the same bow) swings from the back over the left shoulder into the left hand, its
+  grip and the left hand exactly at `BowGeometry`'s hold point (`HoldLocal`, where the Bow
+  module's arrows start). The right hand is on the string, pulled back `Draw` ×
+  `BowGeometry.FullDrawPull` behind its rest, with the nocked arrow (`NockArrow`, a poison
+  mushroom tip) on it. The bow points along the aim turned `BowSkew` (0.35 rad) to the left, so
+  the string hand comes back beside the big head, which tilts away to the left. The upper body and
+  head turn and pitch toward `AimDirection` (`AimAngles`: yaw within ±0.7 rad of the facing,
+  pitch within -0.6..0.7 rad); the feet keep the facing logic and the legs keep walking. The arms
+  stretch (rubbery chibi arms) to reach. A slight squash pulses as the draw reaches full.
+- On release (`Draw` back to 0): the arrow is gone, the string snaps forward with a little
+  overshoot, the right hand follows through back and out; after 0.6 s without drawing the bow
+  swings back onto the back (0.15 s). Drawing again meanwhile keeps the bow in hand.
+- `PlayerView` blends `Weight` between ticks, so the pose glides at any frame rate.
+
 ## Models
 
 `blender -b --factory-startup --python modules/Player/Models/characters.py` (from the
 repository root) writes `girl.glb` and `boy.glb`; commit both with the script. Chibi kids from
 the drawing: a big round head with large dark oval eyes with sparkles, rosy cheeks, a small
 smile and hair; a simple rounded body; short arms with little round hands; stubby legs with round
-shoes; a wooden bow slung on the back with mushroom-red tips. The Girl has a ribbon bow on her
+shoes; a wooden bow slung on the back with mushroom-red tips, and for shooting the same bow
+without its string (the game draws the string) and a nocked poison mushroom-tipped arrow. The Girl has a ribbon bow on her
 head, pigtail puffs and a pink triangle dress with white spots; the Boy a red bow tie, a
 rounded blue shirt and trousers. Separate objects with pivots where they move: `Body`, `Head`
-(neck), `LegL`/`LegR` (hip), `ArmL`/`ArmR` (shoulder), `BackBow`. Feet at the origin, facing
--Z in Godot.
+(neck), `LegL`/`LegR` (hip), `ArmL`/`ArmR` (shoulder), `HandL`/`HandR` (hand center; the
+game keeps them at the arms' ends), `BackBow`, `HandBow` (grip; it rests exactly where `BackBow`
+is, its own frame being the held bow's: tips up and down, arc bulging forward) and `NockArrow`
+(nock; at rest it hides upright inside the body, its own frame points forward). Feet at the
+origin, facing -Z in Godot.
 
 ## Screenshots
 
 `./screenshot.sh modules/Player/Godot/Preview.tscn` shows both characters; the environment
-variable `PLAYER_PREVIEW` picks the pose: `front` (default), `back`, `walk`, `jump` or `hit`.
+variable `PLAYER_PREVIEW` picks the pose: `front` (default), `back`, `walk`, `jump`, `hit`,
+`draw` (full draw), `drawback` (full draw from behind, like the game camera), `release` (just
+after a shot) or `swing` (the bow on its way back); `PLAYER_PREVIEW_CHARACTER=girl` or `boy`
+shows only that character, larger.
