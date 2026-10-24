@@ -884,6 +884,100 @@ public class WardrobeModuleTests
         Assert.Equal(-1, wardrobe.Worn(Slot.Head));
         Assert.Equal((1, 2, 3, 4), (wardrobe.Skin, wardrobe.HairStyle, wardrobe.HairColor, wardrobe.EyeColor));
     }
+
+    /// <summary>
+    /// Plays the Input module's <see cref="MenuNav"/> as its contract says: a step on the tick a
+    /// direction is first pushed, then one per 0.2 s (12 ticks) while held, never two closer than that.
+    /// </summary>
+    private sealed class FakeMenuInput
+    {
+        private const int RepeatTicks = 12;
+        private long _tick;
+        private long _lastStep = -RepeatTicks;
+
+        public MenuNav Next(int vertical)
+        {
+            int step = vertical != 0 && _tick - _lastStep >= RepeatTicks ? vertical : 0;
+            if (step != 0)
+                _lastStep = _tick;
+            _tick++;
+            return new MenuNav(step, 0);
+        }
+    }
+
+    /// <summary>
+    /// Runs <paramref name="ticks"/> ticks with the screen open: each tick the Input module publishes
+    /// its MenuNav (down held while <paramref name="held"/> says so) and the view runs two frames (a
+    /// 120 Hz screen), moving the focus by each step it takes. Returns the ticks the focus moved on.
+    /// </summary>
+    private static List<int> FocusMoves(WardrobeModule wardrobe, FakeBus bus, int ticks, Func<int, bool> held)
+    {
+        var input = new FakeMenuInput();
+        var moves = new List<int>();
+        for (int t = 0; t < ticks; t++)
+        {
+            bus.Publish(input.Next(held(t) ? 1 : 0));
+            wardrobe.Tick(Step);
+            for (int frame = 0; frame < 2; frame++)
+                if (wardrobe.TakeMenuStep(out int vertical, out int horizontal))
+                {
+                    Assert.Equal((1, 0), (vertical, horizontal));
+                    moves.Add(t);
+                }
+        }
+        return moves;
+    }
+
+    [Fact]
+    public void HeldDirectionMovesTheFocusOneItemPerFifthOfASecond()
+    {
+        var bus = new FakeBus();
+        var wardrobe = Started(bus, CharacterKind.Girl);
+        bus.Publish(new OpenShop());
+        // Down held for one second: the first item at once, then one per 0.2 s (12 ticks).
+        Assert.Equal(new[] { 0, 12, 24, 36, 48 }, FocusMoves(wardrobe, bus, 60, _ => true));
+    }
+
+    [Fact]
+    public void ShortFlickMovesTheFocusExactlyOneItem()
+    {
+        var bus = new FakeBus();
+        var wardrobe = Started(bus, CharacterKind.Girl);
+        bus.Publish(new OpenWardrobe());
+        // The stick pushed for two ticks (33 ms), then let go: one item, however long the screen stays open.
+        Assert.Equal(new[] { 0 }, FocusMoves(wardrobe, bus, 60, t => t < 2));
+    }
+
+    [Fact]
+    public void MenuStepsAreTakenOnceAndOnlyWhileAScreenIsOpen()
+    {
+        var bus = new FakeBus();
+        var wardrobe = Started(bus, CharacterKind.Girl);
+        // Closed: steps (walking with W A S D or the stick) are not kept for later.
+        bus.Publish(new MenuNav(1, 0));
+        bus.Publish(new OpenWardrobe());
+        Assert.False(wardrobe.TakeMenuStep(out _, out _));
+
+        // The ticks without a step do not drop one the view has not taken yet.
+        bus.Publish(new MenuNav(0, -1));
+        bus.Publish(new MenuNav(0, 0));
+        Assert.True(wardrobe.TakeMenuStep(out int vertical, out int horizontal));
+        Assert.Equal((0, -1), (vertical, horizontal));
+        Assert.False(wardrobe.TakeMenuStep(out _, out _));
+
+        // Steps never pile up: only the latest untaken one moves the focus.
+        bus.Publish(new MenuNav(-1, 0));
+        bus.Publish(new MenuNav(1, 0));
+        Assert.True(wardrobe.TakeMenuStep(out vertical, out _));
+        Assert.Equal(1, vertical);
+        Assert.False(wardrobe.TakeMenuStep(out _, out _));
+
+        // Closing forgets an untaken step.
+        bus.Publish(new MenuNav(1, 0));
+        wardrobe.Close();
+        bus.Publish(new OpenShop());
+        Assert.False(wardrobe.TakeMenuStep(out _, out _));
+    }
 }
 
 public class WardrobePromptsTests

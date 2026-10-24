@@ -13,9 +13,10 @@ namespace Fungtopia.Wardrobe.View;
 /// a screen is open the mouse is free and this view takes the input before the Input module:
 /// mouse clicks (hit-tested here, so they are not taken to recapture the mouse), a mouse drag on
 /// the left half, Q / E, LB / RB and the right stick to turn the character (the Core's
-/// <see cref="PreviewYaw"/>), arrows / W A S D / d-pad / left stick to move the focus, Enter /
-/// Space / A to choose, Page Up / Page Down / LT / RT for tabs, Esc / B for Done. As the Input
-/// module does not see that input, this view tells the Core which device it came from, so the
+/// <see cref="PreviewYaw"/>), Enter / Space / A to choose, Page Up / Page Down / LT / RT for tabs,
+/// Esc / B for Done. The focus moves only by the Input module's <see cref="MenuNav"/> steps (arrows,
+/// W A S D, d-pad, left stick, paced there), which the Core keeps for this view
+/// (<see cref="WardrobeModule.TakeMenuStep"/>). As the Input module does not see that input, this view tells the Core which device it came from, so the
 /// screens' hints show that device's buttons (<see cref="WardrobeModule.Device"/>).
 /// </summary>
 public partial class WardrobeView : Node, IModuleView
@@ -29,7 +30,6 @@ public partial class WardrobeView : Node, IModuleView
     private const int Pad = 0;
     private const float TriggerThreshold = 0.5f;
 
-    private Vector2 _stick;
     private float _triggerLeft;
     private float _triggerRight;
     private bool _dragging;
@@ -80,6 +80,9 @@ public partial class WardrobeView : Node, IModuleView
                 GodotInput.IsPhysicalKeyPressed(Key.Q) || GodotInput.IsJoyButtonPressed(Pad, JoyButton.LeftShoulder),
                 GodotInput.IsPhysicalKeyPressed(Key.E) || GodotInput.IsJoyButtonPressed(Pad, JoyButton.RightShoulder));
             _wardrobe.SetTurnStick(GodotInput.GetJoyAxis(Pad, JoyAxis.RightX));
+            // The focus moves one step per MenuNav step (one per push, then one per 0.2 s held).
+            if (_wardrobe.TakeMenuStep(out int vertical, out int horizontal))
+                Move(vertical < 0 ? Side.Top : vertical > 0 ? Side.Bottom : horizontal < 0 ? Side.Left : Side.Right);
         }
         else
         {
@@ -135,11 +138,6 @@ public partial class WardrobeView : Node, IModuleView
                     case Key.Pageup: _shown.StepTab(-1); break;
                     case Key.Pagedown: _shown.StepTab(1); break;
                     case Key.Enter or Key.KpEnter or Key.Space: Press(); break;
-                    case Key.Up or Key.W: Move(Side.Top); break;
-                    case Key.Down or Key.S: Move(Side.Bottom); break;
-                    case Key.Left or Key.A: Move(Side.Left); break;
-                    case Key.Right or Key.D: Move(Side.Right); break;
-                    case Key.Tab: Move(key.ShiftPressed ? Side.Left : Side.Right); break;
                 }
                 break;
             case InputEventJoypadButton { Pressed: true } pad:
@@ -147,14 +145,7 @@ public partial class WardrobeView : Node, IModuleView
                 {
                     case JoyButton.A: Press(); break;
                     case JoyButton.B: _wardrobe.Close(); break;
-                    case JoyButton.DpadUp: Move(Side.Top); break;
-                    case JoyButton.DpadDown: Move(Side.Bottom); break;
-                    case JoyButton.DpadLeft: Move(Side.Left); break;
-                    case JoyButton.DpadRight: Move(Side.Right); break;
                 }
-                break;
-            case InputEventJoypadMotion { Axis: JoyAxis.LeftX or JoyAxis.LeftY } motion:
-                Stick(motion);
                 break;
             case InputEventJoypadMotion { Axis: JoyAxis.TriggerLeft or JoyAxis.TriggerRight } trigger:
                 Trigger(trigger);
@@ -190,20 +181,6 @@ public partial class WardrobeView : Node, IModuleView
         if (!_families.TryGetValue(device, out var family))
             _families[device] = family = WardrobePrompts.PadFamily(GodotInput.GetJoyName(device), GodotInput.GetJoyGuid(device));
         return family;
-    }
-
-    private void Stick(InputEventJoypadMotion motion)
-    {
-        var old = _stick;
-        if (motion.Axis == JoyAxis.LeftX)
-            _stick.X = motion.AxisValue;
-        else
-            _stick.Y = motion.AxisValue;
-        // One step per push past the threshold.
-        if (Mathf.Abs(old.X) < 0.6f && Mathf.Abs(_stick.X) >= 0.6f)
-            Move(_stick.X > 0 ? Side.Right : Side.Left);
-        if (Mathf.Abs(old.Y) < 0.6f && Mathf.Abs(_stick.Y) >= 0.6f)
-            Move(_stick.Y > 0 ? Side.Bottom : Side.Top);
     }
 
     /// <summary>LT / RT: one tab back or on per pull past the threshold.</summary>

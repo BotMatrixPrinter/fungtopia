@@ -19,7 +19,8 @@ Some clothes are rewards. Adding a piece of clothing is one `Catalog` entry plus
 - `Tests/` — `WardrobeModuleTests.cs`: `CatalogTests` (the catalog and looks are well-formed, every
   model and its script exist) and `WardrobeModuleTests` (`WardrobeModule` with a fake `IMessageBus`
   that also plays the wallet; saving and restoring round trips, bad save data keeps the defaults,
-  the prompt device) and `WardrobePromptsTests` (each device's hints show its own icons only).
+  the prompt device, the menu steps: a held direction moves the focus one item per 0.2 s, a short
+  flick exactly one) and `WardrobePromptsTests` (each device's hints show its own icons only).
 
 Test it with `./test.sh Wardrobe` from the repository root.
 
@@ -59,7 +60,7 @@ check the model and the script exist.
 
 `WardrobeModule` reads `Fungtopia.Player.PlayerState` (the character: Girl or Boy),
 `Fungtopia.Monsters.MonsterKilled`, `Fungtopia.Wallet.WalletState` and `SpendResult`,
-`Fungtopia.Input.ActiveDevice`,
+`Fungtopia.Input.ActiveDevice` and `MenuNav`,
 `Fungtopia.Save.CollectSave` and `RestorePart`, and the messages above; it publishes
 `Fungtopia.Wallet.SpendCoins` and `Fungtopia.Save.SavePart`.
 
@@ -98,6 +99,11 @@ check the model and the script exist.
   whenever the Input module reports a new one, or the one the view passes to `NoteDevice(kind)`
   since (while a screen is open the view takes the input, so the Input module sees no change);
   opening a screen goes back to the Input module's device.
+- **Menu steps.** While a screen is open each `MenuNav` step (the Input module paces them: one when
+  a direction is first pushed, then one per 0.2 s held, from the left stick, D-pad, arrows and
+  W A S D) is kept for the view, which takes it with `TakeMenuStep(out vertical, out horizontal)`
+  and moves the focus one item. Only the latest untaken step is kept (they never pile up); steps
+  while closed are dropped, and opening or closing a screen forgets an untaken one.
 - `Coins` (the latest `WalletState`), `Owns`, `Worn(slot)`, `BottomHidden`, `CanBuy`, `Appearance`
   are for the view. No allocations per tick.
 
@@ -109,12 +115,14 @@ rounded cream panel and big mushroom buttons (Done; Buy in the shop) under it, a
 half of the screen (scaled down on narrow screens so it never crosses the middle). The left half
 is left free: the Player module draws the character there and the Camera frames it while
 `WardrobeState.Open` (their jobs). While a screen is open the mouse pointer is free and the view
-takes the input events before the Input module (so the game does not jump, talk or open the map):
+takes the input events before the Input module (so the game does not jump, talk or open the map).
+The focus moves only by the Input module's `MenuNav` steps (it polls the held directions, so it still
+sees them); the view reads no stick, D-pad or arrow of its own for that:
 
 | Action | Mouse | Keyboard | Gamepad |
 | --- | --- | --- | --- |
 | Turn the character | Drag on the left half | Q / E (held) | Right stick, LB / RB (held) |
-| Move the focus | Hover a shop card | Arrows, W A S D, Tab | D-pad, left stick |
+| Move the focus | Hover a shop card | Arrows, W A S D (via `MenuNav`) | D-pad, left stick (via `MenuNav`) |
 | Choose | Click | Enter, Space | A |
 | Tabs (wardrobe) | Click a tab | Page Up / Page Down | LT / RT |
 | Done | Done | Esc | B |

@@ -36,7 +36,7 @@ public sealed class WardrobeModule : IModule, IMessageHandler<SetLook>, IMessage
     IMessageHandler<GrantItem>, IMessageHandler<OpenWardrobe>, IMessageHandler<OpenShop>,
     IMessageHandler<MonsterKilled>, IMessageHandler<PlayerState>, IMessageHandler<WalletState>,
     IMessageHandler<SpendResult>, IMessageHandler<CollectSave>, IMessageHandler<RestorePart>,
-    IMessageHandler<ActiveDevice>
+    IMessageHandler<ActiveDevice>, IMessageHandler<MenuNav>
 {
     /// <summary>The <see cref="SpendCoins.RequestId"/>s of the shop start here (other shops use their own).</summary>
     public const int RequestIdBase = 0x5744_0000;
@@ -75,6 +75,8 @@ public sealed class WardrobeModule : IModule, IMessageHandler<SetLook>, IMessage
     private float _turnStick;
     private float _drag;
     private bool _restoreProblemLogged;
+    private int _navVertical;
+    private int _navHorizontal;
 
     public WardrobeModule()
     {
@@ -175,6 +177,7 @@ public sealed class WardrobeModule : IModule, IMessageHandler<SetLook>, IMessage
         bus.Subscribe<CollectSave>(this);
         bus.Subscribe<RestorePart>(this);
         bus.Subscribe<ActiveDevice>(this);
+        bus.Subscribe<MenuNav>(this);
     }
 
     public void Tick(in TickContext context)
@@ -251,6 +254,8 @@ public sealed class WardrobeModule : IModule, IMessageHandler<SetLook>, IMessage
         Shop = false;
         _tryOn = -1;
         _drag = 0f;
+        _navVertical = 0;
+        _navHorizontal = 0;
     }
 
     /// <summary>Puts on starter outfit <paramref name="outfit"/> (character creation): its slots, the rest empty but face and back.</summary>
@@ -350,6 +355,32 @@ public sealed class WardrobeModule : IModule, IMessageHandler<SetLook>, IMessage
 
     /// <summary>The view saw input from <paramref name="kind"/> (while a screen is open): its prompts show.</summary>
     public void NoteDevice(DeviceKind kind) => Device = kind;
+
+    /// <summary>
+    /// A <see cref="MenuNav"/> step (the Input module paces them: one on a push, then one per 0.2 s
+    /// held) is kept for the view while a screen is open; only the latest untaken one, so steps never pile up.
+    /// </summary>
+    public void Handle(in MenuNav message)
+    {
+        if (!Open || !message.Any)
+            return;
+        _navVertical = message.Vertical;
+        _navHorizontal = message.Horizontal;
+    }
+
+    /// <summary>
+    /// The view, every frame: the focus step to make now (<paramref name="vertical"/> -1 up, +1 down;
+    /// <paramref name="horizontal"/> -1 left, +1 right), from the latest <see cref="MenuNav"/> step not
+    /// taken yet. False when there is none; each step is taken once.
+    /// </summary>
+    public bool TakeMenuStep(out int vertical, out int horizontal)
+    {
+        vertical = _navVertical;
+        horizontal = _navHorizontal;
+        _navVertical = 0;
+        _navHorizontal = 0;
+        return vertical != 0 || horizontal != 0;
+    }
 
     public void Handle(in SpendResult message)
     {
@@ -505,6 +536,8 @@ public sealed class WardrobeModule : IModule, IMessageHandler<SetLook>, IMessage
         LastBuyItem = -1;
         _tryOn = -1;
         _drag = 0f;
+        _navVertical = 0;
+        _navHorizontal = 0;
         Yaw = 0f;
     }
 
