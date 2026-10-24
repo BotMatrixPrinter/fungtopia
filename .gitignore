@@ -1,0 +1,16 @@
+# Godot
+.godot/
+*.tmp
+export_presets.cfg
+
+# .NET build output
+bin/
+obj/
+*.user
+.vs/
+.idea/
+TestResults/
+
+# Screenshots are never committed
+screenshots/
+*.screenshot.png

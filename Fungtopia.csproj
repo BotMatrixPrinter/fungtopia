@@ -1,0 +1,23 @@
+<Project Sdk="Godot.NET.Sdk/4.7.2">
+  <!--
+    The Godot game assembly. It compiles only the Godot scripts (shell/Godot and every
+    modules/*/Godot) and references the shell and every module's Contract and Core project
+    by wildcard, so adding a module never needs a change here. Module Tests are left out.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <RootNamespace>Fungtopia</RootNamespace>
+    <Nullable>enable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="shell/Godot/**/*.cs;modules/*/Godot/**/*.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="shell/Contract/Fungtopia.Shell.Contract.csproj" />
+    <ProjectReference Include="shell/Host/Fungtopia.Shell.Host.csproj" />
+    <ProjectReference Include="modules/*/Contract/*.csproj" />
+    <ProjectReference Include="modules/*/Core/*.csproj" />
+  </ItemGroup>
+</Project>

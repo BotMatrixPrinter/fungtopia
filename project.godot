@@ -1,0 +1,23 @@
+; Engine configuration file.
+
+config_version=5
+
+[application]
+
+config/name="Fungtopia"
+config/description="A cute third-person 3D mushroom-world adventure."
+run/main_scene="res://shell/Godot/Bootstrap.tscn"
+config/features=PackedStringArray("4.7", "C#", "Forward Plus")
+
+[display]
+
+window/size/viewport_width=1920
+window/size/viewport_height=1080
+
+[dotnet]
+
+project/assembly_name="Fungtopia"
+
+[physics]
+
+common/physics_ticks_per_second=60
