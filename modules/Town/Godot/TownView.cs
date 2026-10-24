@@ -8,7 +8,8 @@ namespace Fungtopia.Town.View;
 
 /// <summary>
 /// Draws Mushroom Town from <see cref="TownLayout"/>: each Town building of the Map exactly where
-/// the Map puts it, and the street lamps, benches, fences and flower beds, all from town.glb. The
+/// the Map puts it, the Map's street lamps, benches, fences, planters and crates exactly where and as
+/// large as the Map says, and small flower clumps, all from town.glb. The
 /// street lamps' bulbs and every window light up while <see cref="TownModule.LampsLit"/> (night),
 /// fading over a second or two, each lamp with a warm light of its own. Nothing else moves.
 /// </summary>
@@ -19,6 +20,8 @@ public partial class TownView : Node3D, IModuleView
     public const float NightGlow = 2.2f;
     private const float LampEnergy = 2.4f;
     private const float FadeSeconds = 1.5f;
+    /// <summary>Where the bulb hangs, as a share of the lamp's height (2.62 m of the 3.2 m model).</summary>
+    private const float LampLightHeight = 0.8f;
 
     private TownModule? _town;
     private readonly List<OmniLight3D> _lights = new();
@@ -44,7 +47,7 @@ public partial class TownView : Node3D, IModuleView
                 var light = new OmniLight3D
                 {
                     Name = $"LampLight_{_lights.Count}",
-                    Position = node.Position + new Vector3(0f, 2.55f, 0f),
+                    Position = node.Position + new Vector3(0f, p.Height * LampLightHeight, 0f),
                     LightColor = new Color(1f, 0.78f, 0.45f),
                     OmniRange = 10f,
                     OmniAttenuation = 1.2f,
@@ -94,10 +97,12 @@ public partial class TownView : Node3D, IModuleView
         TownPiece.Fountain => new(7f, 2.2f, 7f),
         TownPiece.House => new(9f, 7f, 9f),
         TownPiece.ClothingShop => new(10f, 8f, 9f),
-        TownPiece.StreetLamp => Size(TownLayout.LampSize),
-        TownPiece.Bench => Size(TownLayout.BenchSize),
-        TownPiece.Fence => Size(TownLayout.FenceSize),
-        TownPiece.FlowerBed => Size(TownLayout.FlowerBedSize),
+        TownPiece.StreetLamp => new(0.8f, 3.2f, 0.8f),
+        TownPiece.Bench => new(1.8f, 0.9f, 0.7f),
+        TownPiece.Fence => new(3.5f, 0.8f, 0.2f),
+        TownPiece.Planter => new(1.2f, 0.7f, 1.2f),
+        TownPiece.Crate => new(0.71f, 0.8f, 0.71f),
+        TownPiece.Flowers => Size(TownLayout.FlowersSize),
         _ => throw new ArgumentOutOfRangeException(nameof(piece)),
     };
 

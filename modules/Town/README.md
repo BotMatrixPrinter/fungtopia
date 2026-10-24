@@ -2,10 +2,16 @@
 
 Draws Mushroom Town, exactly where the Map module lays it out (`Fungtopia.Map.Buildings`, the
 ones in `Area.Town`): your house, Millie's house next door, Dr. Jeremy's clinic, the furniture
-shop's stall, Abby's clothing shop, the fountain in the square and four more houses, plus street lamps, benches, picket
-fences and flower beds. The street lamps (and every window) light up at night. Nothing in the
-town moves or is walked into here: the Map's `Ground.Obstacles` already cover the buildings; the
-Home module handles the house door and the shop, the signpost is the Travel module's.
+shop's stall, Abby's clothing shop, the fountain in the square and four more houses, plus the
+Map's Town props (`Fungtopia.Map.Props`, the ones in `Area.Town`: street lamps, benches, garden
+fences, planters, crates), and small flower clumps. The street lamps (and every window) light up
+at night. Nothing in the town moves or is walked into here: the Map's `Ground.Obstacles` already
+cover the buildings and the props; the Home module handles the house door and the shop, the
+signpost is the Travel module's.
+
+The rule (Map README, **Props**): anything taller than about 0.4 m or wider than about 0.6 m is
+solid and drawn only from the Map's data; Town scatters only flower clumps (0.5 m across, 0.35 m
+tall), which are walked over.
 
 - `Contract/` — `Fungtopia.Town.Contract` (namespace `Fungtopia.Town`): `TownLights`.
 - `Core/` — `Fungtopia.Town.Core`: `TownModule`, the module's one `IModule`; `TownLayout`, the
@@ -14,7 +20,7 @@ Home module handles the house door and the shop, the signpost is the Travel modu
   (loads `town.glb` at run time, toon materials); `Preview.tscn` with `TownPreview` (for
   screenshots); `Shaders/` (toon surface, ink outline).
 - `Models/` — `town.py`, the Blender script that builds and exports `town.glb` next to it.
-- `Tests/` — `TownTests.cs`: xUnit tests of `TownLayout`, of `town.glb` having an object for every placement, and of `TownModule` with a fake `IMessageBus`.
+- `Tests/` — `TownTests.cs`: xUnit tests of `TownLayout` (its props are exactly the Map's Town props), of `town.glb` having an object for every placement, and of `TownModule` with a fake `IMessageBus`.
 
 Test it with `./test.sh Town` from the repository root.
 
@@ -31,31 +37,32 @@ the first night), and each change publishes one `TownLights`. Its Tick does noth
 allocations per tick.
 
 `TownLayout.All` is a plain list of `TownPlacement`s (`Piece`, `Variant`, `X`, `Z`, `Yaw`,
-`Width`, `Depth`, `Height`, `BuildingIndex`), the same every run:
+`Width`, `Depth`, `Height`, `BuildingIndex`, `PropIndex`), the same every run:
 
 - first each Town building of `Buildings.All`, once, in order, at its exact position, rotation
-  and size, with its index in `Buildings.All` (`TryPieceFor(kind)`: PlayerHouse, MillieHouse,
-  Clinic, FurnitureShop, Fountain, House, ClothingShop; the four plain houses get looks 0..3). A
-  kind Town does not draw (PetCity's, or one the Map adds later) is skipped, never thrown; props
-  still keep clear of its footprint;
-- then the props (`BuildingIndex` -1): street lamps in a ring round the square and at both front
-  corners of every building, benches on the square facing the fountain, flower beds either side
-  of each front door and round the square, picket fences round the back and sides of the four
-  houses' yards, behind your and Millie's shared back garden, and either side of the street
-  where it comes into town.
-
-Every prop passes `PropFits`: in the Town area on walkable ground, clear of every building's
-footprint (`Clearance` 0.6 m), its center not in an obstacle, `PathClearance` (1.8 m) from the
-middle of the town's dirt paths (`PathDistance`: the street from the entrance to the square and
-the path from the square to each front, as the Map draws them), 1.2 m from the doors, NPC spots
-and the signpost, and not overlapping another prop.
+  and size, with its index in `Buildings.All` (`TryPieceFor(BuildingKind)`: PlayerHouse,
+  MillieHouse, Clinic, FurnitureShop, Fountain, House, ClothingShop; the four plain houses get
+  looks 0..3). A kind Town does not draw (PetCity's, or one the Map adds later) is skipped, never
+  thrown;
+- then each Town prop of `Props.All`, once, in order, with its index in `Props.All`
+  (`TryPieceFor(PropKind)`: Lamp → StreetLamp, Bench, FenceSegment → Fence, Planter, Crate; a kind
+  without a model is skipped). `ForProp` puts it at the prop's `X`, `Z`, `Rotation` and `Height`;
+  a lamp or planter is 2 x `Radius` across, a bench or fence 2 x `Radius` long (along local X;
+  `BenchDepth` 0.62 m, `FenceDepth` 0.2 m deep), a crate a square with its corners on its circle;
+- then the free decoration (both indexes -1): flower clumps (`FlowersSize`, under
+  `DecorationMaxHeight` 0.4 m and `DecorationMaxWidth` 0.6 m) along each building's front either
+  side of the door and round the square. Each passes `FlowersFit`: walkable town ground, off every
+  obstacle (`Ground.Blocks`), `PathClearance` (1.8 m) from the middle of the town's dirt paths
+  (`PathDistance`: the street from the entrance to the square and the path from the square to each
+  front, as the Map draws them), 1.2 m from the doors, NPC spots and the signpost, and not on
+  another clump.
 
 ## View
 
 `TownView` puts one copy of a `town.glb` object at each placement (on the lowest ground under a
 building's footprint, its foundation reaching into the rest), turned by `Yaw` and scaled to the
 placement's size. While `LampsLit` the lamp bulbs and windows glow (fading over 1.5 s) and each
-street lamp has a warm `OmniLight3D`; by day they are off. The sky and sun are DayNight's.
+street lamp has a warm `OmniLight3D` at its bulb (0.8 of its height); by day they are off. The sky and sun are DayNight's.
 
 ## Models
 
@@ -80,8 +87,10 @@ toon-shaded with ink outlines, and no eyes or faces on anything:
   reading "Abby's". Its windows and lanterns light up at night with the rest of the town.
 - **House0..House3** — orange, lilac, blue and yellow caps, round or arched doors, flower boxes,
   two with chimneys.
-- **StreetLamp** (3.2 m, a glowing bulb under a spotted cap), **Bench** (on mushroom-stem legs),
-  **Fence** (a 2 m picket segment), **FlowerBed** (2 x 0.8 m, round flowers).
+- **StreetLamp** (modelled 3.2 m, a glowing bulb under a spotted cap), **Bench** (on
+  mushroom-stem legs), **Fence** (a 3.5 m picket segment, 0.8 m tall, a post at each end),
+  **Planter** (a round stone planter of flowers, 1.2 m across), **Crate** (0.71 m, planks with dark
+  edges), all scaled to the Map's sizes; **Flowers** (a 0.5 m clump of three flowers, decoration).
 
 ## Screenshots
 

@@ -17,16 +17,22 @@ public enum TownPiece
     StreetLamp,
     Bench,
     Fence,
-    FlowerBed,
+    /// <summary>A small clump of flowers (free ground decoration, walked over; not solid).</summary>
+    Flowers,
     /// <summary>Abby's clothing shop (added after the props, so the earlier pieces keep their numbers).</summary>
     ClothingShop,
+    /// <summary>A round planter full of flowers (the Map's <see cref="PropKind.Planter"/>).</summary>
+    Planter,
+    /// <summary>A wooden crate (the Map's <see cref="PropKind.Crate"/>).</summary>
+    Crate,
 }
 
 /// <summary>
 /// One thing drawn in Mushroom Town: at (<see cref="X"/>, <see cref="Z"/>) on the ground, turned
 /// by <see cref="Yaw"/> (radians about +Y; at 0 its front faces -Z), sized
 /// <see cref="Width"/> (local X) by <see cref="Depth"/> (local Z) by <see cref="Height"/>.
-/// A building of the Map Contract keeps its index in <see cref="Buildings.All"/>.
+/// A building of the Map Contract keeps its index in <see cref="Buildings.All"/>, a solid prop its
+/// index in <see cref="Props.All"/>; free decoration has neither.
 /// </summary>
 public readonly struct TownPlacement
 {
@@ -38,10 +44,12 @@ public readonly struct TownPlacement
     public readonly float Width;
     public readonly float Depth;
     public readonly float Height;
-    /// <summary>Index in <see cref="Buildings.All"/>, or -1 for a prop (lamp, bench, fence, flower bed).</summary>
+    /// <summary>Index in <see cref="Buildings.All"/>, or -1.</summary>
     public readonly int BuildingIndex;
+    /// <summary>Index in <see cref="Props.All"/>, or -1.</summary>
+    public readonly int PropIndex;
 
-    public TownPlacement(TownPiece piece, int variant, float x, float z, float yaw, float width, float depth, float height, int buildingIndex)
+    public TownPlacement(TownPiece piece, int variant, float x, float z, float yaw, float width, float depth, float height, int buildingIndex, int propIndex = -1)
     {
         Piece = piece;
         Variant = variant;
@@ -52,35 +60,45 @@ public readonly struct TownPlacement
         Depth = depth;
         Height = height;
         BuildingIndex = buildingIndex;
+        PropIndex = propIndex;
     }
 
-    /// <summary>Radius of the circle on the ground a prop takes (half its longest side).</summary>
+    /// <summary>Radius of the circle on the ground it takes (half its longest side).</summary>
     public float Radius => MathF.Max(Width, Depth) * 0.5f;
+
+    /// <summary>Whether it is free decoration: neither a Map building nor a Map prop.</summary>
+    public bool IsDecoration => BuildingIndex < 0 && PropIndex < 0;
 }
 
 /// <summary>
 /// Everything Town draws, as a plain list: each Town building of <see cref="Buildings.All"/> once,
-/// exactly where the Map puts it, then the props (street lamps, benches, fences, flower beds),
-/// all on walkable ground, off the buildings, the town's dirt paths and the Map's named spots.
-/// Fixed data, the same every run.
+/// exactly where the Map puts it, then each Town prop of <see cref="Props.All"/> (street lamps,
+/// benches, fence segments, planters, crates) once, exactly where and as large as the Map says,
+/// then small flower clumps (free decoration under 0.4 m, walked over) by the doors and round the
+/// square. Fixed data, the same every run.
 /// </summary>
 public static class TownLayout
 {
     /// <summary>Plain houses come in this many looks (cap colors, doors).</summary>
     public const int HouseVariants = 4;
 
-    /// <summary>Meters a prop keeps between its edge and the middle of a dirt path.</summary>
+    /// <summary>Free decoration stays at most this tall and this wide (meters); anything bigger is a Map prop.</summary>
+    public const float DecorationMaxHeight = 0.4f;
+    public const float DecorationMaxWidth = 0.6f;
+
+    /// <summary>Depth (local Z) a bench is drawn at; its length is the Map's 2 x radius.</summary>
+    public const float BenchDepth = 0.62f;
+
+    /// <summary>Depth (local Z) of a fence segment's pickets; its length is the Map's 2 x radius.</summary>
+    public const float FenceDepth = 0.2f;
+
+    /// <summary>Size (width, height, depth) of a flower clump.</summary>
+    public static readonly Vector3 FlowersSize = new(0.5f, 0.35f, 0.5f);
+
+    /// <summary>Meters a flower clump keeps from the middle of a dirt path (beyond its own radius).</summary>
     public const float PathClearance = 1.8f;
 
-    /// <summary>Meters a prop keeps between its edge and a building's footprint or a named spot.</summary>
-    public const float Clearance = 0.6f;
-
-    public static readonly Vector3 LampSize = new(0.8f, 3.2f, 0.8f);
-    public static readonly Vector3 BenchSize = new(1.8f, 0.9f, 0.7f);
-    public static readonly Vector3 FenceSize = new(2f, 0.9f, 0.2f);
-    public static readonly Vector3 FlowerBedSize = new(2f, 0.5f, 0.8f);
-
-    /// <summary>The Map's named spots in or by town that props stay off.</summary>
+    /// <summary>The Map's named spots in or by town that flower clumps stay off.</summary>
     public static readonly Vector2[] Spots =
     {
         Flat(Places.HomeDoor), Flat(Places.ClinicDoor), Flat(Places.MillieSpot),
@@ -92,7 +110,7 @@ public static class TownLayout
     // After the fields Build uses (static fields initialize in order).
     private static readonly TownPlacement[] s_all = Build();
 
-    /// <summary>Every placement: the buildings first (in <see cref="Buildings.All"/> order), then the props.</summary>
+    /// <summary>Every placement: the buildings first (in <see cref="Buildings.All"/> order), then the Map's props (in <see cref="Props.All"/> order), then the flower clumps.</summary>
     public static ReadOnlySpan<TownPlacement> All => s_all;
 
     /// <summary>Number of placements.</summary>
@@ -118,6 +136,42 @@ public static class TownLayout
     }
 
     /// <summary>
+    /// The piece drawing a Map prop of <paramref name="kind"/>, or false for a kind Town has no
+    /// model for (forest mushrooms, the statue, one the Map adds later): Build skips it.
+    /// </summary>
+    public static bool TryPieceFor(PropKind kind, out TownPiece piece)
+    {
+        switch (kind)
+        {
+            case PropKind.Lamp: piece = TownPiece.StreetLamp; return true;
+            case PropKind.Bench: piece = TownPiece.Bench; return true;
+            case PropKind.FenceSegment: piece = TownPiece.Fence; return true;
+            case PropKind.Planter: piece = TownPiece.Planter; return true;
+            case PropKind.Crate: piece = TownPiece.Crate; return true;
+            default: piece = default; return false;
+        }
+    }
+
+    /// <summary>
+    /// The placement drawing Map prop <paramref name="prop"/> (index <paramref name="index"/> in
+    /// <see cref="Props.All"/>): at its spot and rotation, its footprint inside its obstacle circles
+    /// and as long and tall as the Map says (a fence or bench 2 x radius along local X, a lamp or
+    /// planter 2 x radius across, a square crate with its corners on its circle).
+    /// </summary>
+    public static TownPlacement ForProp(in Prop prop, TownPiece piece, int index)
+    {
+        float across = prop.Radius * 2f;
+        (float width, float depth) = piece switch
+        {
+            TownPiece.Bench => (across, BenchDepth),
+            TownPiece.Fence => (across, FenceDepth),
+            TownPiece.Crate => (prop.Radius * MathF.Sqrt(2f), prop.Radius * MathF.Sqrt(2f)),
+            _ => (across, across),
+        };
+        return new TownPlacement(piece, 0, prop.X, prop.Z, prop.Rotation, width, depth, prop.Height, -1, index);
+    }
+
+    /// <summary>
     /// Distance from (x, z) to the middle of the town's dirt paths, as the Map draws them: the
     /// street from the entrance to the square, and one from the square to 1 m in front of each
     /// building.
@@ -137,17 +191,13 @@ public static class TownLayout
     }
 
     /// <summary>
-    /// Whether a prop of <paramref name="radius"/> at (x, z) is on walkable town ground, clear of
-    /// the Map's obstacles and buildings, the dirt paths and the named spots (doors, NPC spots,
-    /// the signpost).
+    /// Whether a flower clump of <paramref name="radius"/> at (x, z) is on walkable town ground,
+    /// off every obstacle (buildings and props), the dirt paths and the named spots.
     /// </summary>
-    public static bool PropFits(float x, float z, float radius)
+    public static bool FlowersFit(float x, float z, float radius)
     {
-        if (Areas.At(x, z) != Area.Town || !Areas.Walkable(x, z, radius + Clearance) || Ground.Blocks(x, z))
+        if (Areas.At(x, z) != Area.Town || !Areas.Walkable(x, z, radius + 0.5f) || Ground.Blocks(x, z, radius + 0.2f))
             return false;
-        foreach (var b in Buildings.All)
-            if (b.Contains(x, z, radius + Clearance))
-                return false;
         if (PathDistance(x, z) < radius + PathClearance)
             return false;
         foreach (var spot in Spots)
@@ -166,9 +216,6 @@ public static class TownLayout
         return MathF.Sqrt(dx * dx + dz * dz);
     }
 
-    /// <summary>Yaw whose front (-Z at 0) faces the direction (dx, dz).</summary>
-    private static float Facing(float dx, float dz) => MathF.Atan2(-dx, -dz);
-
     private static TownPlacement[] Build()
     {
         var list = new List<TownPlacement>();
@@ -184,117 +231,49 @@ public static class TownLayout
         }
         int buildings = list.Count;
 
-        bool Add(TownPiece piece, Vector3 size, float x, float z, float yaw)
+        // Every solid prop: exactly the Map's.
+        var props = Props.All;
+        for (int i = 0; i < props.Length; i++)
+            if (props[i].Area == Area.Town && TryPieceFor(props[i].Kind, out var piece))
+                list.Add(ForProp(props[i], piece, i));
+        int decoration = list.Count;
+
+        bool Add(float x, float z, float yaw)
         {
-            float radius = MathF.Max(size.X, size.Z) * 0.5f;
-            if (!PropFits(x, z, radius))
+            float radius = MathF.Max(FlowersSize.X, FlowersSize.Z) * 0.5f;
+            if (!FlowersFit(x, z, radius))
                 return false;
-            for (int k = buildings; k < list.Count; k++)
-            {
-                var other = list[k];
-                if (Vector2.Distance(new Vector2(x, z), new Vector2(other.X, other.Z)) < radius + other.Radius - 0.01f)
+            for (int k = decoration; k < list.Count; k++)
+                if (Vector2.Distance(new Vector2(x, z), new Vector2(list[k].X, list[k].Z)) < radius + list[k].Radius)
                     return false;
-            }
-            list.Add(new TownPlacement(piece, 0, x, z, yaw, size.X, size.Z, size.Y, -1));
+            list.Add(new TownPlacement(TownPiece.Flowers, 0, x, z, yaw, FlowersSize.X, FlowersSize.Z, FlowersSize.Y, -1));
             return true;
         }
 
-        var square = Buildings.TownSquare;
-
-        // Street lamps in a ring just outside the square's paving, between the paths.
-        for (int a = 0; a < 48; a++)
-        {
-            float angle = a * MathF.Tau / 48f;
-            float x = square.X + MathF.Sin(angle) * 14f, z = square.Y + MathF.Cos(angle) * 14f;
-            if (NearestOfKind(list, buildings, TownPiece.StreetLamp, x, z) >= 9f)
-                Add(TownPiece.StreetLamp, LampSize, x, z, 0f);
-        }
-
-        // Benches on the paving, facing the fountain.
-        for (int a = 0; a < 36; a++)
-        {
-            float angle = a * MathF.Tau / 36f + 0.09f;
-            float dx = MathF.Sin(angle), dz = MathF.Cos(angle);
-            float x = square.X + dx * 9.5f, z = square.Y + dz * 9.5f;
-            if (NearestOfKind(list, buildings, TownPiece.Bench, x, z) >= 10f)
-                Add(TownPiece.Bench, BenchSize, x, z, Facing(-dx, -dz));
-        }
-
-        // At each building: a lamp at both front corners, flower beds along its front either
-        // side of the door.
+        // Flower clumps along each building's front, either side of the door.
         for (int i = 0; i < buildings; i++)
         {
             var p = list[i];
             if (p.Piece == TownPiece.Fountain)
                 continue;
             var b = all[p.BuildingIndex];
-            float front = -b.Depth * 0.5f;
             foreach (float side in Sides)
-            {
-                var lamp = b.ToWorld(side * (b.Width * 0.5f + 1.4f), front - 1.4f);
-                Add(TownPiece.StreetLamp, LampSize, lamp.X, lamp.Y, 0f);
-                var bed = b.ToWorld(side * b.Width * 0.3f, front - Clearance - FlowerBedSize.X * 0.5f - 0.05f);
-                if (!Add(TownPiece.FlowerBed, FlowerBedSize, bed.X, bed.Y, b.Rotation))
+                for (int k = 0; k < 3; k++)
                 {
-                    bed = b.ToWorld(side * (b.Width * 0.5f - 1f), front - Clearance - FlowerBedSize.X * 0.5f - 0.05f);
-                    Add(TownPiece.FlowerBed, FlowerBedSize, bed.X, bed.Y, b.Rotation);
+                    var w = b.ToWorld(side * (b.Width * 0.18f + k * 0.75f), -b.Depth * 0.5f - 0.8f - (k % 2) * 0.35f);
+                    Add(w.X, w.Y, k * 1.3f + side);
                 }
-            }
         }
 
-        // Picket fences round the back and sides of each plain house's yard.
-        for (int i = 0; i < buildings; i++)
+        // Flower clumps round the square.
+        var square = Buildings.TownSquare;
+        for (int a = 0; a < 40; a++)
         {
-            var p = list[i];
-            if (p.Piece != TownPiece.House)
-                continue;
-            var b = all[p.BuildingIndex];
-            float hx = b.Width * 0.5f + 3f, front = -b.Depth * 0.5f - 1f, back = b.Depth * 0.5f + 3f;
-            FenceLine(b, -hx, front, -hx, back);
-            FenceLine(b, -hx, back, hx, back);
-            FenceLine(b, hx, back, hx, front);
-        }
-
-        // A fence behind your house and Millie's (one shared back garden), and either side of the
-        // street where it comes into town.
-        FenceLine(default, -35.5f, 199f, -35.5f, 249f);
-        FenceLine(default, 7f, 161f, 35f, 161f);
-        FenceLine(default, -7f, 161f, -35f, 161f);
-
-        // Flower beds round the square, between its lamps.
-        for (int a = 0; a < 48; a++)
-        {
-            float angle = a * MathF.Tau / 48f + 0.065f;
-            float dx = MathF.Sin(angle), dz = MathF.Cos(angle);
-            float x = square.X + dx * 16.5f, z = square.Y + dz * 16.5f;
-            if (NearestOfKind(list, buildings, TownPiece.FlowerBed, x, z) >= 8f)
-                Add(TownPiece.FlowerBed, FlowerBedSize, x, z, Facing(-dx, -dz));
+            float angle = a * MathF.Tau / 40f + 0.04f;
+            float r = a % 2 == 0 ? 16.5f : 19.5f;
+            Add(square.X + MathF.Sin(angle) * r, square.Y + MathF.Cos(angle) * r, angle * 3f);
         }
 
         return list.ToArray();
-
-        // Fence segments end to end from local (x0, z0) to (x1, z1) of building b (world when b is default).
-        void FenceLine(Building b, float x0, float z0, float x1, float z1)
-        {
-            float length = MathF.Sqrt((x1 - x0) * (x1 - x0) + (z1 - z0) * (z1 - z0));
-            int count = (int)(length / FenceSize.X);
-            for (int k = 0; k < count; k++)
-            {
-                float t = (k + 0.5f) / count;
-                float lx = x0 + (x1 - x0) * t, lz = z0 + (z1 - z0) * t;
-                Vector2 w = b.Width > 0f ? b.ToWorld(lx, lz) : new Vector2(lx, lz);
-                Vector2 d = b.Width > 0f ? b.ToWorld(x1, z1) - b.ToWorld(x0, z0) : new Vector2(x1 - x0, z1 - z0);
-                Add(TownPiece.Fence, FenceSize, w.X, w.Y, MathF.Atan2(-d.Y, d.X));
-            }
-        }
-    }
-
-    private static float NearestOfKind(List<TownPlacement> list, int start, TownPiece piece, float x, float z)
-    {
-        float best = float.MaxValue;
-        for (int k = start; k < list.Count; k++)
-            if (list[k].Piece == piece)
-                best = MathF.Min(best, Vector2.Distance(new Vector2(x, z), new Vector2(list[k].X, list[k].Z)));
-        return best;
     }
 }

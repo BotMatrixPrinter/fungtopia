@@ -4,8 +4,8 @@
 #
 # One object per Fungtopia.Town TownPiece: PlayerHouse (12 x 12 m, 10 m tall), MillieHouse
 # (10 x 10 x 8), Clinic (12 x 10 x 8.5), FurnitureShop (7 x 4 x 3.5), Fountain (7 x 7 x 2.2),
-# House0..House3 (9 x 9 x 7, four looks), ClothingShop (10 x 9 x 8), StreetLamp, Bench, Fence (one 2 m segment) and
-# FlowerBed: each the size of its footprint in the Map Contract, standing on the ground at the
+# House0..House3 (9 x 9 x 7, four looks), ClothingShop (10 x 9 x 8), StreetLamp, Bench, Fence (one 3.5 m segment),
+# Planter, Crate and Flowers (a small clump): each the size of its footprint in the Map Contract, standing on the ground at the
 # origin (a little foundation below it, for uneven ground), its front (door, counter, seat)
 # toward Blender +Y (Godot -Z, a building's front at rotation 0). Chunky and cute; no eyes or
 # faces on anything (only creatures have them). Materials carry plain colors only; the game draws
@@ -618,35 +618,62 @@ def bench():
 
 
 def fence():
-    # One 2 m segment of picket fence along X: a post at its -X end, two rails, rounded pickets.
+    # One 3.5 m segment of picket fence along X (the Map's FenceSegment), 0.8 m tall: a post at
+    # each end, two rails, rounded pickets.
     p = Piece("Fence")
-    p.add(box((0.14, 0.14, 1.0), T(-1.0, 0, 0.42), bevel=0.03), "Picket")
-    p.add(sphere(0.1, T(-1.0, 0, 0.94), segments=10, rings=5), "Picket")
-    for z in (0.3, 0.65):
-        p.add(box((2.0, 0.06, 0.09), T(0, -0.05, z), bevel=0.02), "Picket")
-    for k in range(5):
-        x = -0.8 + k * 0.4
-        p.add(box((0.14, 0.05, 0.72), T(x, 0.02, 0.33), bevel=0.02), "Picket")
-        p.add(cylinder(0.07, 0.05, T(x, 0.02, 0.69) @ R("X", 90), segments=12), "Picket")
+    for x in (-1.68, 1.68):
+        p.add(box((0.14, 0.14, 0.82), T(x, 0, 0.32), bevel=0.03), "Picket")
+        p.add(sphere(0.09, T(x, 0, 0.72), segments=10, rings=5), "Picket")
+    for z in (0.24, 0.52):
+        p.add(box((3.4, 0.06, 0.08), T(0, -0.05, z), bevel=0.02), "Picket")
+    for k in range(8):
+        x = -1.4 + k * 0.4
+        p.add(box((0.14, 0.05, 0.58), T(x, 0.02, 0.27), bevel=0.02), "Picket")
+        p.add(cylinder(0.07, 0.05, T(x, 0.02, 0.56) @ R("X", 90), segments=12), "Picket")
     p.finish()
 
 
-def flower_bed():
-    # A raised wooden flower bed, 2 x 0.8 m, full of round flowers and leaves.
-    p = Piece("FlowerBed")
-    w, d = 2.0, 0.8
+def planter():
+    # A round stone planter (the Map's Planter), 1.2 m across and 0.7 m tall with its flowers.
+    p = Piece("Planter")
+    p.add(cylinder(0.6, 0.36, T(0, 0, 0.14), segments=28, radius2=0.56), "Stone")
+    p.add(torus(0.55, 0.06, T(0, 0, 0.32), segments=28, sides=8), "Stone")
+    p.add(cylinder(0.5, 0.06, T(0, 0, 0.31), segments=24), "Soil")
+    petals = ("PetalPink", "PetalYellow", "PetalBlue", "PetalWhite", "PetalPink", "PetalYellow")
+    for k in range(6):
+        a = 2 * math.pi * k / 6
+        flower(p, T(math.cos(a) * 0.3, math.sin(a) * 0.3, 0.32) @ R("Z", k * 47), petals[k], scale=0.95)
+    flower(p, T(0, 0, 0.32), "PetalWhite", scale=1.05)
+    for k in range(4):
+        a = 2 * math.pi * k / 4 + 0.4
+        p.add(sphere(0.13, T(math.cos(a) * 0.36, math.sin(a) * 0.36, 0.38), scale=(1, 0.8, 0.5), segments=10, rings=5), "Leaf")
+    p.finish()
+
+
+def crate():
+    # A wooden crate (the Map's Crate), 0.71 x 0.71 m and 0.8 m tall: planks with darker edges.
+    p = Piece("Crate")
+    w, h = 0.71, 0.8
+    p.add(box((w - 0.04, w - 0.04, h - 0.04), T(0, 0, h / 2), bevel=0.03), "Wood")
     for y in (-1, 1):
-        p.add(box((w, 0.1, 0.3), T(0, y * (d / 2 - 0.05), 0.1), bevel=0.03), "Wood")
+        for z in (0.06, h - 0.06):
+            p.add(box((w, 0.06, 0.1), T(0, y * (w / 2 - 0.02), z), bevel=0.02), "WoodDark")
+        p.add(box((0.08, 0.05, h * 1.05), T(0, y * (w / 2 - 0.01), h / 2) @ R("Y", 42), bevel=0.02), "WoodDark")
     for x in (-1, 1):
-        p.add(box((0.1, d, 0.3), T(x * (w / 2 - 0.05), 0, 0.1), bevel=0.03), "Wood")
-    p.add(box((w - 0.16, d - 0.16, 0.2), T(0, 0, 0.1), bevel=0.04), "Soil")
-    petals = ("PetalPink", "PetalYellow", "PetalBlue", "PetalWhite")
-    for k in range(8):
-        x = -0.78 + k * 0.22
-        y = 0.13 if k % 2 else -0.13
-        flower(p, T(x, y, 0.18) @ R("Z", k * 47), petals[k % 4], scale=0.9 + 0.2 * ((k * 3) % 2))
-    for k in range(5):
-        p.add(sphere(0.12, T(-0.7 + k * 0.35, 0.02, 0.22), scale=(1, 0.8, 0.5), segments=10, rings=5), "Leaf")
+        for z in (0.06, h - 0.06):
+            p.add(box((0.06, w, 0.1), T(x * (w / 2 - 0.02), 0, z), bevel=0.02), "WoodDark")
+    p.finish()
+
+
+def flowers():
+    # A small clump of flowers (free ground decoration, walked over): 0.5 m across, 0.35 m tall.
+    p = Piece("Flowers")
+    petals = ("PetalPink", "PetalYellow", "PetalBlue")
+    for k, (x, y) in enumerate(((-0.1, -0.06), (0.11, -0.03), (0.0, 0.12))):
+        flower(p, T(x, y, 0) @ R("Z", k * 70), petals[k], scale=0.85 + 0.1 * k)
+    for k in range(3):
+        a = 2 * math.pi * k / 3 + 0.5
+        p.add(sphere(0.1, T(math.cos(a) * 0.14, math.sin(a) * 0.14, 0.03), scale=(1, 0.8, 0.5), segments=10, rings=5), "Leaf")
     p.finish()
 
 
@@ -665,7 +692,9 @@ clothing_shop()
 street_lamp()
 bench()
 fence()
-flower_bed()
+planter()
+crate()
+flowers()
 
 path = os.path.join(HERE, "town.glb")
 bpy.ops.export_scene.gltf(filepath=path, export_format="GLB", export_yup=True)

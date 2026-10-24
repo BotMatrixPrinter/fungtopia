@@ -137,14 +137,6 @@ public class TownTests
             Assert.Equal(shop.Height, p.Height);
         }
         Assert.Equal(1, drawn);
-
-        // Lamps light its front at night, like every other building's.
-        var front = shop.ToWorld(0f, -shop.Depth * 0.5f);
-        bool lamp = false;
-        foreach (var p in TownLayout.All)
-            if (p.Piece == TownPiece.StreetLamp && Vector2.Distance(new Vector2(p.X, p.Z), front) < shop.Width * 0.5f + 4f)
-                lamp = true;
-        Assert.True(lamp);
     }
 
     /// <summary>The names of the objects in Models/town.glb (read from its JSON chunk).</summary>
@@ -198,52 +190,141 @@ public class TownTests
     }
 
     [Fact]
-    public void BuildingsComeFirstThenOnlyProps()
+    public void BuildingsComeFirstThenTheMapsPropsThenDecoration()
     {
         var all = TownLayout.All;
-        for (int i = 0; i < all.Length; i++)
-            Assert.Equal(i < 10, all[i].BuildingIndex >= 0);
+        int stage = 0;
+        foreach (var p in all)
+        {
+            int s = p.BuildingIndex >= 0 ? 0 : p.PropIndex >= 0 ? 1 : 2;
+            Assert.False(p.BuildingIndex >= 0 && p.PropIndex >= 0);
+            Assert.True(s >= stage);
+            stage = s;
+        }
+        Assert.Equal(10, CountWhere(p => p.BuildingIndex >= 0));
     }
 
-    [Fact]
-    public void TheTownHasLampsBenchesFencesAndFlowerBeds()
+    private static int CountWhere(Func<TownPlacement, bool> match)
     {
-        var counts = new Dictionary<TownPiece, int>();
+        int n = 0;
         foreach (var p in TownLayout.All)
-            counts[p.Piece] = counts.GetValueOrDefault(p.Piece) + 1;
-        Assert.InRange(counts.GetValueOrDefault(TownPiece.StreetLamp), 12, 60);
-        Assert.InRange(counts.GetValueOrDefault(TownPiece.Bench), 3, 12);
-        Assert.InRange(counts.GetValueOrDefault(TownPiece.Fence), 30, 200);
-        Assert.InRange(counts.GetValueOrDefault(TownPiece.FlowerBed), 8, 60);
+            if (match(p))
+                n++;
+        return n;
     }
 
     [Fact]
-    public void PropsStandOnTownGroundOffBuildingsPathsAndSpotsAndApart()
+    public void TheDrawnPropsAreExactlyTheMapsTownProps()
+    {
+        // Each Town prop of the Map, in order, drawn once, where, turned and as large as the Map says.
+        var props = Props.All;
+        var drawn = new List<TownPlacement>();
+        foreach (var p in TownLayout.All)
+            if (p.PropIndex >= 0)
+                drawn.Add(p);
+        var expected = new List<int>();
+        for (int i = 0; i < props.Length; i++)
+            if (props[i].Area == Area.Town)
+                expected.Add(i);
+        Assert.True(expected.Count > 40);
+        Assert.Equal(expected, drawn.ConvertAll(p => p.PropIndex));
+
+        foreach (var p in drawn)
+        {
+            var m = props[p.PropIndex];
+            string what = $"{m.Kind} at ({m.X}, {m.Z})";
+            Assert.True(TownLayout.TryPieceFor(m.Kind, out var piece), what);
+            Assert.Equal(piece, p.Piece);
+            Assert.Equal(m.X, p.X);
+            Assert.Equal(m.Z, p.Z);
+            Assert.Equal(m.Rotation, p.Yaw);
+            Assert.Equal(m.Height, p.Height);
+            switch (m.Kind)
+            {
+                case PropKind.Bench:
+                case PropKind.FenceSegment:
+                    // As long as the Map's segment (along local X), thinner than its circles.
+                    Assert.Equal(m.Radius * 2f, p.Width, 4);
+                    Assert.True(p.Depth <= Math.Max(m.Radius, Props.FencePostRadius) * 2f, what);
+                    break;
+                case PropKind.Crate:
+                    // A square whose corners touch its circle.
+                    Assert.Equal(p.Width, p.Depth);
+                    Assert.Equal(m.Radius, MathF.Sqrt(p.Width * p.Width + p.Depth * p.Depth) * 0.5f, 4);
+                    break;
+                default:
+                    Assert.Equal(m.Radius * 2f, p.Width, 4);
+                    Assert.Equal(m.Radius * 2f, p.Depth, 4);
+                    break;
+            }
+        }
+    }
+
+    [Fact]
+    public void EveryTownPropKindOfTheMapHasAPieceAndOthersAreSkipped()
+    {
+        foreach (var m in Props.All)
+            if (m.Area == Area.Town)
+                Assert.True(TownLayout.TryPieceFor(m.Kind, out _), m.Kind.ToString());
+        Assert.False(TownLayout.TryPieceFor(PropKind.MediumMushroom, out _));
+        Assert.False(TownLayout.TryPieceFor((PropKind)999, out _));
+        // Other areas' props are not Town's to draw.
+        foreach (var p in TownLayout.All)
+            if (p.PropIndex >= 0)
+                Assert.Equal(Area.Town, Props.All[p.PropIndex].Area);
+    }
+
+    [Fact]
+    public void TheTownHasTheMapsLampsBenchesFencesPlantersAndCrates()
+    {
+        Assert.True(CountWhere(p => p.Piece == TownPiece.StreetLamp) >= 10);
+        Assert.True(CountWhere(p => p.Piece == TownPiece.Bench) >= 3);
+        Assert.True(CountWhere(p => p.Piece == TownPiece.Fence) >= 14);
+        Assert.True(CountWhere(p => p.Piece == TownPiece.Planter) >= 3);
+        Assert.Equal(2, CountWhere(p => p.Piece == TownPiece.Crate));
+        foreach (var p in TownLayout.All)
+            if (p.Piece is TownPiece.StreetLamp or TownPiece.Bench or TownPiece.Fence or TownPiece.Planter or TownPiece.Crate)
+                Assert.True(p.PropIndex >= 0, $"{p.Piece} at ({p.X}, {p.Z}) is not one of the Map's props");
+    }
+
+    [Fact]
+    public void OnlySmallFlowerClumpsArePlacedFreely()
+    {
+        int flowers = 0;
+        foreach (var p in TownLayout.All)
+        {
+            if (!p.IsDecoration)
+                continue;
+            flowers++;
+            Assert.Equal(TownPiece.Flowers, p.Piece);
+            Assert.True(p.Height <= TownLayout.DecorationMaxHeight);
+            Assert.True(p.Width <= TownLayout.DecorationMaxWidth && p.Depth <= TownLayout.DecorationMaxWidth);
+            Assert.True(TownLayout.DecorationMaxHeight <= 0.4f && TownLayout.DecorationMaxWidth <= 0.6f);
+        }
+        Assert.InRange(flowers, 10, 200);
+    }
+
+    [Fact]
+    public void FlowerClumpsStayOffObstaclesPathsAndSpots()
     {
         var all = TownLayout.All;
         var spots = new[] { Places.HomeDoor, Places.ClinicDoor, Places.MillieSpot, Places.FurnitureShopSpot, Places.AbbySpot, Places.SignpostTown };
         for (int i = 0; i < all.Length; i++)
         {
             var p = all[i];
-            if (p.BuildingIndex >= 0)
+            if (!p.IsDecoration)
                 continue;
             string what = $"{p.Piece} at ({p.X}, {p.Z})";
             float r = p.Radius;
-            Assert.True(r > 0f, what);
             Assert.Equal(Area.Town, Areas.At(p.X, p.Z));
             Assert.True(Areas.Walkable(p.X, p.Z, r), what);
-            Assert.False(Ground.Blocks(p.X, p.Z), what);
-            foreach (var b in Buildings.All)
-                Assert.False(b.Contains(p.X, p.Z, r + 0.5f), $"{what} on {b.Kind}");
+            Assert.False(Ground.Blocks(p.X, p.Z, r), what);
             Assert.True(TownLayout.PathDistance(p.X, p.Z) >= r + 1.5f, $"{what} on a path");
             foreach (var spot in spots)
                 Assert.True(Vector2.Distance(new Vector2(p.X, p.Z), new Vector2(spot.Position.X, spot.Position.Z)) >= r + 1f, $"{what} by a spot");
             for (int k = i + 1; k < all.Length; k++)
-            {
-                var q = all[k];
-                if (q.BuildingIndex < 0)
-                    Assert.True(Vector2.Distance(new Vector2(p.X, p.Z), new Vector2(q.X, q.Z)) >= r + q.Radius - 0.02f, $"{what} overlaps {q.Piece}");
-            }
+                if (all[k].IsDecoration)
+                    Assert.True(Vector2.Distance(new Vector2(p.X, p.Z), new Vector2(all[k].X, all[k].Z)) >= r + all[k].Radius - 0.02f, $"{what} overlaps another");
         }
     }
 
@@ -255,22 +336,6 @@ public class TownTests
         var home = Buildings.First(BuildingKind.PlayerHouse);
         var front = home.Center + home.Front * (home.Depth * 0.5f + 1f);
         Assert.Equal(0f, TownLayout.PathDistance(front.X, front.Y), 3);
-    }
-
-    [Fact]
-    public void BenchesFaceTheFountain()
-    {
-        int benches = 0;
-        foreach (var p in TownLayout.All)
-        {
-            if (p.Piece != TownPiece.Bench)
-                continue;
-            benches++;
-            var front = new Vector2(-MathF.Sin(p.Yaw), -MathF.Cos(p.Yaw));
-            var toFountain = Vector2.Normalize(Buildings.TownSquare - new Vector2(p.X, p.Z));
-            Assert.True(Vector2.Dot(front, toFountain) > 0.99f);
-        }
-        Assert.True(benches > 0);
     }
 
     [Fact]
