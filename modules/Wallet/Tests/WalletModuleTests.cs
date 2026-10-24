@@ -15,13 +15,14 @@ public class WalletModuleTests
 
     /// <summary>
     /// Fake of the shell's bus: delivers messages to subscribers like the real one, and records
-    /// every WalletState and CoinsEarned published.
+    /// every WalletState, CoinsEarned and SpendResult published.
     /// </summary>
     private sealed class FakeBus : IMessageBus
     {
         private readonly Dictionary<Type, List<object>> _handlers = new();
         public readonly List<WalletState> States = new();
         public readonly List<CoinsEarned> Earned = new();
+        public readonly List<SpendResult> Results = new();
         public readonly List<Type> Subscribed = new();
 
         public void Subscribe<T>(IMessageHandler<T> handler) where T : struct
@@ -38,6 +39,8 @@ public class WalletModuleTests
                 States.Add(state);
             if (message is CoinsEarned earned)
                 Earned.Add(earned);
+            if (message is SpendResult result)
+                Results.Add(result);
             if (_handlers.TryGetValue(typeof(T), out var list))
                 foreach (var handler in list)
                     ((IMessageHandler<T>)handler).Handle(message);
@@ -141,7 +144,7 @@ public class WalletModuleTests
             wallet.Tick(Step);
         Assert.Equal(250, wallet.Coins);
         Assert.All(bus.States, s => Assert.Equal(250, s.Coins));
-        Assert.Equal(new[] { typeof(MonsterKilled) }, bus.Subscribed);
+        Assert.DoesNotContain(typeof(PlayerDefeated), bus.Subscribed);
 
         // Coins earned after coming back add to the ones kept.
         bus.Publish(Kill(3, MonsterKind.Ant, Player));
@@ -181,6 +184,126 @@ public class WalletModuleTests
         Assert.Equal(n, wallet.EarnedCount);
         for (int i = n - WalletModule.RecentCapacity; i < n; i++)
             Assert.Equal(i, wallet.Recent[i % WalletModule.RecentCapacity].Position.X);
+    }
+
+    private static PlayerState PlayerAt(Vector3 position) =>
+        new(position, 0f, Vector3.Zero, true, 10, 10, true, CharacterKind.Girl);
+
+    [Fact]
+    public void SpendingTakesTheCoinsWhenThereAreEnough()
+    {
+        var bus = new FakeBus();
+        var wallet = Started(bus);
+        bus.Publish(new GrantCoins(5000, "test"));
+        bus.Publish(new SpendCoins(7, 3000, "Mushroom Crow"));
+        var result = Assert.Single(bus.Results);
+        Assert.Equal(7, result.RequestId);
+        Assert.True(result.Ok);
+        Assert.Equal(2000, result.CoinsLeft);
+        Assert.Equal(2000, wallet.Coins);
+        wallet.Tick(Step);
+        Assert.Equal(2000, bus.States[^1].Coins);
+        // Spending is not earning: no "+N" pop-up for it.
+        Assert.Single(bus.Earned);
+    }
+
+    [Fact]
+    public void SpendingEverythingIsAllowed()
+    {
+        var bus = new FakeBus();
+        var wallet = Started(bus);
+        bus.Publish(new GrantCoins(3000, "test"));
+        bus.Publish(new SpendCoins(1, 3000, "Mushroom Crow"));
+        var result = Assert.Single(bus.Results);
+        Assert.True(result.Ok);
+        Assert.Equal(0, result.CoinsLeft);
+        Assert.Equal(0, wallet.Coins);
+    }
+
+    [Fact]
+    public void SpendingMoreThanThereIsChangesNothing()
+    {
+        var bus = new FakeBus();
+        var wallet = Started(bus);
+        bus.Publish(Kill(1, MonsterKind.Tarantula, Player));
+        bus.Publish(new SpendCoins(42, 3000, "Mushroom Crow"));
+        var result = Assert.Single(bus.Results);
+        Assert.Equal(42, result.RequestId);
+        Assert.False(result.Ok);
+        Assert.Equal(200, result.CoinsLeft);
+        Assert.Equal(200, wallet.Coins);
+        wallet.Tick(Step);
+        Assert.Equal(200, bus.States[^1].Coins);
+    }
+
+    [Fact]
+    public void ANegativeSpendIsRefused()
+    {
+        var bus = new FakeBus();
+        var wallet = Started(bus);
+        bus.Publish(new GrantCoins(100, "test"));
+        bus.Publish(new SpendCoins(3, -500, "trick"));
+        var result = Assert.Single(bus.Results);
+        Assert.False(result.Ok);
+        Assert.Equal(100, result.CoinsLeft);
+        Assert.Equal(100, wallet.Coins);
+    }
+
+    [Fact]
+    public void EachSpendIsAnsweredOnceInOrder()
+    {
+        var bus = new FakeBus();
+        var wallet = Started(bus);
+        bus.Publish(new GrantCoins(500, "test"));
+        bus.Publish(new SpendCoins(1, 300, "chair"));
+        bus.Publish(new SpendCoins(2, 300, "table"));
+        bus.Publish(new SpendCoins(3, 200, "lamp"));
+        Assert.Equal(new[] { 1, 2, 3 }, bus.Results.ConvertAll(r => r.RequestId));
+        Assert.Equal(new[] { true, false, true }, bus.Results.ConvertAll(r => r.Ok));
+        Assert.Equal(new[] { 200, 200, 0 }, bus.Results.ConvertAll(r => r.CoinsLeft));
+        Assert.Equal(0, wallet.Coins);
+    }
+
+    [Fact]
+    public void GrantingAddsCoinsAndPopsThemUpAtThePlayer()
+    {
+        var bus = new FakeBus();
+        var wallet = Started(bus);
+        bus.Publish(Kill(1, MonsterKind.Ant, Player));
+        var where = new Vector3(12f, 0.25f, -30f);
+        bus.Publish(PlayerAt(new Vector3(1f, 0f, 1f)));
+        bus.Publish(PlayerAt(where));
+        bus.Publish(new GrantCoins(500, "Millie's quest"));
+        Assert.Equal(550, wallet.Coins);
+        wallet.Tick(Step);
+        Assert.Equal(550, bus.States[^1].Coins);
+        Assert.Equal(2, bus.Earned.Count);
+        Assert.Equal(500, bus.Earned[1].Amount);
+        Assert.Equal(where, bus.Earned[1].Position);
+        Assert.Equal(2, wallet.EarnedCount);
+        Assert.Equal(where, wallet.Recent[1].Position);
+        Assert.Empty(bus.Results);
+    }
+
+    [Fact]
+    public void GrantingNothingAddsNothing()
+    {
+        var bus = new FakeBus();
+        var wallet = Started(bus);
+        bus.Publish(new GrantCoins(0, "nothing"));
+        bus.Publish(new GrantCoins(-100, "negative"));
+        Assert.Equal(0, wallet.Coins);
+        Assert.Empty(bus.Earned);
+    }
+
+    [Fact]
+    public void GrantingStopsAtAFullWallet()
+    {
+        var bus = new FakeBus();
+        var wallet = Started(bus);
+        bus.Publish(new GrantCoins(int.MaxValue - 10, "lots"));
+        bus.Publish(new GrantCoins(500, "more"));
+        Assert.Equal(int.MaxValue, wallet.Coins);
     }
 
     [Fact]
