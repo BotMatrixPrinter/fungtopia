@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Fungtopia.PetCity</RootNamespace>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../shell/Contract/Fungtopia.Shell.Contract.csproj" />
+    <ProjectReference Include="../Contract/Fungtopia.PetCity.Contract.csproj" />
+    <ProjectReference Include="../../Map/Contract/Fungtopia.Map.Contract.csproj" />
+    <ProjectReference Include="../../DayNight/Contract/Fungtopia.DayNight.Contract.csproj" />
+  </ItemGroup>
+</Project>
