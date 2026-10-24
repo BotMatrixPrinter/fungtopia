@@ -4,6 +4,7 @@ using Fungtopia.Input;
 using Fungtopia.Map;
 using Fungtopia.Pet;
 using Fungtopia.Player;
+using Fungtopia.Save;
 using Fungtopia.Shell;
 using Fungtopia.StartScreen;
 using Fungtopia.Wallet;
@@ -102,12 +103,13 @@ public struct HomePet
 /// town (bought with <see cref="SpendCoins"/>), placing furniture on the home's floor grid, and
 /// the pets that stay at home, and the wardrobe that comes with the house (Interact publishes
 /// <see cref="OpenWardrobe"/>; nothing else is usable while a wardrobe screen is open, and
-/// nothing at all while the start screen is open). Publishes <see cref="HomeState"/> every tick. Kept for the session
-/// only (not saved to disk yet).
+/// nothing at all while the start screen is open). Publishes <see cref="HomeState"/> every tick. Its furniture
+/// (owned and placed) is saved through the Save module: <see cref="CollectSave"/> is answered with a
+/// <see cref="SavePart"/> for <see cref="SaveModules.Home"/> and <see cref="RestorePart"/> restores it (<see cref="HomeSave"/>).
 /// </summary>
 public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessageHandler<PlayerInput>,
     IMessageHandler<SpendResult>, IMessageHandler<WalletState>, IMessageHandler<OwnedPets>, IMessageHandler<WardrobeState>,
-    IMessageHandler<StartScreenState>
+    IMessageHandler<StartScreenState>, IMessageHandler<CollectSave>, IMessageHandler<RestorePart>
 {
     /// <summary>How many pieces of furniture the player can own.</summary>
     public const int MaxItems = 64;
@@ -151,6 +153,7 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
     private uint _random = 0x9E3779B9u;
     private bool _shopFocus, _decorateFocus;
     private MenuRepeat _navigation;
+    private readonly FurnitureItem[] _restored = new FurnitureItem[MaxItems];
 
     public HomeModule()
     {
@@ -229,6 +232,9 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
     public int CursorRotation { get; private set; }
 
     /// <summary>Whether the held item fits where the cursor is.</summary>
+    /// <summary>Where a refused restore is reported (one line per refused <see cref="RestorePart"/>); the console by default.</summary>
+    public Action<string> Log { get; set; } = Console.WriteLine;
+
     public bool CanPlaceHeld => Held >= 0 && CanPlace(_items[Held].Kind, CursorColumn, CursorRow, CursorRotation);
 
     public void Start(IMessageBus bus)
@@ -242,6 +248,8 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
         bus.Subscribe<OwnedPets>(this);
         bus.Subscribe<WardrobeState>(this);
         bus.Subscribe<StartScreenState>(this);
+        bus.Subscribe<CollectSave>(this);
+        bus.Subscribe<RestorePart>(this);
     }
 
     public void Tick(in TickContext context)
@@ -313,6 +321,65 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
         {
             Answer(ShopResult.TooFewCoins, _pendingKind);
         }
+    }
+
+    public void Handle(in CollectSave message) =>
+        _bus!.Publish(new SavePart(message.RequestId, SaveModules.Home, HomeSave.Write(Items)));
+
+    /// <summary>
+    /// Restores the furniture saved by <see cref="CollectSave"/>, exactly, and nothing else happens:
+    /// no purchase, no shop result, no coins. The shop and placement mode close and a purchase still
+    /// waiting for its answer is dropped. Missing, unreadable or unknown-version JSON, or placed
+    /// furniture that does not fit the room, keeps the furniture as it is and logs one line.
+    /// </summary>
+    public void Handle(in RestorePart message)
+    {
+        if (message.Module != SaveModules.Home)
+            return;
+        if (!HomeSave.TryRead(message.Json, _restored, out int count, out string error) || !Fits(_restored, count, out error))
+        {
+            Log("Fungtopia: Home: saved furniture not restored, keeping it as it is: " + error);
+            return;
+        }
+        Array.Clear(_items);
+        Array.Copy(_restored, _items, count);
+        ItemCount = count;
+        ShopOpen = false;
+        StopDecorating();
+        _pendingRequest = -1;
+        _interact = false;
+        for (int i = 0; i < _pets.Length; i++)
+        {
+            // Bed indexes refer to the old furniture: each pet picks again.
+            _pets[i].BedItem = -1;
+            _pets[i].Asleep = false;
+            _pets[i].Timer = 0f;
+        }
+        RebuildPetGrid();
+    }
+
+    /// <summary>Whether every placed item of <paramref name="items"/> fits the room without overlapping another.</summary>
+    private static bool Fits(FurnitureItem[] items, int count, out string error)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            if (!items[i].Placed)
+                continue;
+            for (int c = items[i].Column; c < items[i].Column + items[i].Width; c++)
+                for (int r = items[i].Row; r < items[i].Row + items[i].Depth; r++)
+                {
+                    bool overlap = false;
+                    for (int j = 0; j < i; j++)
+                        overlap |= items[j].Placed && items[j].Covers(c, r);
+                    if (!HomeRoom.Inside(c, r) || HomeRoom.KeptClear(c, r) || overlap)
+                    {
+                        error = "item " + i + " does not fit at " + items[i].Column + ", " + items[i].Row;
+                        return false;
+                    }
+                }
+        }
+        error = "";
+        return true;
     }
 
     public void Handle(in OwnedPets message)

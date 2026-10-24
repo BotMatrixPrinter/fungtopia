@@ -4,12 +4,12 @@ The player's house in Mushroom Town: the front door (in and out by teleporting),
 shop in town, arranging furniture on the home's floor grid, the pets that stay at home, and the
 wardrobe (the Wardrobe module's screen for changing your look). The house starts cozy but sparse:
 a basic bed under the round window and a big wooden wardrobe in the north-east corner (the room,
-its windows and its door are drawn by the Map module). Everything is kept for the session only (saving to disk comes
-later).
+its windows and its door are drawn by the Map module). The furniture is saved with the game
+through the Save module (see **Saving** below).
 
 - `Contract/` — `Fungtopia.Home.Contract` (namespace `Fungtopia.Home`): `HomeState`.
 - `Core/` — `Fungtopia.Home.Core`: `HomeModule`, the module's one `IModule`; `Furniture` (the
-  catalog), `HomeRoom` (the floor grid), `HomeText` (the texts and hint lines), `MenuRepeat` (a held
+  catalog), `HomeRoom` (the floor grid), `HomeText` (the texts and hint lines), `HomeSave` (the saved furniture's JSON), `MenuRepeat` (a held
   menu direction: one step at once, repeating after a short delay).
 - `Godot/` — `Main.tscn` with `HomeView` (furniture, the catalog book, pets at home, the grid and
   cursor while decorating), `HomePanels` (prompt, shop catalog and decorating help, a
@@ -32,7 +32,8 @@ Test it with `./test.sh Home` from the repository root.
 
 `HomeModule` reads `Fungtopia.Player.PlayerState`, `Fungtopia.Input.PlayerInput` (`Interact`),
 `Fungtopia.Wallet.WalletState` and `SpendResult`, `Fungtopia.Pet.OwnedPets`,
-`Fungtopia.Wardrobe.WardrobeState` and `Fungtopia.StartScreen.StartScreenState`; it publishes `Fungtopia.Player.TeleportPlayer`,
+`Fungtopia.Wardrobe.WardrobeState`, `Fungtopia.StartScreen.StartScreenState` and `Fungtopia.Save.CollectSave` and
+`RestorePart`; it publishes `Fungtopia.Save.SavePart`, `Fungtopia.Player.TeleportPlayer`,
 `Fungtopia.Wallet.SpendCoins`, `Fungtopia.Wardrobe.OpenWardrobe`, `Fungtopia.Input.UiFocus` and `HomeState`, and takes the
 world's spots from the Map Contract (`Places`, `Areas`). An Interact press is acted on at the
 next tick, for whatever `Prompt` shows then (only while the player is alive, and never while
@@ -87,6 +88,17 @@ the start screen is open, below):
   has taken, `OnBed`, else on the floor) and plays (chasing another pet at home, or zooming
   around), 3 to 14 s at a time, steering clear of furniture. The order is a fixed pseudo-random
   sequence: the same every run.
+
+- **Saving.** `CollectSave(RequestId)` is answered at once with one `SavePart(RequestId, "Home",
+  json)`: every owned item in order, compact JSON from `HomeSave` (version `HomeSave.Version`, 1),
+  e.g. `{"v":1,"items":[{"k":"BasicBed","p":true,"c":2,"r":0,"t":0}]}` (kind by name, placed,
+  north-west column and row, quarter turns). `RestorePart("Home", json)` puts back exactly that
+  furniture and nothing else happens (no `SpendCoins`, no shop result, no coins); the shop and
+  placement mode close, a purchase still waiting for its answer is dropped, and pets choose their
+  beds again. Missing or unreadable JSON, another version, an unknown kind, more than 64 items, a
+  turn outside 0..3, or placed furniture outside the room, over a kept-clear cell or overlapping
+  keeps the furniture as it was and logs one line (`HomeModule.Log`, the console by default).
+  Pets at home and the shop's highlight are not saved (owned pets are the Pet module's).
 
 Furniture footprints, in cells: Basic Bed 2 x 4, Mushroom Bed 3 x 4, Rug 4 x 3, Table 2 x 2,
 Pet Bed 2 x 2, Bookshelf 3 x 1, the rest 1 x 1. No allocations per tick.

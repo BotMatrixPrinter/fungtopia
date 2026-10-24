@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Numerics;
 using Fungtopia.Input;
 using Fungtopia.Map;
 using Fungtopia.Pet;
 using Fungtopia.Player;
+using Fungtopia.Save;
 using Fungtopia.Shell;
 using Fungtopia.StartScreen;
 using Fungtopia.Wallet;
@@ -26,6 +28,7 @@ public class HomeModuleTests
         public readonly List<SpendCoins> Spends = new();
         public readonly List<HomeState> States = new();
         public readonly List<UiFocus> Focus = new();
+        public readonly List<SavePart> SaveParts = new();
         public int OpenWardrobes;
         public int? Coins;
 
@@ -44,6 +47,8 @@ public class HomeModuleTests
                 States.Add(state);
             if (message is UiFocus focus)
                 Focus.Add(focus);
+            if (message is SavePart part)
+                SaveParts.Add(part);
             if (message is OpenWardrobe)
                 OpenWardrobes++;
             if (_handlers.TryGetValue(typeof(T), out var list))
@@ -885,5 +890,170 @@ public class HomeModuleTests
             return home.Pets[(int)PetKind.Dog].Position;
         }
         Assert.Equal(Run(), Run());
+    }
+
+    // Saving and loading
+
+    /// <summary>A house with furniture bought, placed (one turned) and one left in the inventory.</summary>
+    private static (HomeModule home, FakeBus bus) Furnished()
+    {
+        var (home, bus) = Started(coins: 2000);
+        home.Buy(FurnitureKind.Rug);
+        home.Buy(FurnitureKind.Bookshelf);
+        home.Buy(FurnitureKind.PetBed);
+        home.Buy(FurnitureKind.Lamp);
+        Inside(home, bus);
+        home.StartDecorating();
+        home.MoveCursor(-100, -100);
+        home.MoveCursor(8, 2);
+        Assert.True(home.PlaceOrPickUp()); // the rug
+        home.NextItem(1);
+        home.MoveCursor(-100, -100);
+        home.MoveCursor(0, 2);
+        home.Rotate();
+        Assert.True(home.PlaceOrPickUp()); // the bookshelf, a quarter turn
+        home.NextItem(1);
+        home.MoveCursor(-100, -100);
+        home.MoveCursor(16, 4);
+        Assert.True(home.PlaceOrPickUp()); // the pet bed; the lamp stays in the inventory
+        home.Back();
+        home.Tick(Step);
+        return (home, bus);
+    }
+
+    private static string Save(HomeModule home, FakeBus bus, int requestId = 42)
+    {
+        bus.Publish(new CollectSave(requestId));
+        var part = Assert.Single(bus.SaveParts);
+        Assert.Equal(requestId, part.RequestId);
+        Assert.Equal(SaveModules.Home, part.Module);
+        return part.Json;
+    }
+
+    [Fact]
+    public void CollectSaveIsAnsweredAtOnceWithCompactVersionedJson()
+    {
+        var (home, bus) = Furnished();
+        string json = Save(home, bus, 7);
+        Assert.StartsWith("{\"v\":" + HomeSave.Version + ",", json);
+        Assert.DoesNotContain(" ", json);
+        Assert.DoesNotContain("\n", json);
+        Assert.Contains("\"Bookshelf\"", json);
+    }
+
+    [Fact]
+    public void SaveThenRestoreGivesBackTheSameFurnitureAndNothingElseHappens()
+    {
+        var (home, bus) = Furnished();
+        var saved = home.Items.ToArray();
+        Assert.Equal(5, saved.Length);
+        Assert.Equal(4, home.ItemsPlaced);
+        string json = Save(home, bus);
+
+        var (loaded, loadedBus) = Started(coins: 500);
+        var logs = new List<string>();
+        loaded.Log = logs.Add;
+        loadedBus.Publish(new RestorePart(SaveModules.Home, json));
+
+        Assert.Equal(saved, loaded.Items.ToArray());
+        Assert.Equal(4, loaded.ItemsPlaced);
+        Assert.Equal(1, loaded.Items[2].Rotation);
+        Assert.Empty(logs);
+        // No purchase, no shop result, no coins spent.
+        Assert.Empty(loadedBus.Spends);
+        Assert.Equal(500, loadedBus.Coins);
+        Assert.Equal(0, loaded.ShopResults);
+        Assert.Equal(ShopResult.None, loaded.LastShopResult);
+        loaded.Tick(Step);
+        Assert.Equal(new HomeState(5, 4, false), loadedBus.States[^1]);
+        Assert.Empty(loadedBus.Focus);
+
+        // Saving the restored house gives the same JSON back.
+        Assert.Equal(json, Save(loaded, loadedBus));
+    }
+
+    [Fact]
+    public void RestoringReplacesTheFurnitureExactly()
+    {
+        // A save of the starting house only, restored over a furnished one.
+        var (fresh, freshBus) = Started();
+        var defaults = fresh.Items.ToArray();
+        string json = Save(fresh, freshBus);
+
+        var (home, bus) = Furnished();
+        home.StartDecorating();
+        bus.Publish(new RestorePart(SaveModules.Home, json));
+        Assert.Equal(defaults, home.Items.ToArray());
+        Assert.False(home.Decorating);
+        Assert.Equal(-1, home.Held);
+        home.Tick(Step);
+        Assert.Equal(new HomeState(1, 1, false), bus.States[^1]);
+    }
+
+    [Fact]
+    public void RestoringDropsAPurchaseStillWaitingForItsAnswer()
+    {
+        var (home, bus) = Started();
+        string json = Save(home, bus);
+        home.Buy(FurnitureKind.Chair);
+        var spend = Assert.Single(bus.Spends);
+        bus.Publish(new RestorePart(SaveModules.Home, json));
+        bus.Publish(new SpendResult(spend.RequestId, true, 0));
+        Assert.Equal(1, home.ItemCount);
+        Assert.Equal(0, home.ShopResults);
+    }
+
+    [Fact]
+    public void RestorePartsOfOtherModulesAreIgnored()
+    {
+        var (home, bus) = Furnished();
+        var before = home.Items.ToArray();
+        var logs = new List<string>();
+        home.Log = logs.Add;
+        bus.Publish(new RestorePart(SaveModules.Wallet, "{\"v\":1,\"items\":[]}"));
+        Assert.Equal(before, home.Items.ToArray());
+        Assert.Empty(logs);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("not json")]
+    [InlineData("{\"v\":1,\"items\":[{\"k\":\"Rug\"")]
+    [InlineData("[1,2,3]")]
+    [InlineData("{\"v\":2,\"items\":[]}")]
+    [InlineData("{\"items\":[]}")]
+    [InlineData("{\"v\":1,\"items\":[{\"k\":\"Sofa\",\"p\":false,\"c\":0,\"r\":0,\"t\":0}]}")]
+    [InlineData("{\"v\":1,\"items\":[{\"k\":99,\"p\":false,\"c\":0,\"r\":0,\"t\":0}]}")]
+    [InlineData("{\"v\":1,\"items\":[{\"k\":\"Rug\",\"p\":false,\"c\":0,\"r\":0,\"t\":4}]}")]
+    [InlineData("{\"v\":1,\"items\":[{\"k\":\"Rug\",\"p\":true,\"c\":50,\"r\":0,\"t\":0}]}")]
+    [InlineData("{\"v\":1,\"items\":[{\"k\":\"Rug\",\"p\":true,\"c\":8,\"r\":2,\"t\":0},{\"k\":\"Chair\",\"p\":true,\"c\":9,\"r\":3,\"t\":0}]}")]
+    [InlineData("{\"v\":1,\"items\":[null]}")]
+    public void BadSavedJsonKeepsTheDefaultsAndLogsOnce(string? json)
+    {
+        var (fresh, _) = Started();
+        var defaults = fresh.Items.ToArray();
+        var (home, bus) = Started();
+        var logs = new List<string>();
+        home.Log = logs.Add;
+        bus.Publish(new RestorePart(SaveModules.Home, json!));
+        Assert.Equal(defaults, home.Items.ToArray());
+        Assert.Single(logs);
+        Assert.DoesNotContain("ERROR", logs[0]);
+        home.Tick(Step);
+        Assert.Equal(new HomeState(1, 1, false), bus.States[^1]);
+    }
+
+    [Fact]
+    public void TooMuchSavedFurnitureKeepsTheDefaults()
+    {
+        var item = "{\"k\":\"Lamp\",\"p\":false,\"c\":0,\"r\":0,\"t\":0}";
+        string json = "{\"v\":1,\"items\":[" + string.Join(",", Enumerable.Repeat(item, HomeModule.MaxItems + 1)) + "]}";
+        var (home, bus) = Started();
+        var logs = new List<string>();
+        home.Log = logs.Add;
+        bus.Publish(new RestorePart(SaveModules.Home, json));
+        Assert.Equal(1, home.ItemCount);
+        Assert.Single(logs);
     }
 }
