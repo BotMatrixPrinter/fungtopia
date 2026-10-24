@@ -85,12 +85,43 @@ public partial class PetCityView : Node3D, IModuleView
             _storeLight.LightEnergy = night ? 4f : 1.6f;
     }
 
+    /// <summary>The model's transform: standing on the high side of its footing (the plinth fills in below).</summary>
     private static Transform3D Placed(in Piece piece, Vector3 scale) =>
-        new(new Basis(Vector3.Up, piece.Yaw).Scaled(scale), new Vector3(piece.Position.X, piece.Position.Y, piece.Position.Z));
+        new(new Basis(Vector3.Up, piece.Yaw).Scaled(scale), new Vector3(piece.Position.X, piece.Footing.High, piece.Position.Z));
+
+    /// <summary>
+    /// A stone plinth under a building, from its footing's base (in the ground) a little above its
+    /// high side, slightly wider than its footprint and flaring wider at the bottom, so no edge floats.
+    /// </summary>
+    private void AddPlinth(in Piece piece, string name, Color color)
+    {
+        float height = piece.Footing.Extension + PetCityLayout.PlinthAbove;
+        float w = piece.Size.X + 2f * PetCityLayout.PlinthOverhang, d = piece.Size.Z + 2f * PetCityLayout.PlinthOverhang;
+        var top = new BoxMesh { Size = new Vector3(w, height, d) };
+        var plinth = new MeshInstance3D
+        {
+            Name = name,
+            Mesh = top,
+            MaterialOverride = PetCityModels.Toon(color),
+            Transform = new Transform3D(new Basis(Vector3.Up, piece.Yaw),
+                new Vector3(piece.Position.X, piece.Position.Y + height * 0.5f, piece.Position.Z)),
+        };
+        AddChild(plinth);
+        // The skirt: a lower, wider step that widens into the ground.
+        float skirt = Planting.Sink + PetCityLayout.PlinthAbove * 0.5f;
+        plinth.AddChild(new MeshInstance3D
+        {
+            Name = "Skirt",
+            Mesh = new BoxMesh { Size = new Vector3(w + 0.5f, skirt, d + 0.5f) },
+            MaterialOverride = PetCityModels.Toon(color.Darkened(0.12f)),
+            Position = new Vector3(0f, (skirt - height) * 0.5f, 0f),
+        });
+    }
 
     private void AddCityBlock(in Piece piece)
     {
         var style = Styles[piece.Style];
+        AddPlinth(piece, $"Plinth{piece.BuildingIndex}", style.Wall.Darkened(0.35f));
         var root = new Node3D
         {
             Name = $"CityBlock{piece.BuildingIndex}",
@@ -111,6 +142,7 @@ public partial class PetCityView : Node3D, IModuleView
     private void AddPetStore(in Piece piece)
     {
         var scale = new Vector3(piece.Size.X / 18f, piece.Size.Y / 11f, piece.Size.Z / 12f);
+        AddPlinth(piece, "PetStorePlinth", new Color(0.86f, 0.7f, 0.78f));
         var root = new Node3D { Name = "PetStore", Transform = Placed(piece, scale) };
         AddChild(root);
         foreach (var name in new[] { "PetStore", "PetStoreInside" })
@@ -135,7 +167,7 @@ public partial class PetCityView : Node3D, IModuleView
         {
             var at = PetCityLayout.Counter;
             counter.Transform = new Transform3D(new Basis(Vector3.Up, at.Yaw),
-                new Vector3(at.Position.X, piece.Position.Y + floor * scale.Y, at.Position.Z));
+                new Vector3(at.Position.X, piece.Footing.High + floor * scale.Y, at.Position.Z));
             AddChild(counter);
         }
 
@@ -164,8 +196,23 @@ public partial class PetCityView : Node3D, IModuleView
             return;
         float across = prop.Radius / radius;
         node.Name = $"{name}{prop.PropIndex}";
-        node.Transform = new Transform3D(new Basis(Vector3.Up, prop.Yaw).Scaled(new Vector3(across, prop.Height / height, across)),
+        // From the base in the ground up to its full height above the high side: the stem reaches down.
+        float tall = PetCityLayout.DrawnHeight(prop);
+        node.Transform = new Transform3D(new Basis(Vector3.Up, prop.Yaw).Scaled(new Vector3(across, tall / height, across)),
             new Vector3(prop.Position.X, prop.Position.Y, prop.Position.Z));
         AddChild(node);
+        float flare = PetCityLayout.FlareRadius(prop);
+        if (flare > 0f)
+        {
+            // A root flare: a collar widening from the base's own radius into the ground.
+            float h = prop.Footing.Extension + PetCityLayout.FlareAbove;
+            AddChild(new MeshInstance3D
+            {
+                Name = $"Flare{prop.PropIndex}",
+                Mesh = new CylinderMesh { TopRadius = prop.Radius * 1.02f, BottomRadius = flare, Height = h, RadialSegments = 24, Rings = 1 },
+                MaterialOverride = PetCityModels.Toon(prop.Kind == PropKind.Statue ? new Color(0.62f, 0.66f, 0.64f) : new Color(0.78f, 0.62f, 0.5f)),
+                Position = new Vector3(prop.Position.X, prop.Position.Y + h * 0.5f, prop.Position.Z),
+            });
+        }
     }
 }

@@ -11,7 +11,7 @@ letters and hearts and the lamps glow.
 - `Contract/` — `Fungtopia.PetCity.Contract` (namespace `Fungtopia.PetCity`): empty; the module
   publishes no messages.
 - `Core/` — `Fungtopia.PetCity.Core`: `PetCityModule`, the module's one `IModule`; `PetCityLayout`
-  (what is drawn where).
+  (what is drawn where); `Planting` (how things stand on the uneven ground).
 - `Godot/` — `Main.tscn` with `PetCityView`, `PetCityModels` (loads `petcity.glb` at run time, toon
   materials, night glow); `Preview.tscn` (`PetCityPreview`, for screenshots); `Shaders/` (toon
   surface, ink outline).
@@ -29,21 +29,34 @@ nothing per tick and publishes nothing.
 `PetCityLayout.Pieces` (fixed data, the same every run) holds one `Piece` per `Buildings.All`
 building of `Area.PetCity`, in the Map's order, and nothing else:
 
-- `Kind` (`PetStore`, `CityBlock`), `BuildingIndex` (into `Buildings.All`), `Position` (the building's x, z; y the lowest ground under its footprint, so no corner
-  floats), `Yaw` (its `Rotation`), `Size` (`Width`, `Height`, `Depth`).
+- `Kind` (`PetStore`, `CityBlock`), `BuildingIndex` (into `Buildings.All`), `Position` (the building's x, z; y its `Footing`'s base),
+  `Footing` (`FootingOf(building)`, `Planting.Rect`), `Yaw` (its `Rotation`), `Size` (`Width`, `Height`, `Depth`).
 - City blocks: `Stories`, the upper stories that fit their height (`StoriesFor`: a 4 m shop floor,
   3 m stories, a 3 m roof; 3..10), and `Style` (one of four color schemes and roofs, in turn).
 - `CityProps`: one `CityProp` per `Props.All` prop of `Area.PetCity`, in the Map's order and
-  nothing else: `Kind`, `PropIndex` (into `Props.All`), `Position` (its x, z; y the lowest ground
-  under it, `FootHeight`), `Yaw` (its `Rotation`), `Radius`, `Height`. `PropModel(kind)` names the
+  nothing else: `Kind`, `PropIndex` (into `Props.All`), `Position` (its x, z; y its `Footing`'s
+  base), `Footing` (`FootingOf(prop)`, `Planting.Round`), `Yaw` (its `Rotation`), `Radius`, `Height`;
+  `DrawnHeight(prop)` (its height plus the footing's extension) and `FlareRadius(prop)` (planters
+  and the statue get a root flare; lamps and benches none). `PropModel(kind)` names the
   glb object that draws a kind and the radius and height it is built at (null for a kind Pet City
   has no model of: the view warns and draws nothing).
+- `Planting`: a `Footing` (`Base`, `Low`, `High`, `Extension` = `High - Base`) from
+  `Ground.HeightAt` sampled under a footprint: `Round(x, z, radius)` samples the center and rings
+  out to the rim (at least 16 points each, at most 0.5 m apart, rings at most 1 m apart),
+  `Rect(building)` a 7 x 7 grid over the footprint, edges and corners included. The base is the
+  lowest sample less `Sink` (0.15 m), so no part of a base floats and none sinks deep; what stands
+  there is extended down by `Extension`, so its height above the high side (`High`) stays the same.
 - `Counter`: the pet store's counter, along the inside of its open front right behind
   `Places.LucySpot`, facing out like it.
 
 ## View
 
-`PetCityView` puts down each piece from `petcity.glb`: a city block is `Tower<Stories>` with a
+`PetCityView` plants everything on its `Footing`: each building's model stands at the footing's
+high side on a stone plinth (`PlinthOverhang` wider than the footprint, a wider skirt step at its
+foot) from the base in the ground up to `PlinthAbove` over the high side; each prop is scaled from
+its base to `DrawnHeight`, so a lamp's cap stays at its full height above the high side, and
+planters and the statue get a root flare (a collar from their radius out to `FlareRadius` in the
+ground, `FlareAbove` high over the high side). It puts down each piece from `petcity.glb`: a city block is `Tower<Stories>` with a
 roof (`RoofCap` or `RoofTerrace` by style) scaled to the building's exact width, height and depth,
 its walls and roof recolored by style (mint/red, lilac/orange, yellow/blue, sky/pink); the pet store
 is `PetStore` and `PetStoreInside` scaled to its footprint, the `Counter` at
@@ -76,5 +89,6 @@ Only the pets have eyes; buildings, caps, signs, lamps and the statue never do.
 ## Screenshots
 
 `./screenshot.sh modules/PetCity/Godot/Preview.tscn` shows the plaza from the south entrance, on
-the Map's ground. `PETCITY_PREVIEW=store`, `block` or `props` (the statue, benches and lamps) picks another view; add `night`
+the Map's ground. `PETCITY_PREVIEW=store`, `block`, `props` (the statue, benches and lamps) or `slope` (the building
+with the most drop under it, from its low corner, on its plinth) picks another view; add `night`
 (for example `PETCITY_PREVIEW=store,night`) for the city at night.

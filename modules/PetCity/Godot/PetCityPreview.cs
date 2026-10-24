@@ -58,7 +58,33 @@ public partial class PetCityPreview : Node3D
         var store = Places.LucySpot.Position;
         var c = Buildings.CityPlaza;
         var plaza = new System.Numerics.Vector3(c.X, Ground.HeightAt(c.X, c.Y), c.Y);
-        if (mode.Contains("store"))
+        if (mode.Contains("slope"))
+        {
+            // The building with the most drop under its footprint, from its low corner.
+            var steep = PetCityLayout.Pieces[0];
+            foreach (var piece in PetCityLayout.Pieces)
+                if (piece.Footing.High - piece.Footing.Low > steep.Footing.High - steep.Footing.Low)
+                    steep = piece;
+            var b = Buildings.All[steep.BuildingIndex];
+            var low = b.Center;
+            float lowest = float.MaxValue;
+            for (int i = 0; i < Planting.SidePoints; i++)
+            for (int j = 0; j < Planting.SidePoints; j++)
+            {
+                var q = Planting.GridPoint(b, i, j);
+                float h = Ground.HeightAt(q.X, q.Y);
+                if (h < lowest)
+                {
+                    lowest = h;
+                    low = q;
+                }
+            }
+            var outward = System.Numerics.Vector2.Normalize(low - b.Center);
+            var eye = low + outward * 9f + new System.Numerics.Vector2(outward.Y, -outward.X) * 4f;
+            camera.LookAtFromPosition(new Vector3(eye.X, Ground.HeightAt(eye.X, eye.Y) + 1.6f, eye.Y),
+                new Vector3(low.X, lowest + 1.2f, low.Y), Vector3.Up);
+        }
+        else if (mode.Contains("store"))
             camera.LookAtFromPosition(G(store) + new Vector3(4f, 3.2f, 13f), G(store) + new Vector3(0f, 2.6f, -4f), Vector3.Up);
         else if (mode.Contains("props"))
             camera.LookAtFromPosition(G(plaza) + new Vector3(-6f, 3.2f, 13f), G(plaza) + new Vector3(-20f, 1.2f, -2f), Vector3.Up);

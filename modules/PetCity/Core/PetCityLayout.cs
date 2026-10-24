@@ -15,8 +15,9 @@ public enum PieceKind
 }
 
 /// <summary>
-/// One piece the view draws: a model standing at <see cref="Position"/> (its foot, on the lowest
-/// ground under its footprint), turned by <see cref="Yaw"/> (radians about +Y; at 0 its front
+/// One piece the view draws: planted at <see cref="Position"/> (y its <see cref="Footing"/>'s base,
+/// below the lowest ground under its footprint; the model stands on a plinth from there up to the
+/// footing's high side, so it never floats and keeps its full height above the ground), turned by <see cref="Yaw"/> (radians about +Y; at 0 its front
 /// faces -Z), and sized <see cref="Size"/> (width along its local X, height, depth along its local Z).
 /// </summary>
 public readonly struct Piece
@@ -31,9 +32,12 @@ public readonly struct Piece
     public readonly int Stories;
     /// <summary>Which color scheme and roof it gets (0..<see cref="PetCityLayout.StyleCount"/>-1).</summary>
     public readonly int Style;
+    /// <summary>How it is planted on the ground under its footprint (<see cref="Planting.Rect"/>).</summary>
+    public readonly Footing Footing;
 
-    public Piece(PieceKind kind, int buildingIndex, Vector3 position, float yaw, Vector3 size, int stories, int style)
+    public Piece(PieceKind kind, int buildingIndex, Vector3 position, float yaw, Vector3 size, int stories, int style, Footing footing)
     {
+        Footing = footing;
         Kind = kind;
         BuildingIndex = buildingIndex;
         Position = position;
@@ -46,8 +50,9 @@ public readonly struct Piece
 
 /// <summary>
 /// One solid prop of the Map the view draws (a lamp, bench, planter, statue, ...): the
-/// <see cref="Props.All"/> prop <see cref="PropIndex"/>, standing at <see cref="Position"/> (its x,
-/// z; y the lowest ground under it), turned by <see cref="Yaw"/> (its <see cref="Prop.Rotation"/>),
+/// <see cref="Props.All"/> prop <see cref="PropIndex"/>, planted at <see cref="Position"/> (its x,
+/// z; y its <see cref="Footing"/>'s base, below the lowest ground under it: the view stretches it down
+/// to there, its top staying <see cref="Height"/> above the high side), turned by <see cref="Yaw"/> (its <see cref="Prop.Rotation"/>),
 /// <see cref="Radius"/> (its obstacle radius; half the length of a bench) and <see cref="Height"/> as the Map says.
 /// </summary>
 public readonly struct CityProp
@@ -59,9 +64,12 @@ public readonly struct CityProp
     public readonly float Yaw;
     public readonly float Radius;
     public readonly float Height;
+    /// <summary>How it is planted on the ground under it (<see cref="Planting.Round"/>).</summary>
+    public readonly Footing Footing;
 
-    public CityProp(PropKind kind, int propIndex, Vector3 position, float yaw, float radius, float height)
+    public CityProp(PropKind kind, int propIndex, Vector3 position, float yaw, float radius, float height, Footing footing)
     {
+        Footing = footing;
         Kind = kind;
         PropIndex = propIndex;
         Position = position;
@@ -98,6 +106,15 @@ public static class PetCityLayout
     /// <summary>The pet store's counter: width along the store's front and depth (meters).</summary>
     public const float CounterWidth = 5f, CounterDepth = 1f;
 
+    /// <summary>How far a building's plinth rises above the high side of its footing (meters).</summary>
+    public const float PlinthAbove = 0.08f;
+
+    /// <summary>How far a building's plinth reaches past its footprint on every side (meters).</summary>
+    public const float PlinthOverhang = 0.12f;
+
+    /// <summary>How far a prop's root flare rises above the high side of its footing (meters).</summary>
+    public const float FlareAbove = 0.12f;
+
     private static readonly Piece[] s_pieces = Build();
     private static readonly CityProp[] s_props = BuildProps();
 
@@ -128,18 +145,8 @@ public static class PetCityLayout
         }
     }
 
-    /// <summary>The lowest ground height under a footprint (its corners, edge middles and center).</summary>
-    public static float FootHeight(in Building b)
-    {
-        float low = float.MaxValue;
-        for (int i = -1; i <= 1; i++)
-        for (int j = -1; j <= 1; j++)
-        {
-            var p = b.ToWorld(i * b.Width * 0.5f, j * b.Depth * 0.5f);
-            low = MathF.Min(low, Ground.HeightAt(p.X, p.Y));
-        }
-        return low;
-    }
+    /// <summary>How a building is planted: its whole footprint (<see cref="Planting.Rect"/>).</summary>
+    public static Footing FootingOf(in Building b) => Planting.Rect(b);
 
     /// <summary>
     /// The petcity.glb object that draws a prop of <paramref name="kind"/>, and the radius (half the
@@ -155,17 +162,21 @@ public static class PetCityLayout
         _ => null,
     };
 
-    /// <summary>The lowest ground height under a prop (its center and four points on its radius).</summary>
-    public static float FootHeight(in Prop p)
-    {
-        float low = Ground.HeightAt(p.X, p.Z);
-        for (int k = 0; k < 4; k++)
-        {
-            float a = k * MathF.PI * 0.5f;
-            low = MathF.Min(low, Ground.HeightAt(p.X + MathF.Sin(a) * p.Radius, p.Z + MathF.Cos(a) * p.Radius));
-        }
-        return low;
-    }
+    /// <summary>How a prop is planted: its center and rim (<see cref="Planting.Round"/>).</summary>
+    public static Footing FootingOf(in Prop p) => Planting.Round(p.X, p.Z, p.Radius);
+
+    /// <summary>
+    /// The height a prop is drawn at: from its base in the ground to <see cref="CityProp.Height"/>
+    /// above the high side of its footing, so its top (a lamp's cap) is where it would be on flat ground.
+    /// </summary>
+    public static float DrawnHeight(in CityProp p) => p.Height + p.Footing.Extension;
+
+    /// <summary>
+    /// The bottom radius of a prop's root flare (<see cref="Planting.FlareRadius"/>): only round,
+    /// big bases get one (planters and the statue's pedestal); 0 for none.
+    /// </summary>
+    public static float FlareRadius(in CityProp p) =>
+        p.Kind is PropKind.Planter or PropKind.Statue ? Planting.FlareRadius(p.Radius) : 0f;
 
     private static CityProp[] BuildProps()
     {
@@ -175,7 +186,10 @@ public static class PetCityLayout
         {
             var p = all[i];
             if (p.Area == Area.PetCity)
-                props.Add(new CityProp(p.Kind, i, new Vector3(p.X, FootHeight(p), p.Z), p.Rotation, p.Radius, p.Height));
+                {
+                var footing = FootingOf(p);
+                props.Add(new CityProp(p.Kind, i, new Vector3(p.X, footing.Base, p.Z), p.Rotation, p.Radius, p.Height, footing));
+            }
         }
         return props.ToArray();
     }
@@ -194,12 +208,13 @@ public static class PetCityLayout
             var b = all[i];
             if (b.Area != Area.PetCity)
                 continue;
-            var at = new Vector3(b.X, FootHeight(b), b.Z);
+            var footing = FootingOf(b);
+            var at = new Vector3(b.X, footing.Base, b.Z);
             var size = new Vector3(b.Width, b.Height, b.Depth);
             pieces[n++] = b.Kind switch
             {
-                BuildingKind.PetStore => new Piece(PieceKind.PetStore, i, at, b.Rotation, size, 0, 0),
-                BuildingKind.CityBlock => new Piece(PieceKind.CityBlock, i, at, b.Rotation, size, StoriesFor(b.Height), blocks++ % StyleCount),
+                BuildingKind.PetStore => new Piece(PieceKind.PetStore, i, at, b.Rotation, size, 0, 0, footing),
+                BuildingKind.CityBlock => new Piece(PieceKind.CityBlock, i, at, b.Rotation, size, StoriesFor(b.Height), blocks++ % StyleCount, footing),
                 _ => throw new InvalidOperationException($"Pet City has no drawing for a {b.Kind}."),
             };
         }
