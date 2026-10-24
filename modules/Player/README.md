@@ -16,7 +16,8 @@ after defeat until it is teleported (to the clinic the next morning).
   for screenshots); `Shaders/` (toon surface with hit flash, ink outline).
 - `Models/` — `characters.py`, the Blender script that builds and exports `girl.glb` and
   `boy.glb` next to it.
-- `Tests/` — `PlayerModuleTests.cs`: xUnit tests of `PlayerModule` (with a fake `IMessageBus`),
+- `Tests/` — `PlayerModuleTests.cs`: xUnit tests of `PlayerModule` (with a fake `IMessageBus`;
+  also the save part's round trip and bad saved Json),
   `ArcheryPose` and `CharacterLook` (also standing idle and turning while the wardrobe is open).
 
 Test it with `./test.sh Player` from the repository root.
@@ -38,8 +39,9 @@ positive turns left; the direction of yaw `a` is `(-sin a, 0, -cos a)`.
 `PlayerModule` reads `Fungtopia.Input.PlayerInput`, `Fungtopia.Dialogue.DialogueState`,
 `Fungtopia.Bow.BowState`, `Fungtopia.StartScreen.GameStart` and `StartScreenState`,
 `Fungtopia.Wardrobe.AppearanceState`, `WardrobeState` and `PreviewYaw` (and the Wardrobe's `Catalog` and `Looks`),
-`TeleportPlayer` and `DamagePlayer`, and the world from the Map Contract (`Ground`, `Areas`,
-`Places`). The Player Contract references the Map Contract (for `Area`). The game starts at
+`TeleportPlayer` and `DamagePlayer`, the Save Contract's `CollectSave` and `RestorePart`, and the
+world from the Map Contract (`Ground`, `Areas`, `Places`). The Player Contract references the Map Contract (for `Area`); the Core also references the Save
+Contract. The game starts at
 `Places.HomeDoor`, facing out.
 
 - **Start screen.** The player is hidden (`Visible` false: the view hides the model) only before
@@ -86,6 +88,21 @@ Each tick:
   invulnerability ignores more hits. At 0: `Alive` false, one `PlayerDefeated`, no moving, for
   as long as it takes: the next `TeleportPlayer` brings it back with full health (DayNight sends
   it the next morning at Dr. Jeremy's clinic).
+
+- **Saved games.** On `Fungtopia.Save.CollectSave` it publishes at once one `SavePart` (same
+  `RequestId`, Module `"Player"`, `SaveJson()`): compact camelCase JSON of a small record,
+  `{"version":1,"x":..,"y":..,"z":..,"facing":..,"area":"Forest","character":"Boy","health":7}`
+  (feet position, `Areas.At` there, yaw, `CharacterKind`, health; `SaveVersion` 1). On
+  `RestorePart` for `"Player"` it puts that back: `Character`, `Health`, the player in play
+  (`Started`, so a later `GameStart` is ignored), standing on the ground at the saved spot (`PlaceAt`,
+  zero velocity, idle) with the saved facing. When that spot is not standable or not in the saved
+  area any more it uses the area's entry instead (`Places.HomeInterior` for Home, the area's
+  `Signpost`, `Places.HomeDoor` for the road), so a load into the house stays on its floor. A save
+  made while defeated (health 0) comes back alive with full health, as after the clinic. Restoring
+  publishes nothing (no `PlayerDefeated`, no damage flash: invulnerability and defeat are reset).
+  Unreadable Json (not JSON, another version, a missing or out-of-range field, an unknown area or
+  character) keeps the current state and is logged once (`Log`, Console by default); other
+  modules' parts are ignored.
 
 - **Archery.** `Archery` (an `ArcheryState`) is advanced every tick by `ArcheryPose.Advance`
   from the latest `BowState.Draw` (see the View for what it means).

@@ -5,6 +5,7 @@ using Fungtopia.Bow;
 using Fungtopia.Dialogue;
 using Fungtopia.Input;
 using Fungtopia.Map;
+using Fungtopia.Save;
 using Fungtopia.Shell;
 using Fungtopia.StartScreen;
 using Fungtopia.Wardrobe;
@@ -22,6 +23,9 @@ public class PlayerModuleTests
         private readonly Dictionary<Type, List<object>> _handlers = new();
         public readonly List<PlayerState> States = new();
         public readonly List<PlayerDefeated> Defeats = new();
+        public readonly List<SavePart> Parts = new();
+        /// <summary>Every message published, of any type.</summary>
+        public readonly List<object> All = new();
 
         public void Subscribe<T>(IMessageHandler<T> handler) where T : struct
         {
@@ -32,6 +36,9 @@ public class PlayerModuleTests
 
         public void Publish<T>(in T message) where T : struct
         {
+            All.Add(message);
+            if (message is SavePart part)
+                Parts.Add(part);
             if (message is PlayerState state)
                 States.Add(state);
             else if (message is PlayerDefeated defeated)
@@ -1002,6 +1009,245 @@ public class PlayerModuleTests
         _bus.Publish(new DamagePlayer(10, Vector3.Zero));
         TickWith(Idle);
         Assert.Equal(2, _bus.Defeats.Count);
+    }
+
+    // ---- Saved games (the Save module's CollectSave / RestorePart) ----
+
+    /// <summary>The Player part the module answers a CollectSave with.</summary>
+    private static string Collect(FakeBus bus, int requestId = 7)
+    {
+        bus.Parts.Clear();
+        bus.Publish(new CollectSave(requestId));
+        var part = Assert.Single(bus.Parts);
+        Assert.Equal(requestId, part.RequestId);
+        Assert.Equal(SaveModules.Player, part.Module);
+        return part.Json;
+    }
+
+    /// <summary>A fresh game behind the start screen that gets <paramref name="json"/> restored.</summary>
+    private static (FakeBus bus, PlayerModule player, List<string> log) RestoredFrom(string json)
+    {
+        var (bus, player) = BehindTheStartScreen();
+        var log = new List<string>();
+        player.Log = log.Add;
+        bus.All.Clear();
+        bus.Publish(new RestorePart(SaveModules.Player, json));
+        return (bus, player, log);
+    }
+
+    private static void AssertSameState(PlayerState expected, PlayerState actual)
+    {
+        Assert.True(Vector3.Distance(expected.Position, actual.Position) < 1e-4f, $"expected {expected.Position}, got {actual.Position}");
+        Assert.Equal(expected.Facing, actual.Facing, 5);
+        Assert.Equal(expected.Area, actual.Area);
+        Assert.Equal(expected.Character, actual.Character);
+        Assert.Equal(expected.Health, actual.Health);
+        Assert.Equal(expected.MaxHealth, actual.MaxHealth);
+        Assert.Equal(expected.Alive, actual.Alive);
+        Assert.Equal(expected.Grounded, actual.Grounded);
+        Assert.Equal(Vector3.Zero, actual.Velocity);
+    }
+
+    [Fact]
+    public void SaveThenRestoreGivesBackPositionAreaFacingCharacterAndHealth()
+    {
+        // The Boy, walked into the forest clearing, turned, hit twice.
+        var (bus, player) = BehindTheStartScreen();
+        PressStart(bus, GameStart.Boy);
+        player.PlaceAt(Middle, 0.3f);
+        bus.Publish(new DamagePlayer(3, Vector3.Zero));
+        for (int i = 0; i < 60; i++)
+        {
+            bus.Publish(Moving(1f, 0.5f));
+            player.Tick(new TickContext(i, Step));
+        }
+        bus.Publish(new DamagePlayer(2, Vector3.Zero));
+        for (int i = 0; i < 5; i++)
+        {
+            bus.Publish(Idle);
+            player.Tick(new TickContext(60 + i, Step));
+        }
+        var original = player.State;
+        Assert.Equal(CharacterKind.Boy, original.Character);
+        Assert.Equal(5, original.Health);
+        Assert.Equal(Area.Forest, original.Area);
+        Assert.NotEqual(Middle, original.Position);
+
+        string json = Collect(bus);
+        var (restoredBus, restored, log) = RestoredFrom(json);
+
+        AssertSameState(original, restored.State);
+        Assert.True(restored.Started);
+        Assert.True(restored.Visible);
+        Assert.Empty(log);
+        // It ticks on from there: the next published state is the same spot.
+        restoredBus.Publish(new StartScreenState(false));
+        restoredBus.Publish(Idle);
+        restored.Tick(new TickContext(0, Step));
+        AssertSameState(original, restoredBus.States[^1]);
+        // And it saves the same again.
+        Assert.Equal(json, Collect(restoredBus));
+    }
+
+    [Fact]
+    public void TheSavedPartIsCompactVersionedJson()
+    {
+        _player.PlaceAt(Middle, 1f);
+        string json = Collect(_bus);
+        Assert.DoesNotContain("\n", json);
+        Assert.DoesNotContain(" ", json);
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        Assert.Equal(PlayerModule.SaveVersion, root.GetProperty("version").GetInt32());
+        Assert.Equal("Forest", root.GetProperty("area").GetString());
+        Assert.Equal("Girl", root.GetProperty("character").GetString());
+        Assert.Equal(10, root.GetProperty("health").GetInt32());
+        Assert.Equal(1f, root.GetProperty("facing").GetSingle(), 5);
+        Assert.Equal(Middle.X, root.GetProperty("x").GetSingle(), 4);
+        Assert.Equal(Middle.Z, root.GetProperty("z").GetSingle(), 4);
+    }
+
+    [Fact]
+    public void SaveThenRestoreInsideTheHouseKeepsThePlayerOnTheInteriorFloor()
+    {
+        _bus.Publish(new TeleportPlayer(Places.HomeInterior.Position, Places.HomeInterior.Yaw));
+        Run(0.5, Moving(0.3f, 1f));
+        var original = _player.State;
+        Assert.Equal(Area.Home, original.Area);
+
+        var (bus, restored, _) = RestoredFrom(Collect(_bus));
+        AssertSameState(original, restored.State);
+        Assert.Equal(Areas.HomeFloorY, restored.Position.Y, 4);
+        Assert.True(PlayerModule.CanStand(restored.Position.X, restored.Position.Z));
+        bus.Publish(new StartScreenState(false));
+        bus.Publish(Idle);
+        restored.Tick(new TickContext(0, Step));
+        Assert.Equal(Area.Home, bus.States[^1].Area);
+    }
+
+    [Fact]
+    public void ASavedSpotThatIsNoLongerStandableComesBackAtTheAreasEntry()
+    {
+        // In the house but inside its wall, and in the forest on a giant trunk.
+        var wall = $"{{\"version\":1,\"x\":594,\"y\":-50,\"z\":600,\"facing\":1,\"area\":\"Home\",\"character\":\"Girl\",\"health\":4}}";
+        var (_, home, _) = RestoredFrom(wall);
+        Assert.Equal(Places.HomeInterior.Position, home.Position);
+        Assert.Equal(Area.Home, home.State.Area);
+        Assert.Equal(4, home.Health);
+
+        var trunk = Ground.Obstacles[0];
+        Assert.Equal(Area.Forest, Areas.At(trunk.X, trunk.Z));
+        var onTrunk = $"{{\"version\":1,\"x\":{trunk.X.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"y\":0,\"z\":{trunk.Z.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"facing\":0,\"area\":\"Forest\",\"character\":\"Boy\",\"health\":10}}";
+        var (_, forest, _) = RestoredFrom(onTrunk);
+        Assert.Equal(Places.SignpostForestSouth.Position, forest.Position);
+        Assert.True(PlayerModule.CanStand(forest.Position.X, forest.Position.Z));
+        Assert.Equal(CharacterKind.Boy, forest.Character);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("not json")]
+    [InlineData("{")]
+    [InlineData("[1,2]")]
+    [InlineData("\"Player\"")]
+    [InlineData("{}")]
+    [InlineData("{\"version\":2,\"x\":0,\"y\":0,\"z\":-5,\"facing\":1,\"area\":\"Forest\",\"character\":\"Boy\",\"health\":3}")]
+    [InlineData("{\"x\":0,\"y\":0,\"z\":-5,\"facing\":1,\"area\":\"Forest\",\"character\":\"Boy\",\"health\":3}")]
+    [InlineData("{\"version\":1,\"x\":\"far\",\"y\":0,\"z\":-5,\"facing\":1,\"area\":\"Forest\",\"character\":\"Boy\",\"health\":3}")]
+    [InlineData("{\"version\":1,\"x\":0,\"y\":0,\"z\":-5,\"facing\":1,\"area\":\"Moon\",\"character\":\"Boy\",\"health\":3}")]
+    [InlineData("{\"version\":1,\"x\":0,\"y\":0,\"z\":-5,\"facing\":1,\"area\":\"Forest\",\"character\":\"Cat\",\"health\":3}")]
+    [InlineData("{\"version\":1,\"x\":0,\"y\":0,\"z\":-5,\"facing\":1,\"area\":\"Forest\",\"character\":\"Boy\",\"health\":99}")]
+    [InlineData("{\"version\":1,\"x\":0,\"y\":0,\"z\":-5,\"facing\":1,\"area\":\"Forest\",\"character\":\"Boy\",\"health\":-1}")]
+    public void BadSavedJsonKeepsTheDefaultsAndLogsOnce(string json)
+    {
+        var (bus, player, log) = RestoredFrom(json);
+        var fresh = new PlayerModule();
+        fresh.Start(new FakeBus());
+
+        AssertSameState(fresh.State, player.State);
+        Assert.Equal(Places.HomeDoor.Position, player.Position);
+        Assert.Equal(PlayerModule.MaxHealth, player.Health);
+        Assert.Equal(CharacterKind.Girl, player.Character);
+        Assert.False(player.Started);
+        Assert.Empty(bus.All.FindAll(m => m is not RestorePart));
+        Assert.Single(log);
+        Assert.DoesNotContain("ERROR", log[0]);
+
+        // Logged once: a second bad part says nothing more.
+        bus.Publish(new RestorePart(SaveModules.Player, json));
+        Assert.Single(log);
+    }
+
+    [Fact]
+    public void BadSavedJsonInPlayKeepsThePlayerWhereItIs()
+    {
+        _player.PlaceAt(Middle, 0.5f);
+        _bus.Publish(new DamagePlayer(4, Vector3.Zero));
+        var before = _player.State;
+        _player.Log = _ => { };
+        _bus.Publish(new RestorePart(SaveModules.Player, "{\"version\":99}"));
+        AssertSameState(before, _player.State);
+    }
+
+    [Fact]
+    public void OtherModulesPartsAreIgnored()
+    {
+        string json = $"{{\"version\":1,\"x\":0,\"y\":0,\"z\":-5,\"facing\":1,\"area\":\"Forest\",\"character\":\"Boy\",\"health\":3}}";
+        var (bus, player) = BehindTheStartScreen();
+        var log = new List<string>();
+        player.Log = log.Add;
+        bus.Publish(new RestorePart(SaveModules.Wallet, json));
+        bus.Publish(new RestorePart(SaveModules.Wardrobe, "not json"));
+        Assert.Equal(Places.HomeDoor.Position, player.Position);
+        Assert.Equal(CharacterKind.Girl, player.Character);
+        Assert.Empty(log);
+    }
+
+    [Fact]
+    public void RestoringHasNoSideEffects()
+    {
+        // A save made while defeated (health 0) and mid-hit.
+        _player.PlaceAt(Middle, 0f);
+        for (int i = 0; i < 4; i++)
+        {
+            _bus.Publish(new DamagePlayer(3, Vector3.Zero));
+            Run(1.0, Idle);
+        }
+        Assert.False(_player.Alive);
+        string json = Collect(_bus);
+
+        var (bus, player, log) = RestoredFrom(json);
+        // Nothing published while restoring: no defeat, no state, no save part.
+        Assert.Empty(bus.All.FindAll(m => m is not RestorePart));
+        Assert.Empty(log);
+        // It comes back standing, as after the clinic, with no defeat on its next ticks.
+        Assert.True(player.Alive);
+        Assert.Equal(PlayerModule.MaxHealth, player.Health);
+        Assert.Equal(0f, player.InvulnerableSeconds);
+        bus.Publish(new StartScreenState(false));
+        for (int i = 0; i < 10; i++)
+        {
+            bus.Publish(Idle);
+            player.Tick(new TickContext(i, Step));
+        }
+        Assert.Empty(bus.Defeats);
+        Assert.True(Vector2.Distance(Flat(Middle), Flat(player.Position)) < 1e-3f);
+    }
+
+    [Fact]
+    public void ALoadedGameIsInPlayAndALaterGameStartDoesNotMoveIt()
+    {
+        string json = $"{{\"version\":1,\"x\":0,\"y\":0,\"z\":-5,\"facing\":1,\"area\":\"Forest\",\"character\":\"Boy\",\"health\":6}}";
+        var (bus, player, _) = RestoredFrom(json);
+        Assert.True(player.Started);
+        bus.Publish(new GameStart(GameStart.Girl, GameStart.Cat));
+        bus.Publish(new StartScreenState(false));
+        bus.Publish(Moving(0f, 1f));
+        player.Tick(new TickContext(0, Step));
+        Assert.Equal(CharacterKind.Boy, player.Character);
+        Assert.Equal(6, player.Health);
+        Assert.Equal(Area.Forest, player.State.Area);
+        Assert.True(Vector2.Distance(new Vector2(0f, -5f), Flat(player.Position)) < 0.2f);
     }
 
     // ---- Archery pose (the bow from the back into the hands) ----

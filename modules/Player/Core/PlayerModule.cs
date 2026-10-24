@@ -1,9 +1,11 @@
 using System;
 using System.Numerics;
+using System.Text.Json;
 using Fungtopia.Bow;
 using Fungtopia.Dialogue;
 using Fungtopia.Input;
 using Fungtopia.Map;
+using Fungtopia.Save;
 using Fungtopia.Shell;
 using Fungtopia.StartScreen;
 using Fungtopia.Wardrobe;
@@ -20,11 +22,13 @@ namespace Fungtopia.Player;
 /// While the wardrobe or the shop is open (<see cref="WardrobeState.Open"/>) it stands idle too,
 /// turned for viewing by the Wardrobe's <see cref="PreviewYaw"/> (<see cref="ShownFacing"/>).
 /// Publishes <see cref="PlayerState"/> every tick and <see cref="PlayerDefeated"/> once per defeat.
+/// Saved games: answers <see cref="CollectSave"/> with its <see cref="SaveModules.Player"/> part and
+/// restores it from <see cref="RestorePart"/>.
 /// </summary>
 public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessageHandler<DamagePlayer>,
     IMessageHandler<TeleportPlayer>, IMessageHandler<DialogueState>, IMessageHandler<BowState>,
     IMessageHandler<GameStart>, IMessageHandler<StartScreenState>, IMessageHandler<AppearanceState>,
-    IMessageHandler<WardrobeState>, IMessageHandler<PreviewYaw>
+    IMessageHandler<WardrobeState>, IMessageHandler<PreviewYaw>, IMessageHandler<CollectSave>, IMessageHandler<RestorePart>
 {
     public const float WalkSpeed = 5f;
     public const float JumpHeight = 1.2f;
@@ -37,6 +41,13 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
     public const float InvulnerableAfterHit = 0.7f;
     /// <summary>How fast <see cref="PreviewTurn"/> eases toward the latest <see cref="PreviewYaw"/>, per second.</summary>
     public const float PreviewTurnSharpness = 12f;
+    /// <summary>The version of the saved part (<see cref="SaveJson"/>); other versions are not restored.</summary>
+    public const int SaveVersion = 1;
+
+    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
+    /// <summary>The saved part: feet position, area and facing, character and health.</summary>
+    private sealed record SavedPlayer(int Version, float X, float Y, float Z, float Facing, string? Area, string? Character, int Health);
 
     private IMessageBus? _bus;
     private PlayerInput _input;
@@ -50,6 +61,10 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
     private bool _wardrobeOpen;
     private float _previewYaw;
     private bool _started;
+    private bool _loggedBadSave;
+
+    /// <summary>Where a save that cannot be restored is told (once).</summary>
+    public Action<string> Log { get; set; } = Console.WriteLine;
 
     /// <summary>The setting that picks the character (Girl by default) until <see cref="GameStart"/> picks it.</summary>
     public CharacterKind Character { get; set; } = CharacterKind.Girl;
@@ -137,6 +152,8 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
         bus.Subscribe<AppearanceState>(this);
         bus.Subscribe<WardrobeState>(this);
         bus.Subscribe<PreviewYaw>(this);
+        bus.Subscribe<CollectSave>(this);
+        bus.Subscribe<RestorePart>(this);
         State = MakeState();
     }
 
@@ -253,6 +270,108 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
         _input = default;
         _jumpQueued = false;
         PlaceAt(Places.HomeDoor.Position, Places.HomeDoor.Yaw);
+    }
+
+    public void Handle(in CollectSave message) =>
+        _bus?.Publish(new SavePart(message.RequestId, SaveModules.Player, SaveJson()));
+
+    /// <summary>The player's saved state as compact JSON, what <see cref="CollectSave"/> is answered with.</summary>
+    public string SaveJson() => JsonSerializer.Serialize(
+        new SavedPlayer(SaveVersion, Position.X, Position.Y, Position.Z, Facing,
+            Areas.At(Position.X, Position.Z).ToString(), Character.ToString(), Health),
+        JsonOptions);
+
+    /// <summary>
+    /// Puts the player back as saved: in play, standing at the saved spot (on the ground there, or
+    /// at the area's entry when that spot is not standable any more), facing, character and health.
+    /// Publishes nothing (no defeat, no damage). Unreadable parts keep the current state.
+    /// </summary>
+    public void Handle(in RestorePart message)
+    {
+        if (message.Module != SaveModules.Player)
+            return;
+        if (!TryReadSave(message.Json, out var saved))
+        {
+            if (!_loggedBadSave)
+            {
+                _loggedBadSave = true;
+                Log("Fungtopia: Player: the saved player cannot be read; keeping the current position and health.");
+            }
+            return;
+        }
+        Character = saved.Character;
+        // A save made while defeated comes back standing, as after the clinic's teleport.
+        Health = saved.Health > 0 ? saved.Health : MaxHealth;
+        Alive = true;
+        DefeatedSeconds = 0f;
+        InvulnerableSeconds = 0f;
+        _defeatPending = false;
+        _started = true;
+        StopInput();
+        Archery = ArcheryState.Relaxed;
+        var place = StandablePlace(saved.Position, saved.Facing, saved.Area);
+        PlaceAt(place.Position, place.Yaw);
+    }
+
+    private readonly struct Restored
+    {
+        public readonly Vector3 Position;
+        public readonly float Facing;
+        public readonly Area Area;
+        public readonly CharacterKind Character;
+        public readonly int Health;
+
+        public Restored(Vector3 position, float facing, Area area, CharacterKind character, int health)
+        {
+            Position = position;
+            Facing = facing;
+            Area = area;
+            Character = character;
+            Health = health;
+        }
+    }
+
+    private static bool TryReadSave(string? json, out Restored restored)
+    {
+        restored = default;
+        if (string.IsNullOrWhiteSpace(json))
+            return false;
+        try
+        {
+            var s = JsonSerializer.Deserialize<SavedPlayer>(json, JsonOptions);
+            if (s == null || s.Version != SaveVersion)
+                return false;
+            if (!float.IsFinite(s.X) || !float.IsFinite(s.Y) || !float.IsFinite(s.Z) || !float.IsFinite(s.Facing))
+                return false;
+            if (s.Health < 0 || s.Health > MaxHealth)
+                return false;
+            if (!Enum.TryParse(s.Area, false, out Area area) || !Enum.IsDefined(area) || int.TryParse(s.Area, out _))
+                return false;
+            if (!Enum.TryParse(s.Character, false, out CharacterKind character) || !Enum.IsDefined(character) || int.TryParse(s.Character, out _))
+                return false;
+            restored = new Restored(new Vector3(s.X, s.Y, s.Z), s.Facing, area, character, s.Health);
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// The saved spot when the player can stand there in the saved area; otherwise that area's
+    /// entry (the house interior's door, an area's signpost, the home door for the road).
+    /// </summary>
+    private static Place StandablePlace(Vector3 feet, float facing, Area area)
+    {
+        if (CanStand(feet.X, feet.Z) && Areas.At(feet.X, feet.Z) == area)
+            return new Place(feet, facing);
+        return area switch
+        {
+            Area.Home => Places.HomeInterior,
+            Area.Town or Area.Forest or Area.PetCity or Area.DeepForest => Places.Signpost(area),
+            _ => Places.HomeDoor,
+        };
     }
 
     public void Handle(in DamagePlayer message)
