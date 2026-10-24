@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Numerics;
 using Fungtopia.DayNight;
 using Fungtopia.Dialogue;
+using Fungtopia.Food;
 using Fungtopia.Input;
 using Fungtopia.Map;
 using Fungtopia.Monsters;
@@ -17,14 +18,15 @@ using Fungtopia.Wardrobe;
 namespace Fungtopia.NPCs;
 
 /// <summary>
-/// The townsfolk: Dr. Jeremy at his clinic, Millie next door, Lucy at the Pet Store and Abby at her
-/// clothing shop. Each stands
+/// The townsfolk: Dr. Jeremy at his clinic, Millie next door, Lucy at the Pet Store, Abby at her
+/// clothing shop and Pip, the cook behind the Mushroom Munchies food stall. Each stands
 /// at its <see cref="Places"/> spot and turns to face a near player; within <see cref="PromptRadius"/>
 /// a talk prompt shows and Interact starts a conversation, one <see cref="SayLine"/> at a time (the
 /// next on <see cref="DialogueAdvanced"/>). Jeremy greets the player on <see cref="WokeUp"/>, Millie
 /// gives quests (<see cref="QuestState"/> every tick) and pays them with <see cref="GrantCoins"/> (some
 /// also with clothes, <see cref="GrantItem"/>), Lucy sells the Mushroom Crow (<see cref="SpendCoins"/>,
-/// then <see cref="AdoptPet"/>), and Abby greets you and opens her shop (<see cref="OpenShop"/>).
+/// then <see cref="AdoptPet"/>), Abby greets you and opens her shop (<see cref="OpenShop"/>), and Pip
+/// greets you and opens the stall's menu (<see cref="OpenFoodMenu"/>).
 /// Quest progress and the crow purchase are saved (<see cref="CollectSave"/>) and restored
 /// (<see cref="RestorePart"/>) as the "NPCs" part.
 /// </summary>
@@ -32,13 +34,14 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
     IMessageHandler<DialogueState>, IMessageHandler<DialogueAdvanced>, IMessageHandler<DialogueClosed>,
     IMessageHandler<WokeUp>, IMessageHandler<MonsterKilled>, IMessageHandler<CoinsEarned>,
     IMessageHandler<SpendResult>, IMessageHandler<OwnedPets>, IMessageHandler<WardrobeState>,
-    IMessageHandler<CollectSave>, IMessageHandler<RestorePart>
+    IMessageHandler<CollectSave>, IMessageHandler<RestorePart>, IMessageHandler<UiFocus>
 {
     public const int Jeremy = 0;
     public const int Millie = 1;
     public const int Lucy = 2;
     public const int Abby = 3;
-    public const int Count = 4;
+    public const int Pip = 4;
+    public const int Count = 5;
 
     /// <summary>The <see cref="SayLine.SpeakerId"/> of NPC i is <c>SpeakerIdBase + i</c>.</summary>
     public const int SpeakerIdBase = 7100;
@@ -53,6 +56,7 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
     public const float TurnSpeed = 5f;
 
     public const string TalkPrompt = "E / X: Talk";
+    public const string FoodPrompt = "E / X: Food";
     public const string BuyPrompt = "E / X: Buy the Mushroom Crow (3,000 M¢)";
 
     public const int CrowPrice = 3000;
@@ -65,6 +69,12 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
     public const string CrowTooPoor = "Come back with 3,000 M¢.";
     public const string CrowAskAgain = "Press E / X again to buy.";
     public const string AbbyGreeting = "Ooh, you'd look so cute in something new!";
+
+    /// <summary>How far behind <see cref="Places.FoodSpot"/> Pip stands (just behind the stall's counter, meters).</summary>
+    public const float PipBehindCounter = 2.6f;
+
+    /// <summary>How far to the left of the counter's middle (as Pip sees it) Pip stands, beside the soup pot (meters).</summary>
+    public const float PipBesidePot = 0.4f;
 
     /// <summary>The <see cref="SaveData.Version"/> this module writes and reads.</summary>
     public const int SaveVersion = 1;
@@ -91,9 +101,22 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
         ForestCoins,
     }
 
-    private static readonly string[] s_names = { "Dr. Jeremy", "Millie", "Lucy", "Abby" };
-    private static readonly int[] s_voices = { Voices.Kind, Voices.Bubbly, Voices.Deadpan, Voices.Bubbly };
-    private static readonly Place[] s_spots = { Places.ClinicDoor, Places.MillieSpot, Places.LucySpot, Places.AbbySpot };
+    private static readonly string[] s_names = { "Dr. Jeremy", "Millie", "Lucy", "Abby", "Pip" };
+    private static readonly int[] s_voices = { Voices.Kind, Voices.Bubbly, Voices.Deadpan, Voices.Bubbly, Voices.Bubbly };
+    private static readonly Place[] s_spots =
+        { Places.ClinicDoor, Places.MillieSpot, Places.LucySpot, Places.AbbySpot, BehindCounter(Places.FoodSpot) };
+
+    /// <summary>Where the player stands to talk to each NPC: their own spot, but Pip's customers stand at the counter.</summary>
+    private static readonly Place[] s_talkSpots =
+        { Places.ClinicDoor, Places.MillieSpot, Places.LucySpot, Places.AbbySpot, Places.FoodSpot };
+
+    /// <summary>Pip's greetings, one per talk, in turn.</summary>
+    private static readonly string[] s_pipGreetings =
+    {
+        "Fresh from the oven!",
+        "Hungry from the forest? I've got you!",
+        "A pie a day keeps the doctor away... sorry, Dr. Jeremy!",
+    };
 
     /// <summary>The clothes Millie gives with her quests, by quest number (the first round only); empty for none.</summary>
     private static readonly string[] s_questItems = { "", "flower_clip", "", "mushroom_backpack" };
@@ -155,14 +178,31 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
     private bool _shopOnClose;
     private bool _wardrobeOpen;
 
+    // Pip's menu.
+    private bool _menuOnClose;
+
+    // The owners of the menus holding UiFocus open (the food menu, the start screen...).
+    private readonly int[] _focusOwners = new int[MaxFocusOwners];
+    private int _focusCount;
+    private const int MaxFocusOwners = 16;
+
     public NPCsModule()
     {
         for (int i = 0; i < Count; i++)
             _yaw[i] = s_spots[i].Yaw;
     }
 
-    /// <summary>Each NPC's spot, by index (<see cref="Jeremy"/>, <see cref="Millie"/>, <see cref="Lucy"/>, <see cref="Abby"/>).</summary>
+    /// <summary>Each NPC's spot, by index (<see cref="Jeremy"/>, <see cref="Millie"/>, <see cref="Lucy"/>, <see cref="Abby"/>, <see cref="Pip"/>).</summary>
     public static ReadOnlySpan<Place> Spots => s_spots;
+
+    /// <summary>
+    /// Where the player stands to talk to each NPC (the prompt shows within <see cref="PromptRadius"/>
+    /// of it): the NPC's own spot, except Pip's, which is <see cref="Places.FoodSpot"/> in front of the counter.
+    /// </summary>
+    public static ReadOnlySpan<Place> TalkSpots => s_talkSpots;
+
+    /// <summary>Pip's greetings, in the order they are said.</summary>
+    public static ReadOnlySpan<string> PipGreetings => s_pipGreetings;
 
     public static string Name(int npc) => s_names[npc];
 
@@ -176,11 +216,14 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
     /// <summary>The NPC whose prompt shows, or -1.</summary>
     public int PromptNpc { get; private set; } = -1;
 
-    /// <summary>The prompt's text (<see cref="TalkPrompt"/>, or <see cref="BuyPrompt"/> while Lucy offers the crow).</summary>
+    /// <summary>The prompt's text: <see cref="TalkPrompt"/>, <see cref="FoodPrompt"/> for Pip, or <see cref="BuyPrompt"/> while Lucy offers the crow.</summary>
     public string PromptText { get; private set; } = TalkPrompt;
 
     /// <summary>The NPC in a conversation, or -1.</summary>
     public int Talking { get; private set; } = -1;
+
+    /// <summary>The NPC the living player is within <see cref="FaceRadius"/> of, or -1 (the nearest when several); Pip waves when you come near.</summary>
+    public int Noticing { get; private set; } = -1;
 
     /// <summary>Lucy has offered the crow: Interact near her buys it; walking away says no.</summary>
     public bool OfferingCrow { get; private set; }
@@ -248,6 +291,7 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
         bus.Subscribe<WardrobeState>(this);
         bus.Subscribe<CollectSave>(this);
         bus.Subscribe<RestorePart>(this);
+        bus.Subscribe<UiFocus>(this);
     }
 
     public void Handle(in PlayerInput message)
@@ -312,6 +356,15 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
     public void Handle(in OwnedPets message) => _ownsCrow |= message.Crow;
 
     public void Handle(in WardrobeState message) => _wardrobeOpen = message.Open;
+
+    public void Handle(in UiFocus message)
+    {
+        int at = Array.IndexOf(_focusOwners, message.Owner, 0, _focusCount);
+        if (message.Open && at < 0 && _focusCount < MaxFocusOwners)
+            _focusOwners[_focusCount++] = message.Owner;
+        else if (!message.Open && at >= 0)
+            _focusOwners[at] = _focusOwners[--_focusCount];
+    }
 
     public void Handle(in CollectSave message) =>
         _bus?.Publish(new SavePart(message.RequestId, SaveModules.NPCs, SaveJson()));
@@ -395,6 +448,7 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
         _spendAnswered = false;
         _offerOnClose = false;
         _shopOnClose = false;
+        _menuOnClose = false;
         Talking = -1;
         _lineCount = 0;
         _lineIndex = 0;
@@ -440,19 +494,22 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
         }
 
         bool alive = _havePlayer && _player.Alive;
-        int near = alive ? Nearest(PromptRadius) : -1;
+        int near = alive ? Nearest(s_talkSpots, PromptRadius) : -1;
+        Noticing = alive ? Nearest(s_spots, FaceRadius) : -1;
         if (OfferingCrow && near != Lucy)
             OfferingCrow = false;
 
         TurnAll(dt, alive);
 
-        bool free = !_dialogueOpen && !_closedThisTick && Talking < 0 && _pendingRequest < 0 && !_wardrobeOpen;
+        bool free = !_dialogueOpen && !_closedThisTick && Talking < 0 && _pendingRequest < 0 && !_wardrobeOpen
+            && _focusCount == 0;
         if (free && near >= 0 && _haveInput && _input.Interact)
             Interact(near);
 
-        free = !_dialogueOpen && !_closedThisTick && Talking < 0 && _pendingRequest < 0 && !_wardrobeOpen;
+        free = !_dialogueOpen && !_closedThisTick && Talking < 0 && _pendingRequest < 0 && !_wardrobeOpen
+            && _focusCount == 0;
         PromptNpc = free ? near : -1;
-        PromptText = PromptNpc == Lucy && OfferingCrow ? BuyPrompt : TalkPrompt;
+        PromptText = PromptNpc == Lucy && OfferingCrow ? BuyPrompt : PromptNpc == Pip ? FoodPrompt : TalkPrompt;
 
         _bus.Publish(new QuestState(QuestActive, _questTitle, QuestProgress, QuestGoal, QuestComplete));
 
@@ -475,10 +532,15 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
             case Lucy:
                 TalkToLucy();
                 break;
-            default:
+            case Abby:
                 // The shop opens once her greeting is dismissed.
                 Begin(Abby, AbbyGreeting);
                 _shopOnClose = true;
+                break;
+            default:
+                // The stall's menu opens once Pip's greeting is dismissed.
+                Begin(Pip, NextTip(Pip, s_pipGreetings));
+                _menuOnClose = true;
                 break;
         }
     }
@@ -573,6 +635,7 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
         _lineIndex = 0;
         _offerOnClose = false;
         _shopOnClose = false;
+        _menuOnClose = false;
         Publish();
     }
 
@@ -599,20 +662,24 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
         // Abby opens her shop once her greeting is dismissed.
         if (ended && Talking == Abby && _shopOnClose)
             _bus!.Publish(new OpenShop());
+        // Pip opens the stall's menu once their greeting is dismissed.
+        if (ended && Talking == Pip && _menuOnClose)
+            _bus!.Publish(new OpenFoodMenu());
         _offerOnClose = false;
         _shopOnClose = false;
+        _menuOnClose = false;
         Talking = -1;
         _lineCount = 0;
         _lineIndex = 0;
     }
 
-    private int Nearest(float radius)
+    private int Nearest(Place[] spots, float radius)
     {
         int best = -1;
         float bestSq = radius * radius;
         for (int i = 0; i < Count; i++)
         {
-            float sq = HorizontalDistanceSq(i);
+            float sq = HorizontalDistanceSq(spots[i]);
             if (sq <= bestSq)
             {
                 bestSq = sq;
@@ -622,11 +689,23 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
         return best;
     }
 
-    private float HorizontalDistanceSq(int npc)
+    private float HorizontalDistanceSq(in Place spot)
     {
-        float dx = _player.Position.X - s_spots[npc].Position.X;
-        float dz = _player.Position.Z - s_spots[npc].Position.Z;
+        float dx = _player.Position.X - spot.Position.X;
+        float dz = _player.Position.Z - spot.Position.Z;
         return dx * dx + dz * dz;
+    }
+
+    /// <summary>
+    /// Pip's spot: <see cref="PipBehindCounter"/> behind the stall's <paramref name="counter"/> spot and
+    /// <see cref="PipBesidePot"/> to the left, facing the same way as it (out over the counter, at the customer).
+    /// </summary>
+    private static Place BehindCounter(in Place counter)
+    {
+        // Pip's right (the facing turned a quarter clockwise seen from above).
+        var right = new Vector3(-counter.Facing.Z, 0f, counter.Facing.X);
+        var p = counter.Position - counter.Facing * PipBehindCounter - right * PipBesidePot;
+        return new Place(p.X, p.Z, counter.Yaw);
     }
 
     private void TurnAll(float dt, bool alive)
@@ -634,9 +713,10 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
         for (int i = 0; i < Count; i++)
         {
             float target = s_spots[i].Yaw;
-            if (_havePlayer && (alive || Talking == i))
+            // Pip keeps facing the counter (and stirring the pot on it).
+            if (i != Pip && _havePlayer && (alive || Talking == i))
             {
-                float sq = HorizontalDistanceSq(i);
+                float sq = HorizontalDistanceSq(s_spots[i]);
                 if (sq <= FaceRadius * FaceRadius && sq > 1e-6f)
                 {
                     float dx = _player.Position.X - s_spots[i].Position.X;

@@ -5,29 +5,38 @@ using Godot;
 namespace Fungtopia.NPCs.View;
 
 /// <summary>
-/// One NPC model (jeremy.glb, millie.glb, lucy.glb or abby.glb from modules/NPCs/Models), loaded at run
-/// time from the file's bytes (so a fresh checkout runs without an editor import), drawn
+/// One NPC model (jeremy.glb, millie.glb, lucy.glb, abby.glb or pip.glb from modules/NPCs/Models), loaded
+/// at run time from the file's bytes (so a fresh checkout runs without an editor import), drawn
 /// toon-shaded with ink outlines and animated procedurally: breathing, a gentle sway and head
-/// tilt, swinging arms, and a happy bounce with nodding while talking. Faces -Z at zero rotation.
+/// tilt, swinging arms, and a happy bounce with nodding while talking. Pip stirs the soup pot with
+/// the wooden spoon instead, and waves with the other hand when the player comes near (and while
+/// talking). Faces -Z at zero rotation.
 /// </summary>
 public partial class NpcFigure : Node3D
 {
     private const string Models = "res://modules/NPCs/Models/";
     private const string Shaders = "res://modules/NPCs/Godot/Shaders/";
 
-    /// <summary>The models, by NPC index (<see cref="NPCsModule.Jeremy"/>, Millie, Lucy, Abby).</summary>
-    private static readonly string[] Files = { "jeremy.glb", "millie.glb", "lucy.glb", "abby.glb" };
+    /// <summary>The models, by NPC index (<see cref="NPCsModule.Jeremy"/>, Millie, Lucy, Abby, Pip).</summary>
+    private static readonly string[] Files = { "jeremy.glb", "millie.glb", "lucy.glb", "abby.glb", "pip.glb" };
 
     /// <summary>Jeremy is a grown-up, a little taller than the kids.</summary>
-    private static readonly float[] Scales = { 1.12f, 1.0f, 1.04f, 1.02f };
+    private static readonly float[] Scales = { 1.12f, 1.0f, 1.04f, 1.02f, 1.0f };
 
-    /// <summary>How lively each one is: Millie bounces, Abby nearly as much, Lucy barely moves.</summary>
-    private static readonly float[] Liveliness = { 0.8f, 1.3f, 0.45f, 1.15f };
+    /// <summary>How lively each one is: Millie bounces, Abby and Pip nearly as much, Lucy barely moves.</summary>
+    private static readonly float[] Liveliness = { 0.8f, 1.3f, 0.45f, 1.15f, 1.1f };
+
+    /// <summary>The top of each one's head (meters above the feet, before scaling): Pip's chef's hat on the step stool is taller.</summary>
+    private static readonly float[] Heights = { 1.6f, 1.6f, 1.6f, 1.6f, 2.07f };
+
+    /// <summary>How long Pip waves when the player comes near (seconds).</summary>
+    private const float WaveSeconds = 2.5f;
 
     /// <summary>Surfaces drawn without an ink outline (small soft details).</summary>
     private static readonly HashSet<string> NoOutline = new()
     {
         "EyeShine", "Blush", "Mouth", "Print", "Heart", "Button", "BadgeStripe", "Lid", "Spots",
+        "Freckle", "Cup", "MuffinTop", "Berry", "Cherry", "HatSpots", "Gills",
     };
 
     private static readonly Dictionary<string, ShaderMaterial> s_materials = new();
@@ -38,12 +47,28 @@ public partial class NpcFigure : Node3D
     private int _npc;
     private float _time;
     private float _talk;
+    private float _wave;
+    private float _waveLeft;
+    private float _stir;
+    private bool _noticing;
 
     /// <summary>Head height above the feet (meters), for the prompt.</summary>
-    public float Height => 1.6f * Scales[_npc];
+    public float Height => Heights[_npc] * Scales[_npc];
 
     /// <summary>True while this NPC is in a conversation (bounces and nods).</summary>
     public bool Talking { get; set; }
+
+    /// <summary>True while the player is near (the Core's <see cref="NPCsModule.Noticing"/>); Pip waves when it turns true.</summary>
+    public bool Noticing
+    {
+        get => _noticing;
+        set
+        {
+            if (value && !_noticing)
+                _waveLeft = WaveSeconds;
+            _noticing = value;
+        }
+    }
 
     public static NpcFigure Create(int npc)
     {
@@ -77,12 +102,42 @@ public partial class NpcFigure : Node3D
             new Vector3(-nod + MathF.Sin(_time * 0.7f) * 0.04f * live, MathF.Sin(_time * 0.45f) * 0.12f * live,
                 sway + MathF.Sin(_time * 0.9f) * 0.06f * live), Vector3.One);
         float arm = MathF.Sin(_time * 2.2f + 0.6f) * 0.07f * live;
-        float wave = _talk * (0.25f + MathF.Sin(_time * 6f) * 0.15f) * live;
-        Pose("ArmL", new Vector3(0f, hop, 0f), new Vector3(arm, 0f, -arm * 0.5f), Vector3.One);
-        Pose("ArmR", new Vector3(0f, hop, 0f), new Vector3(-arm - wave, 0f, arm * 0.5f + wave), Vector3.One);
+        if (_npc == NPCsModule.Pip)
+            PoseCook(dt, hop, arm);
+        else
+        {
+            float wave = _talk * (0.25f + MathF.Sin(_time * 6f) * 0.15f) * live;
+            Pose("ArmL", new Vector3(0f, hop, 0f), new Vector3(arm, 0f, -arm * 0.5f), Vector3.One);
+            Pose("ArmR", new Vector3(0f, hop, 0f), new Vector3(-arm - wave, 0f, arm * 0.5f + wave), Vector3.One);
+        }
         // The hands stay at the ends of the arms.
         FollowArm("ArmL", "HandL");
         FollowArm("ArmR", "HandR");
+    }
+
+    /// <summary>
+    /// Pip's arms: the right one reaches up over the rim of the soup pot on the counter (in front,
+    /// to Pip's right) and stirs it in little circles with the spoon tipped forward into it; the
+    /// left one waves high for a moment when the player comes near and while talking (stirring
+    /// slows meanwhile). It tips the spoon hand itself (<see cref="FollowArm"/> only moves it).
+    /// </summary>
+    private void PoseCook(float dt, float hop, float arm)
+    {
+        _waveLeft = MathF.Max(0f, _waveLeft - dt);
+        _wave = Mathf.MoveToward(_wave, _waveLeft > 0f || Talking ? 1f : 0f, dt * 4f);
+        float stir = 1f - _wave * 0.5f;
+        _stir += dt * 3.4f * stir;
+        float turn = _stir;
+        // Rotation about X lifts the arm forward (past level, up over the rim), circling.
+        Pose("ArmR", new Vector3(0f, hop, 0f),
+            new Vector3(stir * (2.0f + MathF.Sin(turn) * 0.12f), 0f, stir * (MathF.Cos(turn) * 0.12f)), Vector3.One);
+        // The spoon hangs down from the hand: tip it forward into the pot.
+        if (_parts.TryGetValue("HandR", out var hand))
+            hand.Node.Basis = hand.Home.Basis * Basis.FromEuler(new Vector3(0.8f * stir, 0f, 0f));
+        // The wave: out to the side and a little forward, beside the face, flapping.
+        float flap = MathF.Sin(_time * 10f) * 0.4f;
+        Pose("ArmL", new Vector3(0f, hop, 0f),
+            new Vector3(arm * (1f - _wave) + _wave * 0.9f, 0f, -arm * 0.5f * (1f - _wave) - _wave * (1.9f + flap)), Vector3.One);
     }
 
     private void Pose(string name, Vector3 offset, Vector3 euler, Vector3 scale)

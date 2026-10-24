@@ -4,6 +4,7 @@ using System.Linq;
 using System.Numerics;
 using Fungtopia.DayNight;
 using Fungtopia.Dialogue;
+using Fungtopia.Food;
 using Fungtopia.Input;
 using Fungtopia.Map;
 using Fungtopia.Monsters;
@@ -20,7 +21,8 @@ namespace Fungtopia.NPCs.Tests;
 public class NPCsModuleTests
 {
     private const double Step = 1.0 / 60;
-    private const int Jeremy = NPCsModule.Jeremy, Millie = NPCsModule.Millie, Lucy = NPCsModule.Lucy, Abby = NPCsModule.Abby;
+    private const int Jeremy = NPCsModule.Jeremy, Millie = NPCsModule.Millie, Lucy = NPCsModule.Lucy, Abby = NPCsModule.Abby,
+        Pip = NPCsModule.Pip;
 
     /// <summary>Fake of the shell's bus: records what NPCs publishes; a fake wallet answers purchases.</summary>
     private sealed class FakeBus : IMessageBus
@@ -124,9 +126,10 @@ public class NPCsModuleTests
         public QuestState Quest => Bus.All<QuestState>()[^1];
     }
 
+    /// <summary>In front of where the player talks to <paramref name="npc"/> (Pip: in front of the food stall's counter).</summary>
     private static Vector3 Near(int npc, float distance = 1.5f)
     {
-        var spot = NPCsModule.Spots[npc];
+        var spot = NPCsModule.TalkSpots[npc];
         return spot.Position + spot.Facing * distance;
     }
 
@@ -148,11 +151,33 @@ public class NPCsModuleTests
         Assert.Equal(Places.MillieSpot.Position, NPCsModule.Position(Millie));
         Assert.Equal(Places.LucySpot.Position, NPCsModule.Position(Lucy));
         Assert.Equal(Places.AbbySpot.Position, NPCsModule.Position(Abby));
-        Assert.Equal(4, NPCsModule.Count);
+        Assert.Equal(5, NPCsModule.Count);
         var rig = new Rig(Far);
         rig.Wait(5);
         for (int i = 0; i < NPCsModule.Count; i++)
             Assert.Equal(NPCsModule.Spots[i].Yaw, rig.Npcs.Yaw[i], 4);
+    }
+
+    [Fact]
+    public void PipStandsBehindTheFoodStallsCounterFacingIt()
+    {
+        var counter = Places.FoodSpot;
+        var pip = NPCsModule.Spots[Pip];
+        // Behind the counter spot (towards the stall), a little to the side, facing the same way: out at the customer.
+        var offset = pip.Position - counter.Position;
+        Assert.Equal(-NPCsModule.PipBehindCounter, Vector3.Dot(offset, counter.Facing), 3);
+        var right = new Vector3(-counter.Facing.Z, 0f, counter.Facing.X);
+        Assert.Equal(-NPCsModule.PipBesidePot, Vector3.Dot(offset, right), 3);
+        Assert.InRange(NPCsModule.PipBehindCounter, 2.4f, 3.0f);
+        Assert.InRange(NPCsModule.PipBesidePot, 0f, 0.8f);
+        Assert.Equal(Ground.HeightAt(pip.Position.X, pip.Position.Z), pip.Position.Y, 4);
+        Assert.Equal(counter.Yaw, pip.Yaw, 5);
+        // Inside the stall's footprint (behind its counter), not out on the square.
+        var stall = Buildings.First(BuildingKind.FoodStall);
+        Assert.True(stall.Contains(pip.Position.X, pip.Position.Z, 0f));
+        Assert.Equal(counter.Position, NPCsModule.TalkSpots[Pip].Position);
+        Assert.Equal("Pip", NPCsModule.Name(Pip));
+        Assert.Equal(Voices.Bubbly, NPCsModule.Voice(Pip));
     }
 
     [Theory]
@@ -160,6 +185,7 @@ public class NPCsModuleTests
     [InlineData(Millie)]
     [InlineData(Lucy)]
     [InlineData(Abby)]
+    [InlineData(Pip)]
     public void PromptShowsWithinTwoAndAHalfMeters(int npc)
     {
         var rig = new Rig(Far);
@@ -173,7 +199,7 @@ public class NPCsModuleTests
         rig.Position = Near(npc, 2.4f);
         rig.Tick();
         Assert.Equal(npc, rig.Npcs.PromptNpc);
-        Assert.Equal("E / X: Talk", rig.Npcs.PromptText);
+        Assert.Equal(npc == Pip ? "E / X: Food" : "E / X: Talk", rig.Npcs.PromptText);
 
         rig.Alive = false;
         rig.Tick();
@@ -454,6 +480,126 @@ public class NPCsModuleTests
         Assert.Equal(-1, rig.Npcs.Talking);
         rig.Press();
         Assert.Empty(rig.Bus.All<OpenShop>());
+    }
+
+    [Fact]
+    public void PipsPromptShowsAtTheCounterNotFromBehindTheStall()
+    {
+        var rig = new Rig(Places.FoodSpot.Position);
+        rig.Tick();
+        Assert.Equal(Pip, rig.Npcs.PromptNpc);
+        Assert.Equal(NPCsModule.FoodPrompt, rig.Npcs.PromptText);
+
+        // Off to the counter's side, 2.4 m from the spot in front of it: still showing; 2.6 m: gone.
+        var side = new Vector3(Places.FoodSpot.Facing.Z, 0f, -Places.FoodSpot.Facing.X);
+        rig.Position = Places.FoodSpot.Position + side * 2.4f;
+        rig.Tick();
+        Assert.Equal(Pip, rig.Npcs.PromptNpc);
+        rig.Position = Places.FoodSpot.Position + side * 2.6f;
+        rig.Tick();
+        Assert.Equal(-1, rig.Npcs.PromptNpc);
+
+        // Behind the stall, close to Pip but on the far side of the counter spot: no prompt.
+        rig.Position = NPCsModule.Spots[Pip].Position - Places.FoodSpot.Facing * 1f;
+        rig.Tick();
+        Assert.Equal(-1, rig.Npcs.PromptNpc);
+        // Pip still notices you there, but keeps facing the counter (stirring the pot on it).
+        Assert.Equal(Pip, rig.Npcs.Noticing);
+        rig.Wait(60);
+        Assert.Equal(Places.FoodSpot.Yaw, rig.Npcs.Yaw[Pip], 4);
+    }
+
+    [Fact]
+    public void PipNoticesYouComingNear()
+    {
+        var rig = new Rig(Places.FoodSpot.Position + Places.FoodSpot.Facing * 6f);
+        rig.Tick();
+        Assert.Equal(-1, rig.Npcs.Noticing);
+        rig.Position = Places.FoodSpot.Position;
+        rig.Tick();
+        Assert.Equal(Pip, rig.Npcs.Noticing);
+        rig.Alive = false;
+        rig.Tick();
+        Assert.Equal(-1, rig.Npcs.Noticing);
+    }
+
+    [Fact]
+    public void PipGreetsYouThenOpensTheFoodMenu()
+    {
+        var rig = new Rig(Places.FoodSpot.Position);
+        rig.Tick(interact: true);
+        var line = Assert.Single(rig.Lines);
+        Assert.Equal("Pip", line.Speaker);
+        Assert.Equal(NPCsModule.SpeakerId(Pip), line.SpeakerId);
+        Assert.Equal(Voices.Bubbly, line.Voice);
+        Assert.Equal("Fresh from the oven!", line.Text);
+        Assert.True(line.Last);
+        Assert.Equal(Pip, rig.Npcs.Talking);
+        Assert.Equal(-1, rig.Npcs.PromptNpc);
+        // The menu waits until the greeting is dismissed.
+        rig.Wait(10);
+        Assert.Empty(rig.Bus.All<OpenFoodMenu>());
+
+        rig.Press();
+        Assert.False(rig.Open);
+        Assert.Single(rig.Bus.All<OpenFoodMenu>());
+        Assert.Equal(-1, rig.Npcs.Talking);
+        Assert.Single(rig.Lines);
+
+        // The Food module holds UiFocus while its menu is open: no prompt, and buying with Interact
+        // does not make Pip greet again or ask for the menu again.
+        const int menuOwner = 8241001;
+        rig.Npcs.Handle(new UiFocus(menuOwner, true));
+        rig.Press();
+        rig.Press();
+        Assert.Equal(-1, rig.Npcs.PromptNpc);
+        Assert.Single(rig.Lines);
+        Assert.Single(rig.Bus.All<OpenFoodMenu>());
+
+        // Menu closed: Pip can be talked to again.
+        rig.Npcs.Handle(new UiFocus(menuOwner, false));
+        rig.Tick();
+        Assert.Equal(Pip, rig.Npcs.PromptNpc);
+        rig.Press();
+        rig.Press();
+        Assert.Equal(2, rig.Lines.Count);
+        Assert.Equal(2, rig.Bus.All<OpenFoodMenu>().Count);
+    }
+
+    [Fact]
+    public void PipsGreetingsTakeTurns()
+    {
+        var rig = new Rig(Places.FoodSpot.Position);
+        var heard = new List<string>();
+        for (int talk = 0; talk < 4; talk++)
+        {
+            rig.Press();
+            heard.AddRange(rig.ReadAll());
+        }
+        Assert.Equal(new[]
+        {
+            "Fresh from the oven!",
+            "Hungry from the forest? I've got you!",
+            "A pie a day keeps the doctor away... sorry, Dr. Jeremy!",
+            "Fresh from the oven!",
+        }, heard);
+        Assert.Equal(heard.Take(3), NPCsModule.PipGreetings.ToArray());
+        // One short line per talk, and the menu after each.
+        Assert.All(rig.Lines, l => Assert.True(l.Last));
+        Assert.Equal(4, rig.Bus.All<OpenFoodMenu>().Count);
+    }
+
+    [Fact]
+    public void PipDoesNotOpenTheMenuWhenSomeoneElseTakesTheBubble()
+    {
+        var rig = new Rig(Places.FoodSpot.Position);
+        rig.Tick(interact: true);
+        Assert.Equal(Pip, rig.Npcs.Talking);
+        rig.Shown = new SayLine(42, "Someone", "Hi", Voices.Neutral, true);
+        rig.Tick();
+        Assert.Equal(-1, rig.Npcs.Talking);
+        rig.Press();
+        Assert.Empty(rig.Bus.All<OpenFoodMenu>());
     }
 
     [Fact]
@@ -777,6 +923,16 @@ public class NPCsModuleTests
         Assert.Equal(-1, rig.Npcs.Talking);
         Assert.Empty(rig.Bus.All<OpenShop>());
         Assert.Equal(lines, rig.Bus.All<SayLine>().Count);
+
+        rig.Position = Places.FoodSpot.Position;
+        rig.Press();
+        Assert.Equal(Pip, rig.Npcs.Talking);
+        rig.Npcs.Restore(new NPCsModule().SaveJson());
+        rig.Open = false;
+        rig.Npcs.Handle(new DialogueClosed(NPCsModule.SpeakerId(Pip)));
+        rig.Tick();
+        Assert.Equal(-1, rig.Npcs.Talking);
+        Assert.Empty(rig.Bus.All<OpenFoodMenu>());
     }
 
     [Fact]
@@ -788,7 +944,7 @@ public class NPCsModuleTests
                      typeof(PlayerInput), typeof(PlayerState), typeof(DialogueState), typeof(DialogueAdvanced),
                      typeof(DialogueClosed), typeof(WokeUp), typeof(MonsterKilled), typeof(CoinsEarned),
                      typeof(SpendResult), typeof(OwnedPets), typeof(WardrobeState), typeof(CollectSave),
-                     typeof(RestorePart),
+                     typeof(RestorePart), typeof(UiFocus),
                  })
             Assert.Contains(type, rig.Bus.Subscribed);
     }

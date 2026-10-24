@@ -1,7 +1,9 @@
-# Builds the four townsfolk and exports them next to this script:
-#   jeremy.glb  millie.glb  lucy.glb  abby.glb
+# Builds the five townsfolk and exports them next to this script:
+#   jeremy.glb  millie.glb  lucy.glb  abby.glb  pip.glb
 # Run from the repository root:
 #   blender -b --factory-startup --python modules/NPCs/Models/npcs.py
+# or only some of them:
+#   blender -b --factory-startup --python modules/NPCs/Models/npcs.py -- pip
 #
 # Chibi folk in the style of the player characters (modules/Player/Models/characters.py): a big
 # round head, a simple rounded body, short arms with little round hands, stubby legs.
@@ -11,6 +13,10 @@
 #   Lucy:       a flower in her hair, half-lidded unimpressed eyes, a shirt saying "Pet Store"
 #               with little hearts.
 #   Abby:       big dark eyes, a happy smile, hair in a tall top bun, a triangle dress.
+#   Pip:        the cook at the Mushroom Munchies food stall: big dark eyes, rosy freckled cheeks,
+#               a puffy white chef's hat shaped like a mushroom cap with red spots, a cream apron
+#               with a little muffin printed on it, a wooden spoon in the right hand; standing on
+#               a little wooden step stool (to reach over the counter).
 #
 # Meters, feet at the origin, facing Blender +Y (Godot's -Z, forward, after the glTF export).
 # Separate objects with pivots where they move, so the game can animate them: Body (hip), Head
@@ -18,6 +24,7 @@
 # plain colors only; the game draws them toon-shaded with ink outlines.
 import math
 import os
+import sys
 
 import bmesh
 import bpy
@@ -444,6 +451,114 @@ def abby(mats):
     limbs(mats, "Skin", "Skin", shoulder_x=0.15)
 
 
+def freckles(head, mats):
+    """A few freckles across each rosy cheek and the nose."""
+    for side in (-1, 1):
+        for dx, dz in ((0.0, 0.0), (0.045, 0.02), (0.035, -0.03), (-0.04, 0.015)):
+            head.sphere(mats["Freckle"], HEAD_C + Vector((side * (0.22 + dx), HEAD_R * 0.8 - dx * 0.4, -0.11 + dz)),
+                        (0.011, 0.008, 0.011), segments=8, rings=4)
+
+
+def muffin_print(part, mats, center, size, body_c, body_r, lift=0.004):
+    """A little muffin printed on a surface facing +Y (an ellipsoid at body_c with radii body_r):
+    a pleated pink cup, a domed brown top with blue berries and a red cherry."""
+    def on(x, z):
+        u = ((x - body_c[0]) / body_r[0]) ** 2 + ((z - body_c[2]) / body_r[2]) ** 2
+        return Vector((x, body_c[1] + body_r[1] * math.sqrt(max(0.0, 1.0 - u)) + lift, z))
+    cx, _, cz = center
+    # The cup: a trapezoid of flattened pleats, wider at the top.
+    for k in range(5):
+        t = (k - 2) / 2
+        top = on(cx + t * size * 0.5, cz - size * 0.05)
+        bottom = on(cx + t * size * 0.36, cz - size * 0.5)
+        part.capsule(mats["Cup"], top, bottom, size * 0.11, segments=8)
+    # The muffin top, berries and a cherry.
+    part.sphere(mats["MuffinTop"], on(cx, cz + size * 0.12), (size * 0.62, size * 0.06, size * 0.34), segments=16, rings=8)
+    for dx, dz in ((-0.25, 0.16), (0.2, 0.22), (0.0, 0.05), (0.33, 0.04)):
+        part.sphere(mats["Berry"], on(cx + dx * size, cz + dz * size) + Vector((0, 0.02 * size, 0)),
+                    (size * 0.09, size * 0.06, size * 0.09), segments=8, rings=4)
+    part.sphere(mats["Cherry"], on(cx - size * 0.05, cz + size * 0.46) + Vector((0, 0.02 * size, 0)),
+                (size * 0.12, size * 0.07, size * 0.12), segments=10, rings=5)
+
+
+STOOL_H = 0.45
+
+
+def pip(mats):
+    head = Part("Head", (0, 0, NECK_Z))
+    head.sphere(mats["Skin"], HEAD_C, (HEAD_R, HEAD_R * 0.96, HEAD_R * 0.94), segments=40, rings=24)
+    round_eyes(head, mats)
+    blush(head, mats)
+    freckles(head, mats)
+    smile(head, mats, big=True)
+    # Short ginger hair under the hat: the back of the head, a fringe and tufts over the ears.
+    head.sphere(mats["Hair"], HEAD_C + Vector((0, -0.04, 0.0)), (HEAD_R * 1.02, HEAD_R, HEAD_R * 0.96),
+                segments=40, rings=24, cut=(HEAD_C + Vector((0, 0.12, 0.0)), Vector((0, 1, 0))))
+    for x in (-0.24, -0.12, 0.0, 0.12, 0.24):
+        head.sphere(mats["Hair"], HEAD_C + Vector((x, HEAD_R * 0.78 - abs(x) * 0.4, 0.22 - abs(x) * 0.2)),
+                    (0.085, 0.06, 0.06), segments=14, rings=7)
+    for side in (-1, 1):
+        head.sphere(mats["Hair"], HEAD_C + Vector((side * HEAD_R * 0.92, -0.04, 0.05)), (0.08, 0.17, 0.15),
+                    segments=16, rings=8)
+        head.sphere(mats["Skin"], HEAD_C + Vector((side * HEAD_R * 0.97, 0.03, -0.08)), (0.05, 0.04, 0.07),
+                    segments=12, rings=6)
+    # The chef's hat: a white band round the top of the head under a puffy white mushroom cap,
+    # puffed up like a toque, with a few red spots and cream gills beneath its rim.
+    band_z = HEAD_C.z + HEAD_R * 0.6
+    head.cone(mats["Hat"], (0, -0.01, band_z), HEAD_R * 0.86, HEAD_R * 0.92, 0.08, segments=40)
+    cap_c = Vector((0, -0.01, band_z + 0.06))
+    cap_r = (0.47, 0.45, 0.24)
+    # The cap's rim curls under a little, puffy, with cream gills beneath.
+    head.torus(mats["Hat"], cap_c + Vector((0, 0, 0.01)), 0.42, 0.045, segments=48)
+    head.sphere(mats["Gills"], cap_c + Vector((0, 0, -0.005)), (0.43, 0.41, 0.03), segments=40, rings=8)
+    head.sphere(mats["Hat"], cap_c, cap_r, segments=40, rings=20,
+                cut=(cap_c + Vector((0, 0, -0.01)), Vector((0, 0, -1))))
+    for a, up, r in ((75, 0.55, 0.075), (25, 0.3, 0.06), (130, 0.32, 0.065), (-20, 0.62, 0.05), (200, 0.6, 0.055),
+                     (-75, 0.3, 0.06), (95, 0.95, 0.05)):
+        t = math.radians(a)
+        d = Vector((math.cos(t) * math.sqrt(1 - up * up), math.sin(t) * math.sqrt(1 - up * up), up))
+        spot = cap_c + Vector((d.x * cap_r[0], d.y * cap_r[1], d.z * cap_r[2]))
+        normal = Vector((d.x / cap_r[0], d.y / cap_r[1], d.z / cap_r[2])).normalized()
+        head.sphere(mats["HatSpots"], spot, (r, r, r * 0.35),
+                    rotation=normal.to_track_quat("Z", "Y").to_matrix().to_4x4(), segments=14, rings=6)
+    head.build()
+
+    body = Part("Body", (0, 0, HIP_Z))
+    body_c = (0, 0, (HIP_Z + NECK_Z) / 2 - 0.02)
+    body_r = (0.25, 0.22, 0.27)
+    body.sphere(mats["Shirt"], body_c, body_r, segments=32, rings=16)
+    body.sphere(mats["Trousers"], (0, 0, HIP_Z + 0.04), (0.245, 0.215, 0.1), segments=32, rings=10)
+    # The cream apron: the front of a slightly bigger body, a neck strap, a waist tie bowed at the back.
+    apron_r = (body_r[0] + 0.012, body_r[1] + 0.012, body_r[2] + 0.012)
+    body.sphere(mats["Apron"], body_c, apron_r, segments=32, rings=16,
+                cut=(Vector(body_c) + Vector((0, 0.1, 0)), Vector((0, -1, 0))))
+    body.torus(mats["Apron"], (0, 0.02, NECK_Z - 0.03), 0.13, 0.016, rotation=Matrix.Rotation(math.radians(20), 4, "X"))
+    body.torus(mats["Apron"], (0, 0, HIP_Z + 0.09), 0.245, 0.018, segments=40)
+    ribbon_bow(body, mats["Apron"], (0, -0.24, HIP_Z + 0.09), 0.05)
+    muffin_print(body, mats, (0, 0, body_c[2] + 0.02), 0.15, body_c, apron_r)
+    body.build()
+    limbs(mats, "Shirt", "Trousers", shoulder_x=0.22)
+
+    # A wooden spoon in the right hand, pointing down (into the pot while stirring).
+    h = bpy.data.objects["HandR"].location.copy()
+    spoon = Part("Spoon", h)
+    spoon.capsule(mats["Wood"], h + Vector((0, 0.01, 0.07)), h + Vector((0, 0.01, -0.3)), 0.014, segments=10)
+    spoon.sphere(mats["Wood"], h + Vector((0, 0.01, -0.36)), (0.05, 0.022, 0.07), segments=16, rings=8)
+    spoon.build().parent = bpy.data.objects["HandR"]
+    bpy.data.objects["Spoon"].location = (0, 0, 0)
+
+    # Pip is short, so stands on a little step stool behind the counter: lift everything onto it.
+    for obj in bpy.data.objects:
+        if obj.parent is None:
+            obj.location.z += STOOL_H
+    stool = Part("Stool", (0, 0, 0))
+    stool.box(mats["Wood"], (0, 0, STOOL_H - 0.03), (0.5, 0.36, 0.06))
+    for x in (-0.2, 0.2):
+        stool.box(mats["WoodDark"], (x, 0, (STOOL_H - 0.06) / 2), (0.05, 0.3, STOOL_H - 0.06))
+    stool.box(mats["WoodDark"], (0, 0, STOOL_H * 0.35), (0.4, 0.04, 0.05))
+    stool.build()
+
+
 KINDS = {
     "jeremy": (jeremy, {
         "Hair": (0.35, 0.22, 0.14),
@@ -484,6 +599,22 @@ KINDS = {
         "Collar": (1.0, 0.97, 0.9),
         "Hem": (1.0, 0.97, 0.9),
     }),
+    "pip": (pip, {
+        "Hair": (0.85, 0.42, 0.18),
+        "Freckle": (0.66, 0.36, 0.22),
+        "Hat": (1.0, 1.0, 0.98),
+        "Gills": (0.98, 0.9, 0.78),
+        "HatSpots": (0.9, 0.2, 0.22),
+        "Shirt": (0.92, 0.38, 0.36),
+        "Apron": (0.95, 0.8, 0.56),
+        "Cup": (0.97, 0.55, 0.68),
+        "MuffinTop": (0.72, 0.45, 0.25),
+        "Berry": (0.35, 0.38, 0.85),
+        "Cherry": (0.9, 0.15, 0.2),
+        "Trousers": (0.45, 0.35, 0.3),
+        "Wood": (0.8, 0.58, 0.36),
+        "WoodDark": (0.55, 0.36, 0.22),
+    }),
 }
 
 
@@ -499,5 +630,6 @@ def build(kind):
     print(f"npcs.py: wrote {out}")
 
 
-for name in KINDS:
+wanted = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else list(KINDS)
+for name in wanted:
     build(name)

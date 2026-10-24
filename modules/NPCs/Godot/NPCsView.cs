@@ -5,13 +5,17 @@ using Godot;
 namespace Fungtopia.NPCs.View;
 
 /// <summary>
-/// Draws the NPCs module: Dr. Jeremy, Millie, Lucy and Abby at their spots, turned smoothly to the
-/// Core's facing, with their idle and talking animation (<see cref="NpcFigure"/>), and the small
-/// "E / X: Talk" prompt floating over the one the player is near.
+/// Draws the NPCs module: Dr. Jeremy, Millie, Lucy, Abby and Pip (behind the food stall's counter,
+/// on its floor) at their spots, turned smoothly to the Core's facing, with their idle and talking
+/// animation (<see cref="NpcFigure"/>), and the small "E / X: Talk" (Pip: "E / X: Food") prompt
+/// floating over the one the player is near.
 /// </summary>
 public partial class NPCsView : Node3D, IModuleView
 {
     private static readonly Color Ink = new(0.24f, 0.13f, 0.12f);
+
+    /// <summary>The food stall's plank floor above the ground at Pip's spot (as the Town module draws it), which Pip stands on.</summary>
+    private const float StallFloor = 0.05f;
 
     private NPCsModule? _npcs;
     private readonly NpcFigure[] _figures = new NpcFigure[NPCsModule.Count];
@@ -26,7 +30,7 @@ public partial class NPCsView : Node3D, IModuleView
         {
             var figure = NpcFigure.Create(i);
             var p = NPCsModule.Spots[i].Position;
-            figure.Position = new Vector3(p.X, p.Y, p.Z);
+            figure.Position = new Vector3(p.X, p.Y + (i == NPCsModule.Pip ? StallFloor : 0f), p.Z);
             figure.Rotation = new Vector3(0f, NPCsModule.Spots[i].Yaw, 0f);
             AddChild(figure);
             _figures[i] = figure;
@@ -49,6 +53,7 @@ public partial class NPCsView : Node3D, IModuleView
             float yaw = figure.Rotation.Y;
             figure.Rotation = new Vector3(0f, Mathf.LerpAngle(yaw, _npcs.Yaw[i], blend), 0f);
             figure.Talking = _npcs.Talking == i;
+            figure.Noticing = _npcs.Noticing == i;
         }
         PlacePrompt(_npcs.PromptNpc, _npcs.PromptText);
     }
