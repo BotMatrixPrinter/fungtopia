@@ -74,7 +74,7 @@ internal static class ForestFloor
         return best;
     }
 
-    private static float Hash(int i, int j, int k)
+    internal static float Hash(int i, int j, int k)
     {
         uint h = unchecked((uint)i * 374761393u + (uint)j * 668265263u + (uint)k * 2246822519u + 0x9E3779B9u);
         h = (h ^ (h >> 15)) * 2246822519u;
@@ -83,7 +83,7 @@ internal static class ForestFloor
         return (h >> 8) * (1f / 16777216f);
     }
 
-    private static bool InSquare(float x, float z, float margin)
+    internal static bool InSquare(float x, float z, float margin)
     {
         float limit = HalfSize - margin;
         return x >= -limit && x <= limit && z >= -limit && z <= limit;

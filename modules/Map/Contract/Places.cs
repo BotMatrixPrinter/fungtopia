@@ -36,7 +36,7 @@ public static class Places
     /// <summary>How far in front of a building's front its door or counter spot is (meters from the footprint).</summary>
     public const float FrontGap = 1.6f;
 
-    private const float North = 0f, South = MathF.PI;
+    private const float North = 0f, South = MathF.PI, West = MathF.PI / 2f;
 
     /// <summary>Outside your house's door, facing out (where you appear when you leave the house).</summary>
     public static readonly Place HomeDoor = InFront(BuildingKind.PlayerHouse);
@@ -71,16 +71,20 @@ public static class Places
     /// <summary>The signpost at Pet City's south entrance, beside the road, facing into the city.</summary>
     public static readonly Place SignpostPetCity = new(-4.5f, -156f, North);
 
+    /// <summary>The Deep Forest's entrance signpost, just inside the west gap beside the overgrown path, facing into the Deep Forest.</summary>
+    public static readonly Place SignpostDeepForest = new(-112f, 5.5f, West);
+
     /// <summary>
-    /// The signpost of an area (fast travel arrives there): Town, PetCity, and for Forest its south
-    /// entrance (<see cref="SignpostForestSouth"/>). Road and Home have none (throws).
+    /// The signpost of an area (fast travel arrives there): Town, PetCity, DeepForest, and for
+    /// Forest its south entrance (<see cref="SignpostForestSouth"/>). Road and Home have none (throws).
     /// </summary>
     public static Place Signpost(Area area) => area switch
     {
         Area.Town => SignpostTown,
         Area.Forest => SignpostForestSouth,
         Area.PetCity => SignpostPetCity,
-        _ => throw new ArgumentOutOfRangeException(nameof(area), area, "only Town, Forest and PetCity have signposts"),
+        Area.DeepForest => SignpostDeepForest,
+        _ => throw new ArgumentOutOfRangeException(nameof(area), area, "only Town, Forest, PetCity and DeepForest have signposts"),
     };
 
     private static Place InFront(BuildingKind kind)

@@ -40,6 +40,7 @@ public class MapTests
         yield return Places.SignpostForestSouth;
         yield return Places.SignpostForestNorth;
         yield return Places.SignpostPetCity;
+        yield return Places.SignpostDeepForest;
     }
 
     // Forest
@@ -102,7 +103,8 @@ public class MapTests
         for (float z = -95f; z <= 95f; z += 1f)
         {
             Assert.False(Areas.Walkable(103f, z));
-            Assert.False(Areas.Walkable(-103f, z));
+            if (MathF.Abs(z) > Areas.DeepForestGapHalfWidth + 2f)
+                Assert.False(Areas.Walkable(-103f, z)); // the west gap is the Deep Forest's
         }
         Assert.Equal(new Vector2(0f, 100f), Areas.ForestGapSouth);
         Assert.Equal(new Vector2(0f, -100f), Areas.ForestGapNorth);
@@ -184,7 +186,7 @@ public class MapTests
     [Fact]
     public void RoadsConnectTownForestAndPetCityOnFoot()
     {
-        var box = new AreaBounds(-110f, -300f, 110f, 300f);
+        var box = new AreaBounds(-285f, -300f, 110f, 300f);
         var seen = Reachable(Places.HomeDoor.Position, box, out var reached);
         foreach (var place in TownAndCityPlaces())
             Assert.True(reached(place.Position.X, place.Position.Z), $"{place.Position} cannot be reached on foot from home");
@@ -216,15 +218,163 @@ public class MapTests
         Assert.False(Areas.Walkable(600f, 400f));
     }
 
+    // Deep Forest
+
+    [Fact]
+    public void DeepForestLiesWestOfTheForestBehindANarrowGap()
+    {
+        Assert.Equal((-280f, -90f, -110f, 90f), (Areas.DeepForest.MinX, Areas.DeepForest.MinZ, Areas.DeepForest.MaxX, Areas.DeepForest.MaxZ));
+        Assert.Equal(Areas.DeepForest, DeepForestLayout.Bounds);
+        Assert.Equal(new Vector2(-100f, 0f), Areas.ForestGapWest);
+        Assert.InRange(Areas.DeepForestGapHalfWidth * 2f, 7f, 9f); // about 8 m: a narrow path
+        Assert.Equal(new Vector2(-110f, 0f), DeepForestLayout.Entrance);
+        // Through the gap: free from inside the forest to inside the Deep Forest.
+        for (float x = -114f; x <= -94f; x += 0.5f)
+        for (float z = -3f; z <= 3f; z += 0.5f)
+        {
+            Assert.True(Free(x, z), $"west gap closed at ({x}, {z})");
+            Assert.Equal(x < -100f ? Area.DeepForest : Area.Forest, Areas.At(x, z));
+        }
+        // Elsewhere the strip between them is cliff.
+        for (float x = -109f; x <= -101f; x += 1f)
+        for (float z = -100f; z <= 100f; z += 1f)
+            if (MathF.Abs(z) > Areas.DeepForestGapHalfWidth)
+                Assert.False(Areas.Walkable(x, z), $"strip open at ({x}, {z})");
+        Assert.True(Ground.HeightAt(-105f, 40f) > Ground.HeightAt(-105f, 0f) + 1f, "no ridge beside the gap");
+    }
+
+    [Fact]
+    public void DeepForestIsReachedOnFootOnlyThroughTheWestGap()
+    {
+        var box = new AreaBounds(-285f, -95f, 0f, 95f);
+        var seen = Reachable(new Vector3(0f, 0f, -5f), box, out var reached);
+        var sign = Places.SignpostDeepForest.Position;
+        Assert.True(reached(sign.X, sign.Z), "the Deep Forest's signpost cannot be reached from the forest");
+        foreach (var s in DeepForestLayout.SpawnPoints)
+            Assert.True(reached(s.X, s.Y), $"spawn spot {s} cannot be reached from the forest");
+        Assert.True(reached(-270f, -80f) || reached(-268f, -80f) || reached(-270f, -78f), "the Deep Forest's far corner cannot be reached");
+        // Every reached spot west of the forest is in the Deep Forest or on its path, and the
+        // ground between them is crossed only through the gap.
+        for (int i = 0; i < seen.GetLength(0); i++)
+        for (int j = 0; j < seen.GetLength(1); j++)
+        {
+            if (!seen[i, j])
+                continue;
+            float x = box.MinX + i * 0.5f, z = box.MinZ + j * 0.5f;
+            if (x < -100f)
+                Assert.Equal(Area.DeepForest, Areas.At(x, z));
+            if (x is > -110f and < -100f)
+                Assert.True(MathF.Abs(z) <= Areas.DeepForestGapHalfWidth, $"crossed outside the gap at ({x}, {z})");
+        }
+    }
+
+    [Fact]
+    public void DeepForestSpawnSpotsAreWalkableSpreadAndAwayFromTheEntrance()
+    {
+        var spawns = DeepForestLayout.SpawnPoints;
+        Assert.InRange(spawns.Length, 8, 16);
+        float minX = float.MaxValue, maxX = float.MinValue, minZ = float.MaxValue, maxZ = float.MinValue;
+        for (int i = 0; i < spawns.Length; i++)
+        {
+            var s = spawns[i];
+            Assert.True(Areas.Walkable(s.X, s.Y, 2f), $"spawn spot {s} not walkable");
+            Assert.False(Ground.Blocks(s.X, s.Y, 2f), $"spawn spot {s} blocked");
+            Assert.Equal(Area.DeepForest, Areas.At(s.X, s.Y));
+            Assert.True(Vector2.Distance(s, DeepForestLayout.Entrance) >= DeepForestLayout.SpawnMinEntranceDistance, $"spawn spot {s} near the entrance");
+            Assert.True(Vector2.Distance(s, Areas.ForestGapWest) >= 40f);
+            for (int k = 0; k < i; k++)
+                Assert.True(Vector2.Distance(s, spawns[k]) >= 20f, $"spawn spots {s} and {spawns[k]} bunched up");
+            minX = MathF.Min(minX, s.X); maxX = MathF.Max(maxX, s.X);
+            minZ = MathF.Min(minZ, s.Y); maxZ = MathF.Max(maxZ, s.Y);
+        }
+        // Spread around the whole area.
+        Assert.True(maxX - minX > 100f && maxZ - minZ > 120f);
+        Assert.InRange(DeepForestLayout.SpawnMinEntranceDistance, 30f, 60f);
+    }
+
+    [Fact]
+    public void DeepForestMushroomsAreDenserAndBiggerThanTheForests()
+    {
+        var all = Ground.Obstacles;
+        int deep = Ground.DeepForestTrunkCount, first = all.Length - deep;
+        for (int i = Ground.ForestTrunkCount; i < first; i++)
+            Assert.NotEqual(Area.DeepForest, Areas.At(all[i].X, all[i].Z)); // the buildings' circles come before
+        float forestArea = 200f * 200f, deepArea = 170f * 180f;
+        Assert.True(deep / deepArea > 1.2f * (Ground.ForestTrunkCount / forestArea), $"only {deep} Deep Forest mushrooms");
+        float forestRadius = 0f, deepRadius = 0f;
+        for (int i = 0; i < Ground.ForestTrunkCount; i++)
+            forestRadius += all[i].Radius / Ground.ForestTrunkCount;
+        for (int i = first; i < all.Length; i++)
+        {
+            var o = all[i];
+            deepRadius += o.Radius / deep;
+            Assert.True(Areas.DeepForest.Contains(o.X, o.Z, o.Radius + 2f), $"Deep Forest mushroom at ({o.X}, {o.Z}) too near the edge");
+            Assert.Equal(Area.DeepForest, Areas.At(o.X, o.Z));
+            Assert.True(Ground.Blocks(o.X, o.Z));
+            Assert.True(Vector2.Distance(o.Center, DeepForestLayout.Entrance) > o.Radius + 6f, "a mushroom in the entrance");
+            for (int k = first; k < i; k++)
+                Assert.True(Vector2.Distance(o.Center, all[k].Center) > o.Radius + all[k].Radius + 1f, "Deep Forest mushrooms squeeze shut");
+        }
+        Assert.True(deepRadius > forestRadius * 1.3f, $"Deep Forest mushrooms ({deepRadius} m) not bigger than the forest's ({forestRadius} m)");
+        Assert.False(Ground.Blocks(Places.SignpostDeepForest.Position.X, Places.SignpostDeepForest.Position.Z, 2f));
+    }
+
+    [Fact]
+    public void DeepForestGroundIsRougherButStillWalkable()
+    {
+        // Bumpiness: mean absolute second difference of height over a 1 m grid.
+        static float Bumpiness(AreaBounds box)
+        {
+            float sum = 0f;
+            int n = 0;
+            for (float x = box.MinX + 5f; x <= box.MaxX - 5f; x += 1f)
+            for (float z = box.MinZ + 5f; z <= box.MaxZ - 5f; z += 1f, n++)
+                sum += MathF.Abs(Ground.HeightAt(x + 1f, z) + Ground.HeightAt(x - 1f, z) - 2f * Ground.HeightAt(x, z))
+                     + MathF.Abs(Ground.HeightAt(x, z + 1f) + Ground.HeightAt(x, z - 1f) - 2f * Ground.HeightAt(x, z));
+            return sum / n;
+        }
+        Assert.True(Bumpiness(Areas.DeepForest) > 2f * Bumpiness(Areas.Forest), "the Deep Forest's ground is no rougher than the forest's");
+        float lowest = float.MaxValue, highest = float.MinValue;
+        var b = Areas.DeepForest;
+        for (float x = b.MinX + 2f; x <= b.MaxX - 2f; x += 0.5f)
+        for (float z = b.MinZ + 2f; z <= b.MaxZ - 2f; z += 0.5f)
+        {
+            float h = Ground.HeightAt(x, z);
+            lowest = MathF.Min(lowest, h);
+            highest = MathF.Max(highest, h);
+            float sx = MathF.Abs(Ground.HeightAt(x + 0.5f, z) - h) / 0.5f, sz = MathF.Abs(Ground.HeightAt(x, z + 0.5f) - h) / 0.5f;
+            Assert.True(sx < 0.3f && sz < 0.3f, $"Deep Forest ground too steep at ({x}, {z})");
+        }
+        Assert.InRange(highest - lowest, 1f, 4f);
+    }
+
+    [Fact]
+    public void DeepForestLayoutIsDeterministic()
+    {
+        // Fixed data: the same spots and mushrooms every run (no seed, no clock).
+        Assert.Equal(new Vector2(-150f, -65f), DeepForestLayout.SpawnPoints[0]);
+        Assert.Equal(DeepForestLayout.SpawnPoints.ToArray(), DeepForestLayout.SpawnPoints.ToArray());
+        var all = Ground.Obstacles;
+        var first = all[all.Length - Ground.DeepForestTrunkCount];
+        Assert.Equal(DeepForestTrunkCountPinned, Ground.DeepForestTrunkCount);
+        Assert.True(Ground.Blocks(first.X, first.Z));
+        float h = Ground.HeightAt(-200.25f, 33.5f);
+        Assert.Equal(h, Ground.HeightAt(-200.25f, 33.5f));
+        Assert.Equal(Places.SignpostDeepForest.Position, new Place(-112f, 5.5f, MathF.PI / 2f).Position);
+    }
+
+    private const int DeepForestTrunkCountPinned = 311;
+
     // Outside
 
     [Fact]
     public void OutsideTheAreasIsNotWalkable()
     {
-        for (float x = -200f; x <= 200f; x += 2f)
+        for (float x = -320f; x <= 200f; x += 2f)
         for (float z = -350f; z <= 350f; z += 2f)
         {
             bool inside = Areas.Forest.Contains(x, z) || Areas.Town.Contains(x, z) || Areas.PetCity.Contains(x, z)
+                          || Areas.DeepForest.Contains(x, z) || Areas.DeepForestPath.Contains(x, z)
                           || Areas.RoadDistance(x, z) <= Areas.RoadHalfWidth;
             Assert.Equal(inside, Areas.Walkable(x, z));
             if (!Areas.Walkable(x, z, -(Ground.HedgeBand + Ground.CliffRise)) && MathF.Max(MathF.Abs(x), MathF.Abs(z)) > 104f)
@@ -236,6 +386,8 @@ public class MapTests
         Assert.False(Areas.Walkable(0f, 300f));
         Assert.False(Areas.Walkable(0f, -300f));
         Assert.False(Areas.Walkable(140f, 0f));
+        Assert.False(Areas.Walkable(-290f, 0f));
+        Assert.False(Areas.Walkable(-200f, 100f));
     }
 
     [Fact]
@@ -248,10 +400,17 @@ public class MapTests
         Assert.Equal(Area.PetCity, Areas.At(0f, -220f));
         Assert.Equal(Area.Road, Areas.At(Areas.RoadPoints[3].X, Areas.RoadPoints[3].Y));
         Assert.Equal(Area.Home, Areas.At(600f, 600f));
+        Assert.Equal(Area.DeepForest, Areas.At(-200f, 0f));
+        Assert.Equal(Area.DeepForest, Areas.At(-279f, -89f));
+        Assert.Equal(Area.DeepForest, Areas.At(-105f, 0f)); // the overgrown path
+        Assert.Equal(Area.Forest, Areas.At(-99f, 0f));
         // Off the walkable ground: the nearest area.
         Assert.Equal(Area.Town, Areas.At(0f, 300f));
         Assert.Equal(Area.PetCity, Areas.At(-90f, -200f));
         Assert.Equal(Area.Forest, Areas.At(110f, 0f));
+        Assert.Equal(Area.DeepForest, Areas.At(-290f, 0f));
+        Assert.Equal(Area.DeepForest, Areas.At(-200f, 110f));
+        Assert.Equal(Areas.DeepForest, Areas.Bounds(Area.DeepForest));
         Assert.Equal(Area.Town, Areas.Bounds(Area.Town).Contains(0f, 200f) ? Area.Town : Area.Road);
         Assert.Throws<ArgumentOutOfRangeException>(() => Areas.Bounds(Area.Road));
     }
@@ -271,7 +430,7 @@ public class MapTests
     public void GroundIsContinuousAndWalkableGroundIsGentle()
     {
         const float step = 0.5f;
-        for (float x = -150f; x <= 150f; x += step)
+        for (float x = -310f; x <= 150f; x += step)
         for (float z = -320f; z <= 320f; z += step)
         {
             float h = Ground.HeightAt(x, z);
@@ -313,6 +472,7 @@ public class MapTests
         Check(Places.SignpostForestNorth, Area.Forest);
         Check(Places.SignpostPetCity, Area.PetCity);
         Check(Places.LucySpot, Area.PetCity);
+        Check(Places.SignpostDeepForest, Area.DeepForest);
         Check(Places.HomeInterior, Area.Home);
         Check(Places.HomeExit, Area.Home);
         Assert.Equal(Areas.HomeFloorY, Places.HomeInterior.Position.Y);
@@ -324,6 +484,7 @@ public class MapTests
         Assert.Equal(Places.SignpostTown, Places.Signpost(Area.Town));
         Assert.Equal(Places.SignpostForestSouth, Places.Signpost(Area.Forest));
         Assert.Equal(Places.SignpostPetCity, Places.Signpost(Area.PetCity));
+        Assert.Equal(Places.SignpostDeepForest, Places.Signpost(Area.DeepForest));
         Assert.Throws<ArgumentOutOfRangeException>(() => Places.Signpost(Area.Road));
         Assert.Throws<ArgumentOutOfRangeException>(() => Places.Signpost(Area.Home));
         // Within 10 m of its entrance (and of the road there).
@@ -331,6 +492,12 @@ public class MapTests
         Assert.True(Vector2.Distance(new(Places.SignpostPetCity.Position.X, Places.SignpostPetCity.Position.Z), new(0f, -150f)) < 10f);
         Assert.True(Vector2.Distance(new(Places.SignpostForestSouth.Position.X, Places.SignpostForestSouth.Position.Z), Areas.ForestGapSouth) < 10f);
         Assert.True(Vector2.Distance(new(Places.SignpostForestNorth.Position.X, Places.SignpostForestNorth.Position.Z), Areas.ForestGapNorth) < 10f);
+        // The Deep Forest's stands just inside the west gap, beside the overgrown path, facing west into it.
+        var deep = Places.SignpostDeepForest;
+        Assert.True(Vector2.Distance(new(deep.Position.X, deep.Position.Z), DeepForestLayout.Entrance) < 7f);
+        Assert.True(Areas.DeepForest.Contains(deep.Position.X, deep.Position.Z));
+        Assert.InRange(MathF.Abs(deep.Position.Z), Areas.DeepForestGapHalfWidth, Areas.DeepForestGapHalfWidth + 3f);
+        Assert.True(deep.Facing.X < -0.99f);
         foreach (var p in new[] { Places.SignpostTown, Places.SignpostPetCity, Places.SignpostForestSouth, Places.SignpostForestNorth })
             Assert.InRange(Areas.RoadDistance(p.Position.X, p.Position.Z), Areas.RoadHalfWidth - 2f, Areas.RoadHalfWidth + 3f);
     }
@@ -444,7 +611,7 @@ public class MapTests
         int count = 0;
         for (int i = 0; i < 20000; i++)
         {
-            float x = i * 0.37f % 200f - 100f, z = i * 0.53f % 600f - 300f;
+            float x = i * 0.37f % 400f - 300f, z = i * 0.53f % 600f - 300f;
             sum += Ground.HeightAt(x, z);
             count += Ground.Blocks(x, z, 0.4f) ? 1 : 0;
             count += Areas.Walkable(x, z, 0.4f) ? 1 : 0;
@@ -462,7 +629,7 @@ public class MapTests
     public void BlocksAgreesWithABruteForceCheck()
     {
         var obstacles = Ground.Obstacles.ToArray();
-        for (float x = -110f; x <= 110f; x += 1.7f)
+        for (float x = -290f; x <= 110f; x += 1.7f)
         for (float z = -300f; z <= 300f; z += 1.3f)
         {
             bool expected = false;

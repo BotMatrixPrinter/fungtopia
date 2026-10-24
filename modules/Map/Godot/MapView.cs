@@ -9,7 +9,9 @@ namespace Fungtopia.Map.View;
 /// Draws the world's ground from the Map Contract, everywhere except the forest square (the
 /// Forest module draws its own floor there; this mesh meets it on the same 1 m grid and heights):
 /// grass, dirt roads with little glowing mushroom lamps, the town square and Pet City's paving,
-/// hedges along every walkable edge, cliffs beyond them topped with giant mushrooms, and the home
+/// the Deep Forest's dark soil and moss with roots spreading from its giant mushrooms (the
+/// DeepForest module draws the mushrooms themselves and the gloom), hedges along every walkable
+/// edge, cliffs beyond them topped with giant mushrooms, and the home
 /// interior (wood floor, walls with round windows, a door) at its far-away spot. Buildings are
 /// drawn by the Town and PetCity modules; nothing here moves, so it costs only a few draws.
 /// </summary>
@@ -37,6 +39,7 @@ public partial class MapView : Node3D, IModuleView
         BuildGround();
         BuildHedges();
         BuildMushrooms();
+        BuildRoots();
         BuildHome();
     }
 
@@ -62,6 +65,10 @@ public partial class MapView : Node3D, IModuleView
 
     private static bool InForestSquare(float x, float z) =>
         MathF.Abs(x) < Areas.ForestHalfSize && MathF.Abs(z) < Areas.ForestHalfSize;
+
+    /// <summary>Meters inside the Deep Forest or its overgrown path (negative outside).</summary>
+    private static float DeepForestDepth(float x, float z) =>
+        MathF.Max(Areas.DeepForest.Depth(x, z), Areas.DeepForestPath.Depth(x, z));
 
     // Ground
 
@@ -143,6 +150,23 @@ public partial class MapView : Node3D, IModuleView
         float road = 1f - Mathf.SmoothStep(Areas.RoadHalfWidth - 0.6f, Areas.RoadHalfWidth + 0.4f, Areas.RoadDistance(x, z));
         color = color.Lerp(dirt, road);
 
+        // The Deep Forest: dark soil under patches of deep moss, streaked with old mushroom roots.
+        float deep = Mathf.SmoothStep(-6f, 3f, DeepForestDepth(x, z));
+        if (deep > 0f)
+        {
+            var soil = new Color(0.3f, 0.22f, 0.17f);
+            var deepMoss = new Color(0.17f, 0.32f, 0.2f);
+            var root = new Color(0.46f, 0.34f, 0.25f);
+            var floor = soil.Lerp(deepMoss, Mathf.SmoothStep(0.3f, 0.75f, mottle + 0.15f * MathF.Sin(x * 0.41f + z * 0.37f)));
+            float roots = MathF.Abs(MathF.Sin(0.5f * x + 0.8f * MathF.Sin(0.21f * z)));
+            floor = floor.Lerp(root, Mathf.SmoothStep(0.9f, 0.98f, roots) * 0.7f);
+            // The overgrown path: trodden soil, mossy at its edges.
+            float path = 1f - Mathf.SmoothStep(1.5f, Areas.DeepForestGapHalfWidth, MathF.Abs(z));
+            if (x > Areas.DeepForest.MaxX - 4f)
+                floor = floor.Lerp(soil.Lightened(0.15f), path * 0.7f);
+            color = color.Lerp(floor, deep);
+        }
+
         // Cliff faces are rock; their tops are mossy.
         color = color.Lerp(rock, Mathf.SmoothStep(0.92f, 0.75f, normal.Y));
         return color;
@@ -210,6 +234,8 @@ public partial class MapView : Node3D, IModuleView
         // a coarser 2 m grid out to the cliffs beyond both towns.
         ground.Patch(-near, -near, near, near, 1f, InForestSquare);
         ground.Patch(-160f, -336f, 160f, 336f, 2f, (x, z) => MathF.Abs(x) < near && MathF.Abs(z) < near);
+        // And west around the Deep Forest.
+        ground.Patch(-336f, -144f, -160f, 144f, 2f, (_, _) => false);
         var mesh = ground.Commit();
         mesh.SurfaceSetMaterial(0, Material("ground.gdshader"));
         AddChild(new MeshInstance3D { Name = "Ground", Mesh = mesh });
@@ -267,7 +293,7 @@ public partial class MapView : Node3D, IModuleView
         var hedges = new Instances();
         const float cell = 1.3f;
         int id = 0;
-        for (float gx = -112f; gx < 112f; gx += cell)
+        for (float gx = -290f; gx < 112f; gx += cell)
         for (float gz = -300f; gz < 300f; gz += cell, id++)
         {
             float x = gx + cell * (Rand(id, 1) - 0.5f) * 0.6f, z = gz + cell * (Rand(id, 2) - 0.5f) * 0.6f;
@@ -278,6 +304,8 @@ public partial class MapView : Node3D, IModuleView
                 continue;
             float size = 0.85f + 0.4f * Rand(id, 3);
             var color = new Color(0.3f, 0.6f, 0.3f).Lerp(new Color(0.42f, 0.7f, 0.32f), Rand(id, 4));
+            if (DeepForestDepth(x, z) > -4f && x < -Areas.ForestHalfSize)
+                color = color.Darkened(0.4f); // the Deep Forest's hedges are darker
             hedges.Add(Placed(OnGround(x, z) + Vector3.Down * 0.2f, Rand(id, 5) * MathF.Tau, new Vector3(size, size * 0.85f, size)), color);
         }
         AddChild(hedges.Build("Hedges", MapMeshes.Blob(), Material("toon_color.gdshader", outline: true)));
@@ -318,9 +346,11 @@ public partial class MapView : Node3D, IModuleView
         // Giant mushrooms on the cliffs (not in the forest's ring, which the Forest module fills).
         const float cell = 8f;
         int k = 0;
-        for (float gx = -160f; gx < 160f; gx += cell)
+        for (float gx = -336f; gx < 160f; gx += cell)
         for (float gz = -336f; gz < 336f; gz += cell, k++)
         {
+            if (gx < -160f && MathF.Abs(gz) > 144f)
+                continue; // past the ground mesh
             float x = gx + cell * (0.15f + 0.7f * Rand(k, 10)), z = gz + cell * (0.15f + 0.7f * Rand(k, 11));
             if (MathF.Abs(x) < 128f && MathF.Abs(z) < 128f && Areas.RoadDistance(x, z) > 14f)
                 continue;
@@ -377,6 +407,46 @@ public partial class MapView : Node3D, IModuleView
         AddChild(stems.Build("MushroomStems", MapMeshes.Stem(), Material("toon_color.gdshader", outline: true)));
         AddChild(caps.Build("MushroomCaps", MapMeshes.Cap(), Material("mushroom_cap.gdshader", outline: true)));
         AddChild(eyes.Build("MushroomEyes", MapMeshes.Eye(), Material("eye.gdshader", outline: true), shadows: false));
+    }
+
+    private void BuildRoots()
+    {
+        // Low roots spreading from the foot of each Deep Forest giant mushroom over the soil, and
+        // a few loose ones between: knee-high at most, so walkers step over them.
+        var roots = new Instances();
+        var all = Map.Ground.Obstacles;
+        int first = all.Length - Map.Ground.DeepForestTrunkCount, id = 0;
+        void Root(float x, float z, float yaw, float length, float thickness)
+        {
+            var color = new Color(0.5f, 0.37f, 0.27f).Lerp(new Color(0.62f, 0.5f, 0.38f), Rand(id, 31));
+            roots.Add(Placed(OnGround(x, z) + Vector3.Down * thickness * 0.35f, yaw, new Vector3(thickness, thickness * 0.8f, length)), color);
+            id++;
+        }
+        for (int i = first; i < all.Length; i++)
+        {
+            var o = all[i];
+            int count = 3 + (int)(Rand(i, 32) * 3f);
+            for (int n = 0; n < count; n++)
+            {
+                float a = (n + 0.6f * Rand(i, 33 + n)) * MathF.Tau / count;
+                float length = o.Radius * (0.7f + 0.6f * Rand(i, 40 + n));
+                float reach = o.Radius + length * 0.55f;
+                // A yaw of a turns local +Z toward (sin a, cos a).
+                Root(o.X + MathF.Sin(a) * reach, o.Z + MathF.Cos(a) * reach, a, length, 0.22f + 0.12f * o.Radius / 3f);
+            }
+        }
+        var b = Areas.DeepForest;
+        const float cell = 5f;
+        int k = 0;
+        for (float gx = b.MinX; gx < b.MaxX; gx += cell)
+        for (float gz = b.MinZ; gz < b.MaxZ; gz += cell, k++)
+        {
+            float x = gx + cell * Rand(k, 50), z = gz + cell * Rand(k, 51);
+            if (Rand(k, 52) < 0.55f || b.Depth(x, z) < 1f || Map.Ground.Blocks(x, z, 1.5f))
+                continue;
+            Root(x, z, Rand(k, 53) * MathF.Tau, 0.8f + 1.2f * Rand(k, 54), 0.14f + 0.08f * Rand(k, 55));
+        }
+        AddChild(roots.Build("DeepForestRoots", MapMeshes.Blob(), Material("toon_color.gdshader", outline: true)));
     }
 
     // Home interior

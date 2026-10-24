@@ -21,34 +21,40 @@ public static class Ground
     /// <summary>The footprint circles of one building are at most about this big a cell (meters).</summary>
     private const float CoverCell = 4f;
 
-    // Obstacle bins: a grid of BinSize cells over the forest, roads and both towns.
-    private const float BinSize = 16f, BinMinX = -112f, BinMinZ = -304f;
-    private const int BinsX = 14, BinsZ = 38;
+    // Obstacle bins: a grid of BinSize cells over the Deep Forest, the forest, roads and both towns.
+    private const float BinSize = 16f, BinMinX = -288f, BinMinZ = -304f;
+    private const int BinsX = 25, BinsZ = 38;
 
     private static readonly Circle[] s_obstacles;
     private static readonly int s_forestTrunks;
+    private static readonly int s_deepForestTrunks;
     private static readonly int[] s_binStart = new int[BinsX * BinsZ + 1];
     private static readonly int[] s_binItems;
 
     static Ground()
     {
-        s_obstacles = BuildObstacles(out s_forestTrunks);
+        s_obstacles = BuildObstacles(out s_forestTrunks, out s_deepForestTrunks);
         s_binItems = BuildBins();
     }
 
     /// <summary>
     /// Every obstacle circle walkers must not enter: first the forest's giant mushroom trunks
-    /// (exactly modules/Forest's), then the circles covering each building of <see cref="Buildings.All"/>, in order.
+    /// (exactly modules/Forest's), then the circles covering each building of <see cref="Buildings.All"/>, in order,
+    /// then the Deep Forest's giant mushroom trunks (the last <see cref="DeepForestTrunkCount"/>).
     /// </summary>
     public static ReadOnlySpan<Circle> Obstacles => s_obstacles;
 
     /// <summary>How many of the first <see cref="Obstacles"/> are the forest's trunks.</summary>
     public static int ForestTrunkCount => s_forestTrunks;
 
+    /// <summary>How many of the last <see cref="Obstacles"/> are the Deep Forest's trunks.</summary>
+    public static int DeepForestTrunkCount => s_deepForestTrunks;
+
     /// <summary>
     /// Ground height (meters, Y up) at (x, z). In the forest square it is exactly the forest's
     /// rolling ground; beyond it the rolling flattens out (roads, towns), and past the walkable
-    /// edge it rises into cliffs. The home interior's floor is flat at <see cref="Areas.HomeFloorY"/>.
+    /// edge it rises into cliffs. The Deep Forest's ground is rougher (roots, lumps, small dips).
+    /// The home interior's floor is flat at <see cref="Areas.HomeFloorY"/>.
     /// Defined everywhere, continuous except at the far-away home room.
     /// </summary>
     public static float HeightAt(float x, float z)
@@ -60,6 +66,9 @@ public static class Ground
         if (Areas.Home.Depth(x, z) > -30f)
             return Areas.HomeFloorY;
         float h = rolling * (1f - 0.8f * SmoothStep(4f, 34f, outside));
+        float deep = Areas.DeepForest.Depth(x, z);
+        if (deep > -8f)
+            h += DeepForestLayout.Roughness(x, z) * SmoothStep(-8f, 6f, deep);
         float beyond = -Areas.Depth(x, z);
         if (beyond > HedgeBand)
             h += CliffHeight * SmoothStep(HedgeBand, HedgeBand + CliffRise, beyond);
@@ -99,7 +108,7 @@ public static class Ground
 
     private static int BinZ(float z) => (int)MathF.Floor((z - BinMinZ) / BinSize);
 
-    private static Circle[] BuildObstacles(out int forestTrunks)
+    private static Circle[] BuildObstacles(out int forestTrunks, out int deepForestTrunks)
     {
         var all = new List<Circle>(ForestFloor.Trunks());
         forestTrunks = all.Count;
@@ -120,6 +129,9 @@ public static class Ground
                 all.Add(new Circle(c.X, c.Y, r));
             }
         }
+        var deep = DeepForestLayout.Trunks();
+        deepForestTrunks = deep.Length;
+        all.AddRange(deep);
         return all.ToArray();
     }
 

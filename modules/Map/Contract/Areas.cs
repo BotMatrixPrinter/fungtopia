@@ -11,6 +11,7 @@ public enum Area
     Forest,
     PetCity,
     Home,
+    DeepForest,
 }
 
 /// <summary>An axis-aligned rectangle on the ground (x/z, meters).</summary>
@@ -50,7 +51,9 @@ public readonly struct AreaBounds
 /// <summary>
 /// The world's layout: Mushroom Forest in the middle (the 200 m square on the origin), Mushroom
 /// Town to the south (+Z), Pet City to the north (-Z), joined by two dirt roads through gaps in
-/// the forest's mushroom wall, and the player's home interior, a room far away under the world.
+/// the forest's mushroom wall, the darker Deep Forest to the west (-X) through a narrow overgrown
+/// path in the middle of the forest's west edge, and the player's home interior, a room far away
+/// under the world.
 /// Only these are walkable; cliffs, hedges and giant mushrooms close off everything else.
 /// </summary>
 public static class Areas
@@ -70,12 +73,27 @@ public static class Areas
     /// <summary>The middle of the forest's north road gap (x, z): toward Pet City.</summary>
     public static readonly Vector2 ForestGapNorth = new(0f, -ForestHalfSize);
 
+    /// <summary>The middle of the forest's west gap (x, z): the overgrown path to the Deep Forest.</summary>
+    public static readonly Vector2 ForestGapWest = new(-ForestHalfSize, 0f);
+
+    /// <summary>Half the width of the west gap and of the overgrown path through it (meters).</summary>
+    public const float DeepForestGapHalfWidth = 4f;
+
     /// <summary>Height (Y, meters) of the home interior's floor.</summary>
     public const float HomeFloorY = -50f;
 
     public static readonly AreaBounds Forest = new(-ForestHalfSize, -ForestHalfSize, ForestHalfSize, ForestHalfSize);
     public static readonly AreaBounds Town = new(-80f, 150f, 80f, 290f);
     public static readonly AreaBounds PetCity = new(-80f, -290f, 80f, -150f);
+
+    /// <summary>The Deep Forest, west of Mushroom Forest beyond a 10 m strip of cliff.</summary>
+    public static readonly AreaBounds DeepForest = new(-280f, -90f, -110f, 90f);
+
+    /// <summary>
+    /// The overgrown path through the west gap: from 4 m inside the forest to 2 m inside the Deep
+    /// Forest, <see cref="DeepForestGapHalfWidth"/> to each side of z = 0. Part of the Deep Forest.
+    /// </summary>
+    public static readonly AreaBounds DeepForestPath = new(-112f, -DeepForestGapHalfWidth, -96f, DeepForestGapHalfWidth);
 
     /// <summary>The home interior room: 12 m (x) by 10 m (z) around (600, 600); its door is in the south (+Z) wall.</summary>
     public static readonly AreaBounds Home = new(594f, 595f, 606f, 605f);
@@ -103,6 +121,7 @@ public static class Areas
         Area.Town => Town,
         Area.PetCity => PetCity,
         Area.Home => Home,
+        Area.DeepForest => DeepForest,
         _ => throw new ArgumentOutOfRangeException(nameof(area), area, "roads have no rectangle; use RoadPoints"),
     };
 
@@ -121,6 +140,8 @@ public static class Areas
         d = MathF.Max(d, Town.Depth(x, z));
         d = MathF.Max(d, PetCity.Depth(x, z));
         d = MathF.Max(d, Home.Depth(x, z));
+        d = MathF.Max(d, DeepForest.Depth(x, z));
+        d = MathF.Max(d, DeepForestPath.Depth(x, z));
         return MathF.Max(d, RoadHalfWidth - RoadDistance(x, z));
     }
 
@@ -128,8 +149,9 @@ public static class Areas
     public static bool Walkable(float x, float z, float margin = 0f) => Depth(x, z) >= margin;
 
     /// <summary>
-    /// The area (x, z) belongs to: Home, Forest, Town or PetCity inside their rectangles, Road on a
-    /// road between them, and for a point that is not walkable the nearest of these.
+    /// The area (x, z) belongs to: Home, Forest, Town, PetCity or DeepForest inside their rectangles
+    /// (the overgrown path west of the forest square is DeepForest), Road on a road between them,
+    /// and for a point that is not walkable the nearest of these.
     /// </summary>
     public static Area At(float x, float z)
     {
@@ -138,6 +160,9 @@ public static class Areas
         float forest = Forest.Depth(x, z);
         if (forest >= 0f)
             return Area.Forest;
+        float deep = MathF.Max(DeepForest.Depth(x, z), DeepForestPath.Depth(x, z));
+        if (deep >= 0f)
+            return Area.DeepForest;
         float town = Town.Depth(x, z);
         if (town >= 0f)
             return Area.Town;
@@ -151,6 +176,7 @@ public static class Areas
         float depth = forest;
         if (town > depth) { best = Area.Town; depth = town; }
         if (city > depth) { best = Area.PetCity; depth = city; }
+        if (deep > depth) { best = Area.DeepForest; depth = deep; }
         if (road > depth) best = Area.Road;
         return best;
     }
