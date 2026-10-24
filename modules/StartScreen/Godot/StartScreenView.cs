@@ -7,7 +7,8 @@ namespace Fungtopia.StartScreen.View;
 /// <summary>
 /// Draws the start screen over everything (a <c>CanvasLayer</c> on layer 50) and reports mouse,
 /// keyboard and gamepad presses to its Core: the "Fungtopia" logo over a soft blurred view of
-/// Mushroom Town, then the Girl and the Boy, then the Mushroom Cat and the Mushroom Dog, then
+/// Mushroom Town, then the Girl and the Boy, then "Make your look" (a panel on the right, the
+/// game's own character seen on the left), then the Mushroom Cat and the Mushroom Dog, then
 /// "Start!". It takes every input event while open (so a press here does not also jump or talk
 /// in the game), keeps the mouse visible, fades out after "Start!" and captures the mouse again.
 /// </summary>
@@ -20,6 +21,9 @@ public partial class StartScreenView : CanvasLayer, IModuleView
     private StartScreenModule? _screen;
     private Control _root = null!;
     private PreviewStage _town = null!;
+    private TextureRect _backdrop = null!;
+    private LookPanel _look = null!;
+    private CapButton _next = null!;
     private MushroomLogo _logo = null!;
     private Control _content = null!;
     private Label _heading = null!;
@@ -33,6 +37,7 @@ public partial class StartScreenView : CanvasLayer, IModuleView
     private StartStep _shownStep = (StartStep)(-1);
     private int _hovered = -1;
     private int _stick;
+    private int _stickY;
     private float _closing;
     private float _time;
 
@@ -54,7 +59,7 @@ public partial class StartScreenView : CanvasLayer, IModuleView
         AddChild(_town);
         var blur = new ShaderMaterial { Shader = GD.Load<Shader>("res://modules/StartScreen/Godot/Shaders/blur.gdshader") };
         blur.SetShaderParameter("town", _town.GetTexture());
-        var backdrop = new TextureRect
+        _backdrop = new TextureRect
         {
             Texture = _town.GetTexture(),
             ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
@@ -63,8 +68,8 @@ public partial class StartScreenView : CanvasLayer, IModuleView
             MouseFilter = Control.MouseFilterEnum.Ignore,
             Material = blur,
         };
-        backdrop.SetAnchorsPreset(Control.LayoutPreset.FullRect);
-        _root.AddChild(backdrop);
+        _backdrop.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        _root.AddChild(_backdrop);
 
         for (int i = 0; i < Models.Length; i++)
         {
@@ -88,6 +93,10 @@ public partial class StartScreenView : CanvasLayer, IModuleView
             _content.AddChild(_cards[i]);
             _content.AddChild(_picks[i]);
         }
+        _look = new LookPanel { Screen = _screen };
+        _content.AddChild(_look);
+        _next = new CapButton { Text = "Next", FontSize = 48, CapColor = StartStyle.Green };
+        _content.AddChild(_next);
         _start = new CapButton { Text = "Start!", FontSize = 72, CapColor = StartStyle.Red };
         _back = new CapButton { Text = "Back", FontSize = 30, CapColor = StartStyle.Lilac };
         _content.AddChild(_start);
@@ -138,6 +147,7 @@ public partial class StartScreenView : CanvasLayer, IModuleView
             _stages[step == StartStep.Pet ? 2 + i : i].Spinning = chosen == i;
         }
         _start.Highlighted = step == StartStep.Ready;
+        _look.Screen = _screen;
         _prompt.Modulate = new Color(1f, 1f, 1f, 0.55f + 0.45f * Mathf.Cos(_time * 3.5f));
     }
 
@@ -149,6 +159,7 @@ public partial class StartScreenView : CanvasLayer, IModuleView
         bool title = step == StartStep.Title;
         bool choosing = step is StartStep.Character or StartStep.Pet;
         bool ready = step == StartStep.Ready;
+        bool look = step == StartStep.Look;
         int first = step == StartStep.Pet ? 2 : 0;
         for (int i = 0; i < 2; i++)
         {
@@ -171,6 +182,13 @@ public partial class StartScreenView : CanvasLayer, IModuleView
             _stages[i].RenderTargetUpdateMode = shown ? SubViewport.UpdateMode.Always : SubViewport.UpdateMode.Disabled;
             _stages[i].Spinning = ready && shown;
         }
+        // On the look step the game shows through on the left: the character there is the
+        // Player's own, dressed by the Wardrobe from the messages sent.
+        _backdrop.Visible = !look;
+        _town.RenderTargetUpdateMode = look ? SubViewport.UpdateMode.Disabled : SubViewport.UpdateMode.Always;
+        _look.Visible = look;
+        _look.Hovered = (-1, -1);
+        _next.Visible = look;
         _start.Visible = ready;
         _back.Visible = !title;
         _prompt.Visible = title;
@@ -178,6 +196,7 @@ public partial class StartScreenView : CanvasLayer, IModuleView
         _heading.Text = step switch
         {
             StartStep.Character => "Choose your character",
+            StartStep.Look => "Make your look",
             StartStep.Pet => "Choose your starter pet",
             _ => "Ready for adventure!",
         };
@@ -186,6 +205,7 @@ public partial class StartScreenView : CanvasLayer, IModuleView
         {
             StartStep.Title => "",
             StartStep.Ready => "Enter / E / (A): Start!     Esc / (B): back",
+            StartStep.Look => "Up/Down: row    Left/Right: change    Enter/E/(A): next    Esc/(B): back",
             _ => "Arrows / stick / D-pad: choose     Enter / E / (A): OK     Esc / (B): back",
         };
     }
@@ -202,11 +222,24 @@ public partial class StartScreenView : CanvasLayer, IModuleView
         _logo.Position = _logo.Position.Lerp(new Vector2(view.X * 0.5f, logoY), title && _time < 0.1f ? 1f : 0.2f);
         _logo.Scale = _logo.Scale.Lerp(new Vector2(logoScale, logoScale), title && _time < 0.1f ? 1f : 0.2f);
 
-        Place(_heading, new Vector2(view.X * 0.5f, 210f * u), new Vector2(1400f, 90f) * u);
+        // The look panel sits on the right, under its heading, with "Next" below it.
+        bool look = step == StartStep.Look;
+        float panelX = view.X - 450f * u;
+        var panel = new Vector2(740f, LookPanel.HeightFor(740f)) * u;
+        Place(_look, new Vector2(panelX, 235f * u + panel.Y * 0.5f), panel);
+        Place(_next, new Vector2(panelX, 235f * u + panel.Y + 80f * u), new Vector2(260f, 124f) * u);
+        _next.FontSize = Mathf.RoundToInt(42 * u);
+        Place(_heading, new Vector2(look ? panelX : view.X * 0.5f, look ? 180f * u : 210f * u), new Vector2(1400f, 90f) * u);
         SetFontSize(_heading, Mathf.RoundToInt(64 * u));
         Place(_prompt, new Vector2(view.X * 0.5f, view.Y * 0.72f), new Vector2(1400f, 70f) * u);
         SetFontSize(_prompt, Mathf.RoundToInt(44 * u));
         Place(_hint, new Vector2(view.X * 0.5f, view.Y - 46f * u), new Vector2(1800f, 50f) * u);
+        if (look)
+        {
+            // Left of the panel, under the character.
+            Place(_hint, new Vector2((panelX - panel.X * 0.5f) * 0.5f, view.Y - 46f * u), new Vector2(1000f, 50f) * u);
+            SetFontSize(_hint, Mathf.RoundToInt(23 * u));
+        }
         SetFontSize(_hint, Mathf.RoundToInt(28 * u));
 
         var card = new Vector2(500f, 640f) * u;
@@ -268,6 +301,10 @@ public partial class StartScreenView : CanvasLayer, IModuleView
                     _screen.Press(StartButton.Left);
                 else if (code == Key.Right)
                     _screen.Press(StartButton.Right);
+                else if (code == Key.Up)
+                    _screen.Press(StartButton.Up);
+                else if (code == Key.Down)
+                    _screen.Press(StartButton.Down);
                 else if (code is Key.Enter or Key.KpEnter or Key.E)
                     _screen.Press(StartButton.Confirm);
                 else if (code is Key.Escape or Key.Backspace)
@@ -278,6 +315,10 @@ public partial class StartScreenView : CanvasLayer, IModuleView
                     _screen.Press(StartButton.Left);
                 else if (button.ButtonIndex == JoyButton.DpadRight)
                     _screen.Press(StartButton.Right);
+                else if (button.ButtonIndex == JoyButton.DpadUp)
+                    _screen.Press(StartButton.Up);
+                else if (button.ButtonIndex == JoyButton.DpadDown)
+                    _screen.Press(StartButton.Down);
                 else if (button.ButtonIndex == JoyButton.A)
                     _screen.Press(StartButton.Confirm);
                 else if (button.ButtonIndex == JoyButton.B)
@@ -298,7 +339,23 @@ public partial class StartScreenView : CanvasLayer, IModuleView
                 else if (Mathf.Abs(motion.AxisValue) < StickOff)
                     _stick = 0;
                 break;
+            case InputEventJoypadMotion { Axis: JoyAxis.LeftY } motion:
+                // Up is negative on the stick's Y axis.
+                if (motion.AxisValue <= -StickOn && _stickY != -1)
+                {
+                    _stickY = -1;
+                    _screen.Press(StartButton.Up);
+                }
+                else if (motion.AxisValue >= StickOn && _stickY != 1)
+                {
+                    _stickY = 1;
+                    _screen.Press(StartButton.Down);
+                }
+                else if (Mathf.Abs(motion.AxisValue) < StickOff)
+                    _stickY = 0;
+                break;
             case InputEventMouseMotion motion:
+                _look.Hovered = _look.At(motion.Position);
                 int over = CardAt(motion.Position);
                 if (over != _hovered && over >= 0)
                     _screen.Point(over);
@@ -320,6 +377,10 @@ public partial class StartScreenView : CanvasLayer, IModuleView
             _screen.Press(StartButton.Confirm);
         else if (step == StartStep.Ready && Hit(_start, at))
             _screen.Press(StartButton.Confirm);
+        else if (step == StartStep.Look && Hit(_next, at))
+            _screen.Press(StartButton.Confirm);
+        else if (step == StartStep.Look && _look.At(at) is (int row and >= 0, int value))
+            _screen.Pick((LookRow)row, value);
         else if (CardAt(at) is int card and >= 0)
         {
             _screen.Point(card);

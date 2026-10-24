@@ -12,6 +12,7 @@
   <ItemGroup>
     <ProjectReference Include="../Core/Fungtopia.StartScreen.Core.csproj" />
     <ProjectReference Include="../Contract/Fungtopia.StartScreen.Contract.csproj" />
+    <ProjectReference Include="../../Wardrobe/Contract/Fungtopia.Wardrobe.Contract.csproj" />
     <ProjectReference Include="../../../shell/Contract/Fungtopia.Shell.Contract.csproj" />
   </ItemGroup>
 </Project>

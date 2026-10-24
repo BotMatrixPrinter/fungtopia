@@ -7,8 +7,9 @@ namespace Fungtopia.StartScreen.View;
 /// <summary>
 /// A stand-alone scene showing the start screen at one step, for screenshots:
 /// <c>./screenshot.sh modules/StartScreen/Godot/Preview.tscn</c>. The environment variable
-/// START_PREVIEW picks the step: "title" (default), "character", "boy", "pet", "dog" or "ready"
-/// (the Boy with the Dog).
+/// START_PREVIEW picks the step: "title" (default), "character", "boy", "look" (the Girl's look
+/// step), "boylook" (the Boy's, with a few looks changed), "pet", "dog" or "ready" (the Boy with
+/// the Dog).
 /// </summary>
 public partial class StartScreenPreview : Node
 {
@@ -31,9 +32,19 @@ public partial class StartScreenPreview : Node
         {
             "character" => new[] { StartButton.Confirm },
             "boy" => new[] { StartButton.Confirm, StartButton.Right },
-            "pet" => new[] { StartButton.Confirm, StartButton.Confirm },
-            "dog" => new[] { StartButton.Confirm, StartButton.Right, StartButton.Confirm, StartButton.Right },
-            "ready" => new[] { StartButton.Confirm, StartButton.Right, StartButton.Confirm, StartButton.Right, StartButton.Confirm },
+            "look" => new[] { StartButton.Confirm, StartButton.Confirm },
+            "boylook" => new[]
+            {
+                StartButton.Confirm, StartButton.Right, StartButton.Confirm, StartButton.Right, StartButton.Right,
+                StartButton.Down, StartButton.Down, StartButton.Right, StartButton.Right, StartButton.Right,
+            },
+            "pet" => new[] { StartButton.Confirm, StartButton.Confirm, StartButton.Confirm },
+            "dog" => new[] { StartButton.Confirm, StartButton.Right, StartButton.Confirm, StartButton.Confirm, StartButton.Right },
+            "ready" => new[]
+            {
+                StartButton.Confirm, StartButton.Right, StartButton.Confirm, StartButton.Confirm, StartButton.Right,
+                StartButton.Confirm,
+            },
             _ => Array.Empty<StartButton>(),
         };
         foreach (var press in presses)
