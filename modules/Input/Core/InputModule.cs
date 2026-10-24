@@ -6,7 +6,7 @@ namespace Fungtopia.Input;
 
 /// <summary>
 /// Keeps the latest device state reported by its Godot view and publishes one
-/// <see cref="PlayerInput"/> per tick. Mouse look and jump, interact and map presses that arrive between ticks
+/// <see cref="PlayerInput"/> per tick. Mouse look and jump, interact, map, eat and food presses that arrive between ticks
 /// are gathered and handed out once, on the next tick.
 /// </summary>
 public sealed class InputModule : IModule, IMessageHandler<UiFocus>
@@ -31,6 +31,9 @@ public sealed class InputModule : IModule, IMessageHandler<UiFocus>
     private bool _jumpPressed;
     private bool _interactPressed;
     private bool _openMapPressed;
+    private bool _eatPressed;
+    private int _foodSelectPressed = -1;
+    private int _foodCyclePressed;
     private bool _fireButton;
     private float _fireTrigger;
     private bool _hasAim;
@@ -97,6 +100,25 @@ public sealed class InputModule : IModule, IMessageHandler<UiFocus>
     /// <summary>A map button went down; reported as OpenMap on the next tick only.</summary>
     public void PressOpenMap() => _openMapPressed = true;
 
+    /// <summary>An eat button went down; reported as Eat on the next tick only.</summary>
+    public void PressEat() => _eatPressed = true;
+
+    /// <summary>
+    /// A food slot key went down (0, 1 or 2; others are ignored); reported as FoodSelect on the
+    /// next tick only. The last slot pressed between ticks wins.
+    /// </summary>
+    public void PressFoodSelect(int slot)
+    {
+        if (slot is >= 0 and <= 2)
+            _foodSelectPressed = slot;
+    }
+
+    /// <summary>
+    /// A food cycle button went down (-1 previous, +1 next); reported as FoodCycle on the next tick
+    /// only. Presses between ticks add up and the sign is reported (left then right is 0).
+    /// </summary>
+    public void PressFoodCycle(int direction) => _foodCyclePressed += Math.Sign(direction);
+
     /// <summary>Whether the fire button (left mouse) is held.</summary>
     public void SetFireButton(bool held) => _fireButton = held;
 
@@ -139,19 +161,29 @@ public sealed class InputModule : IModule, IMessageHandler<UiFocus>
         Vector2 look = _mouseLook + ApplyDeadZone(_lookStick, StickDeadZone) * (StickLookRadiansPerSecond * (float)context.StepSeconds);
         bool fire = _fireButton || _fireTrigger >= TriggerThreshold;
         bool jump = _jumpPressed;
+        bool eat = _eatPressed;
+        int foodSelect = _foodSelectPressed;
+        int foodCycle = _foodCyclePressed;
         if (MenuOpen)
         {
             move = Vector2.Zero;
             look = Vector2.Zero;
             jump = false;
             fire = false;
+            eat = false;
+            foodSelect = -1;
+            foodCycle = 0;
         }
 
-        Latest = new PlayerInput(move, look, jump, fire, _hasAim, _aim, _interactPressed, _openMapPressed, _aimOrigin);
+        Latest = new PlayerInput(move, look, jump, fire, _hasAim, _aim, _interactPressed, _openMapPressed, _aimOrigin,
+            eat, foodSelect, foodCycle);
         _mouseLook = Vector2.Zero;
         _jumpPressed = false;
         _interactPressed = false;
         _openMapPressed = false;
+        _eatPressed = false;
+        _foodSelectPressed = -1;
+        _foodCyclePressed = 0;
         _bus.Publish(Latest);
     }
 

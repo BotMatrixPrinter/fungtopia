@@ -87,6 +87,9 @@ public class InputModuleTests
         Assert.False(msg.HasAim);
         Assert.Equal(Vector3.Zero, msg.AimDirection);
         Assert.Equal(Vector3.Zero, msg.AimOrigin);
+        Assert.False(msg.Eat);
+        Assert.Equal(-1, msg.FoodSelect);
+        Assert.Equal(0, msg.FoodCycle);
     }
 
     [Fact]
@@ -349,6 +352,130 @@ public class InputModuleTests
         Assert.True(msg.OpenMap);
     }
 
+    // --- eat and food selection ---
+
+    [Fact]
+    public void EatIsTrueOnlyOnTheTickAfterThePress()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        input.PressEat();
+        input.PressEat();
+        var msg = TickOnce(input, bus);
+        Assert.True(msg.Eat);
+        Assert.False(msg.Jump);
+        Assert.False(msg.Interact);
+        Assert.Equal(-1, msg.FoodSelect);
+        Assert.Equal(0, msg.FoodCycle);
+        Assert.True(input.Latest.Eat);
+        Assert.False(TickOnce(input, bus, 1).Eat);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void FoodSelectReportsThePressedSlotForOneTick(int slot)
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        input.PressFoodSelect(slot);
+        var msg = TickOnce(input, bus);
+        Assert.Equal(slot, msg.FoodSelect);
+        Assert.Equal(slot, input.Latest.FoodSelect);
+        Assert.False(msg.Eat);
+        Assert.Equal(0, msg.FoodCycle);
+        Assert.Equal(-1, TickOnce(input, bus, 1).FoodSelect);
+    }
+
+    [Fact]
+    public void LastFoodSlotPressedBetweenTicksWins()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        input.PressFoodSelect(2);
+        input.PressFoodSelect(0);
+        Assert.Equal(0, TickOnce(input, bus).FoodSelect);
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(3)]
+    public void FoodSelectOutsideTheThreeSlotsIsIgnored(int slot)
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        input.PressFoodSelect(1);
+        input.PressFoodSelect(slot);
+        Assert.Equal(1, TickOnce(input, bus).FoodSelect);
+        input.PressFoodSelect(slot);
+        Assert.Equal(-1, TickOnce(input, bus, 1).FoodSelect);
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(1)]
+    public void FoodCycleReportsTheDirectionForOneTick(int direction)
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        input.PressFoodCycle(direction);
+        var msg = TickOnce(input, bus);
+        Assert.Equal(direction, msg.FoodCycle);
+        Assert.Equal(direction, input.Latest.FoodCycle);
+        Assert.Equal(-1, msg.FoodSelect);
+        Assert.False(msg.Eat);
+        Assert.Equal(0, TickOnce(input, bus, 1).FoodCycle);
+    }
+
+    [Fact]
+    public void FoodCyclePressesBetweenTicksAddUpToTheirSign()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        input.PressFoodCycle(1);
+        input.PressFoodCycle(1);
+        Assert.Equal(1, TickOnce(input, bus).FoodCycle);
+        input.PressFoodCycle(-1);
+        input.PressFoodCycle(1);
+        Assert.Equal(0, TickOnce(input, bus, 1).FoodCycle);
+        input.PressFoodCycle(-5);
+        Assert.Equal(-1, TickOnce(input, bus, 2).FoodCycle);
+    }
+
+    [Fact]
+    public void OlderConstructorsLeaveEatOffAndNoFoodSelected()
+    {
+        var aim = new Vector3(0, 0, -1);
+        foreach (var msg in new[]
+        {
+            default(PlayerInput),
+            new PlayerInput(Vector2.Zero, Vector2.Zero, true, true, true, aim),
+            new PlayerInput(Vector2.Zero, Vector2.Zero, true, true, true, aim, true, true),
+            new PlayerInput(Vector2.Zero, Vector2.Zero, true, true, true, aim, true, true, Vector3.One),
+        })
+        {
+            Assert.False(msg.Eat);
+            Assert.Equal(-1, msg.FoodSelect);
+            Assert.Equal(0, msg.FoodCycle);
+        }
+    }
+
+    [Theory]
+    [InlineData(true, 0, -1, true, 0, -1)]
+    [InlineData(false, 2, 1, false, 2, 1)]
+    [InlineData(false, 3, 4, false, -1, 1)]
+    [InlineData(true, -7, -3, true, -1, -1)]
+    public void FullConstructorSetsEatAndFood(bool eat, int select, int cycle, bool expectEat, int expectSelect, int expectCycle)
+    {
+        var msg = new PlayerInput(Vector2.Zero, Vector2.Zero, false, false, true, new Vector3(0, 0, -1),
+            false, false, Vector3.One, eat, select, cycle);
+        Assert.Equal(expectEat, msg.Eat);
+        Assert.Equal(expectSelect, msg.FoodSelect);
+        Assert.Equal(expectCycle, msg.FoodCycle);
+        Assert.Equal(Vector3.One, msg.AimOrigin);
+    }
+
     // --- aim ---
 
     [Fact]
@@ -484,6 +611,24 @@ public class InputModuleTests
         Assert.Contains("_input.ClearAim()", source);
     }
 
+    [Theory]
+    [InlineData("PhysicalKeycode: Key.F, Pressed: true, Echo: false", "_input.PressEat();")]
+    [InlineData("ButtonIndex: JoyButton.DpadUp, Pressed: true", "_input.PressEat();")]
+    [InlineData("PhysicalKeycode: Key.Key1, Pressed: true, Echo: false", "_input.PressFoodSelect(0);")]
+    [InlineData("PhysicalKeycode: Key.Key2, Pressed: true, Echo: false", "_input.PressFoodSelect(1);")]
+    [InlineData("PhysicalKeycode: Key.Key3, Pressed: true, Echo: false", "_input.PressFoodSelect(2);")]
+    [InlineData("ButtonIndex: JoyButton.DpadLeft, Pressed: true", "_input.PressFoodCycle(-1);")]
+    [InlineData("ButtonIndex: JoyButton.DpadRight, Pressed: true", "_input.PressFoodCycle(1);")]
+    public void ViewMapsTheFoodControls(string pattern, string call)
+    {
+        // The first call after the case pattern is the one that button triggers.
+        var source = ViewSource();
+        int at = source.IndexOf(pattern, StringComparison.Ordinal);
+        Assert.True(at >= 0, $"no case for {pattern}");
+        int next = source.IndexOf("_input.", at, StringComparison.Ordinal);
+        Assert.Equal(next, source.IndexOf(call, at, StringComparison.Ordinal));
+    }
+
     // --- allocations ---
 
     [Fact]
@@ -503,6 +648,9 @@ public class InputModuleTests
             input.PressJump();
             input.PressInteract();
             input.PressOpenMap();
+            input.PressEat();
+            input.PressFoodSelect(i % 3);
+            input.PressFoodCycle(1);
             input.Tick(new TickContext(i, Step));
         }
         Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
@@ -529,6 +677,9 @@ public class InputModuleTests
         input.PressJump();
         input.PressInteract();
         input.PressOpenMap();
+        input.PressEat();
+        input.PressFoodSelect(1);
+        input.PressFoodCycle(1);
         return TickOnce(input, bus);
     }
 
@@ -538,6 +689,9 @@ public class InputModuleTests
         Assert.Equal(Vector2.Zero, msg.Look);
         Assert.False(msg.Jump);
         Assert.False(msg.Fire);
+        Assert.False(msg.Eat);
+        Assert.Equal(-1, msg.FoodSelect);
+        Assert.Equal(0, msg.FoodCycle);
         Assert.True(msg.Interact);
         Assert.True(msg.OpenMap);
     }
@@ -548,6 +702,9 @@ public class InputModuleTests
         Assert.True(msg.Look.X > 0);
         Assert.True(msg.Jump);
         Assert.True(msg.Fire);
+        Assert.True(msg.Eat);
+        Assert.Equal(1, msg.FoodSelect);
+        Assert.Equal(1, msg.FoodCycle);
         Assert.True(msg.Interact);
         Assert.True(msg.OpenMap);
     }
@@ -603,6 +760,23 @@ public class InputModuleTests
         Assert.False(TickOnce(input, bus).Jump);
         bus.Focus(ShopMenu, false);
         Assert.False(TickOnce(input, bus).Jump);
+    }
+
+    [Fact]
+    public void FoodPressesWhileMenuOpenAreNotReportedAfterItCloses()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        bus.Focus(ShopMenu, true);
+        input.PressEat();
+        input.PressFoodSelect(2);
+        input.PressFoodCycle(-1);
+        AssertSuppressed(TickWithEverything(input, bus));
+        bus.Focus(ShopMenu, false);
+        var msg = TickOnce(input, bus);
+        Assert.False(msg.Eat);
+        Assert.Equal(-1, msg.FoodSelect);
+        Assert.Equal(0, msg.FoodCycle);
     }
 
     [Fact]

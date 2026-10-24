@@ -1,3 +1,4 @@
+using System;
 using System.Numerics;
 
 namespace Fungtopia.Input;
@@ -40,6 +41,18 @@ public readonly struct PlayerInput
     /// </summary>
     public readonly Vector3 AimOrigin;
 
+    /// <summary>Eat was pressed during this tick (eat the selected food).</summary>
+    public readonly bool Eat;
+
+    // Stored plus one so that default(PlayerInput) reads FoodSelect -1 (none).
+    private readonly int _foodSelectPlusOne;
+
+    /// <summary>Food slot picked during this tick: 0, 1 or 2 (keys 1 / 2 / 3); -1 when none.</summary>
+    public int FoodSelect => _foodSelectPlusOne - 1;
+
+    /// <summary>Food selection step during this tick: -1 (previous), +1 (next) or 0.</summary>
+    public readonly int FoodCycle;
+
     public PlayerInput(Vector2 move, Vector2 look, bool jump, bool fire, bool hasAim, Vector3 aimDirection)
         : this(move, look, jump, fire, hasAim, aimDirection, false, false)
     {
@@ -53,6 +66,16 @@ public readonly struct PlayerInput
 
     public PlayerInput(Vector2 move, Vector2 look, bool jump, bool fire, bool hasAim, Vector3 aimDirection,
         bool interact, bool openMap, Vector3 aimOrigin)
+        : this(move, look, jump, fire, hasAim, aimDirection, interact, openMap, aimOrigin, false, -1, 0)
+    {
+    }
+
+    /// <summary>
+    /// Full constructor. <paramref name="foodSelect"/> outside 0..2 means none (-1);
+    /// <paramref name="foodCycle"/> is reduced to its sign (-1, 0 or +1).
+    /// </summary>
+    public PlayerInput(Vector2 move, Vector2 look, bool jump, bool fire, bool hasAim, Vector3 aimDirection,
+        bool interact, bool openMap, Vector3 aimOrigin, bool eat, int foodSelect, int foodCycle)
     {
         Move = move;
         Look = look;
@@ -63,5 +86,8 @@ public readonly struct PlayerInput
         AimOrigin = hasAim ? aimOrigin : Vector3.Zero;
         Interact = interact;
         OpenMap = openMap;
+        Eat = eat;
+        _foodSelectPlusOne = foodSelect is >= 0 and <= 2 ? foodSelect + 1 : 0;
+        FoodCycle = Math.Sign(foodCycle);
     }
 }
