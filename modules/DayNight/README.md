@@ -5,9 +5,11 @@ night is 20:00-6:00. Fainting in a fight costs no coins: you wake up at Dr. Jere
 next morning. The view owns the one sun, sky and WorldEnvironment of the whole game.
 
 - `Contract/` — `Fungtopia.DayNight.Contract` (namespace `Fungtopia.DayNight`), see below.
-- `Core/` — `Fungtopia.DayNight.Core`: `DayNightModule`, the module's one `IModule`.
+- `Core/` — `Fungtopia.DayNight.Core`: `DayNightModule`, the module's one `IModule`; `VolumetricFog`, the
+  global volumetric fog settings.
 - `Godot/` — `Main.tscn` with `DayNightView` (light, sky, environment); `Shaders/sky.gdshader`.
-- `Tests/` — `DayNightModuleTests.cs`: xUnit tests of `DayNightModule` with a fake `IMessageBus`.
+- `Tests/` — `DayNightModuleTests.cs`: xUnit tests of `DayNightModule` with a fake `IMessageBus`, and of
+  `VolumetricFog`.
 
 Test it with `./test.sh DayNight` from the repository root.
 
@@ -49,6 +51,13 @@ big cream moon with soft mushroom-cap spots and a blue halo, and twinkling stars
 While the player is in the forest (`PlayerArea == Forest`, blended over 2 s) the fog thickens
 into a green-gold haze by day and a teal one by night, the ambient drops and the glow rises:
 cap shadows dapple the ground more and glowing mushrooms stand out.
+
+Volumetric fog is on in the environment (settings in `VolumetricFog`) with density 0, so open
+areas look as without it and other modules can add local `FogVolume` nodes (the Deep Forest's
+fog). It is kept cheap: 40 m long, a 48x48x32 froxel grid (set with
+`RenderingServer.EnvironmentSetVolumetricFogVolumeSize`), no GI inject, ambient inject 0.5 so
+shaded fog is not black. Volumetric fog needs the Forward+ renderer; the OpenGL renderer that
+`./screenshot.sh` uses ignores it.
 
 ## Screenshots
 

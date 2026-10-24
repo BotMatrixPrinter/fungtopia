@@ -48,6 +48,22 @@ public class DayNightModuleTests
 
     public DayNightModuleTests() => _clock.Start(_bus);
 
+    [Fact]
+    public void VolumetricFogIsOnWithNoDensityOfItsOwn()
+    {
+        Assert.True(VolumetricFog.Enabled);
+        Assert.Equal(0f, VolumetricFog.Density);
+    }
+
+    [Fact]
+    public void VolumetricFogIsCheaperThanGodotsDefaults()
+    {
+        Assert.InRange(VolumetricFog.Length, 16f, 63f);
+        Assert.InRange(VolumetricFog.VolumeSize, 16, 63);
+        Assert.InRange(VolumetricFog.VolumeDepth, 16, 63);
+        Assert.Equal(0f, VolumetricFog.GiInject);
+    }
+
     private void Ticks(int count)
     {
         for (int i = 0; i < count; i++)

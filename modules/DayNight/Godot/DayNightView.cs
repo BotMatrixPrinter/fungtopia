@@ -106,10 +106,18 @@ public partial class DayNightView : Node3D, IModuleView
             GlowBloom = 0.05f,
             FogEnabled = true,
             FogSkyAffect = 0.25f,
+            // On but empty, so other modules' FogVolume nodes (the Deep Forest) show; see VolumetricFog.
+            VolumetricFogEnabled = VolumetricFog.Enabled,
+            VolumetricFogDensity = VolumetricFog.Density,
+            VolumetricFogLength = VolumetricFog.Length,
+            VolumetricFogDetailSpread = VolumetricFog.DetailSpread,
+            VolumetricFogGIInject = VolumetricFog.GiInject,
+            VolumetricFogAmbientInject = VolumetricFog.AmbientInject,
             AdjustmentEnabled = true,
             AdjustmentSaturation = 1.2f,
         };
         AddChild(new WorldEnvironment { Name = "WorldEnvironment", Environment = _environment });
+        RenderingServer.EnvironmentSetVolumetricFogVolumeSize(VolumetricFog.VolumeSize, VolumetricFog.VolumeDepth);
         _light = new DirectionalLight3D
         {
             Name = "Sun",
