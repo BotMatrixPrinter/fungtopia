@@ -307,15 +307,18 @@ public class DayNightModuleTests
         var bus = new NullBus();
         var clock = new DayNightModule();
         clock.Start(bus);
-        clock.Tick(new TickContext(0, Step)); // warm up
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 2000; i++)
+        void Frame(int i)
         {
             if (i % 500 == 0)
                 clock.Handle(new PlayerDefeated(Vector3.Zero));
             clock.Handle(default(PlayerState));
             clock.Tick(new TickContext(i + 1, Step));
         }
+        for (int i = 0; i < 300; i++)
+            Frame(i); // warm up
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 300; i < 2300; i++)
+            Frame(i);
         Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
     }
 

@@ -644,10 +644,7 @@ public class InputModuleTests
         input.SetKeyboardMove(new Vector2(1, 1));
         input.SetLookStick(new Vector2(0.5f, 0.5f));
         input.SetAim(new Vector3(2, 3, 4), new Vector3(1, 1, 1));
-        for (int i = 0; i < 10; i++)
-            input.Tick(new TickContext(i, Step));
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 1000; i++)
+        void Frame(int i)
         {
             input.AddMouseMotion(new Vector2(1, 1));
             input.PressJump();
@@ -658,6 +655,11 @@ public class InputModuleTests
             input.PressFoodCycle(1);
             input.Tick(new TickContext(i, Step));
         }
+        for (int i = 0; i < 300; i++)
+            Frame(i); // warm up
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 300; i < 1300; i++)
+            Frame(i);
         Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
     }
 

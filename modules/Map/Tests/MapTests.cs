@@ -973,7 +973,11 @@ public class MapTests
     {
         float h = Ground.HeightAt(12.5f, 133.25f);
         bool blocked = Ground.Blocks(-24f, 212f);
-        Areas.At(0f, 0f); Areas.Walkable(0f, 0f, 0.4f); Ground.Blocks(0f, 0f, 0.4f); // warm up
+        for (int i = 0; i < 300; i++)
+        {
+            float x = i * 1.3f - 200f, z = i * 1.9f - 250f; // warm up
+            Ground.HeightAt(x, z); Ground.Blocks(x, z, 0.4f); Areas.Walkable(x, z, 0.4f); Areas.At(x, z);
+        }
         long before = GC.GetAllocatedBytesForCurrentThread();
         float sum = 0f;
         int count = 0;

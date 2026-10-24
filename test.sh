@@ -54,6 +54,9 @@ done
 # Build the Godot project; it must target net10.0.
 framework="$(dotnet msbuild Fungtopia.csproj -getProperty:TargetFramework 2>/dev/null | tr -d '[:space:]')"
 [ "$framework" = "net10.0" ] || fail "Fungtopia.csproj targets '$framework', not net10.0"
+# The test-only runtime settings of Directory.Build.props must not reach the game.
+tiering="$(dotnet msbuild Fungtopia.csproj -getProperty:TieredCompilation -getProperty:TieredPGO 2>/dev/null | tr -d '[:space:]')"
+[ "$tiering" = '{"Properties":{"TieredCompilation":"","TieredPGO":""}}' ] || fail "Fungtopia.csproj sets tiering: $tiering"
 echo "test.sh: dotnet build Fungtopia.csproj"
 if ! dotnet build Fungtopia.csproj; then
   fail "building Fungtopia.csproj"

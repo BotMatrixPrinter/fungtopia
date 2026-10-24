@@ -602,10 +602,13 @@ public class TownTests
         var town = new TownModule();
         town.Start(bus);
         var day = At(1, 12f);
-        town.Handle(day);
-        town.Tick(Step);
+        for (int i = 0; i < 300; i++)
+        {
+            town.Handle(day); // warm up
+            town.Tick(new TickContext(i, 1.0 / 60));
+        }
         long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 1000; i++)
+        for (int i = 300; i < 1300; i++)
         {
             town.Handle(day);
             town.Tick(new TickContext(i, 1.0 / 60));

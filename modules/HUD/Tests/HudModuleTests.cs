@@ -779,12 +779,16 @@ public class HudModuleTests
         var deep = In(Area.DeepForest);
         var context = new TickContext(0, Step);
         // Warm up (JIT) before measuring.
-        for (int i = 0; i < 3; i++)
+        for (int i = 0; i < 300; i++)
         {
             _hud.Handle(full); _hud.Handle(hit); _hud.Handle(wallet); _hud.Handle(earned);
             _hud.Handle(bow); _hud.Handle(defeated); _hud.Tick(context);
             _hud.Handle(town); _hud.Handle(forest); _hud.Handle(time); _hud.Handle(woke);
             _hud.Handle(quest); _hud.Handle(questMore);
+            _hud.Handle(open); _hud.Handle(closed); _hud.Handle(deep); _hud.Handle(forest);
+            _ = _hud.Hidden; _ = _hud.BannerSpooky; _ = _hud.CrosshairVisible; _hud.CrosshairAlpha(0.5f);
+            _hud.HeartsShake(0.5f); _hud.CoinsPopScale(0.5f); _hud.FaintFade(0.5f);
+            _hud.BannerSlide(0.5f); _hud.WakeTextAlpha(0.5f); _hud.FaintTextAlpha(0.5f); _hud.QuestPopScale(0.5f);
         }
         long before = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < 200; i++)

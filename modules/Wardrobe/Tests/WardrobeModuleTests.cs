@@ -891,30 +891,35 @@ public class WardrobeModuleTests
         var bus = new CountingBus();
         var wardrobe = new WardrobeModule();
         wardrobe.Start(bus);
-        for (int i = 0; i < 100; i++)
-            wardrobe.Tick(Step);
         var equip = new Equip("beanie");
         var kill = Kill(1, MonsterKind.Caterpillar);
-        wardrobe.Drag(1f);
-        wardrobe.TryOn("skirt");
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 1000; i++)
+        void Play(int ticks)
         {
-            wardrobe.Handle(equip);
-            wardrobe.Handle(kill);
-            wardrobe.Tick(Step);
-        }
-        // Open, turning and trying on.
-        wardrobe.Handle(new OpenShop());
-        wardrobe.SetTurnStick(0.7f);
-        for (int i = 0; i < 1000; i++)
-        {
-            wardrobe.Drag(3f);
+            wardrobe.Drag(1f);
             wardrobe.TryOn("skirt");
-            wardrobe.Tick(Step);
+            for (int i = 0; i < ticks; i++)
+            {
+                wardrobe.Handle(equip);
+                wardrobe.Handle(kill);
+                wardrobe.Tick(Step);
+            }
+            // Open, turning and trying on.
+            wardrobe.Handle(new OpenShop());
+            wardrobe.SetTurnStick(0.7f);
+            for (int i = 0; i < ticks; i++)
+            {
+                wardrobe.Drag(3f);
+                wardrobe.TryOn("skirt");
+                wardrobe.Tick(Step);
+            }
+            wardrobe.Close();
         }
+        Play(300); // warm up
+        int published = bus.Published;
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        Play(1000);
         Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
-        Assert.Equal(2200 + 3000, bus.Published);
+        Assert.Equal(2000 + 3000, bus.Published - published);
     }
 
     /// <summary>A bus that only counts what is published (no allocation).</summary>

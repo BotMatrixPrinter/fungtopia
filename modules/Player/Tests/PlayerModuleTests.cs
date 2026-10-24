@@ -1863,9 +1863,7 @@ public class PlayerModuleTests
         _ = player.Look;
         player.Handle(otherLook);
         _ = player.Look;
-        player.Tick(new TickContext(0, Step)); // warm up
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 600; i++)
+        void Frame(int i)
         {
             player.Handle(input);
             player.Handle(new DamagePlayer(1, Vector3.Zero));
@@ -1876,6 +1874,11 @@ public class PlayerModuleTests
             _ = player.Look;
             player.Tick(new TickContext(i + 1, Step));
         }
+        for (int i = 0; i < 300; i++)
+            Frame(i); // warm up
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 300; i < 900; i++)
+            Frame(i);
         Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
     }
 

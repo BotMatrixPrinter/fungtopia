@@ -1155,9 +1155,10 @@ public class PetModuleTests
                 pet.Handle(in monsters[i]);
             pet.Tick(new TickContext(t, Step));
         }
-        Tick(0);
+        for (int t = 0; t < 300; t++)
+            Tick(t); // warm up
         long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int t = 1; t < 600; t++)
+        for (int t = 300; t < 900; t++)
             Tick(t);
         Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
     }
