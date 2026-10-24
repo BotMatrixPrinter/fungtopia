@@ -1,4 +1,5 @@
 using System;
+using Fungtopia.Wardrobe;
 using Godot;
 
 namespace Fungtopia.Player.View;
@@ -10,9 +11,20 @@ namespace Fungtopia.Player.View;
 /// back), "walk", "jump", "hit", "draw" (at full draw, aiming a little up), "drawback" (the same
 /// from behind, like the game's camera), "release" (just after a shot) or "swing" (the bow on its
 /// way back onto the back). PLAYER_PREVIEW_CHARACTER ("girl" or "boy") shows only that one, larger.
+/// PLAYER_PREVIEW_LOOKS=1 shows four characters dressed from Wardrobe looks instead (<see cref="Dressed"/>),
+/// in the same pose.
 /// </summary>
 public partial class PlayerPreview : Node3D
 {
+    /// <summary>Four combinations of skin, hair, eyes and clothes for PLAYER_PREVIEW_LOOKS.</summary>
+    private static readonly (CharacterKind Kind, AppearanceState Look)[] Dressed =
+    {
+        (CharacterKind.Girl, new AppearanceState(4, 4, 5, 2, "party_dress", "", "mary_janes", "flower_clip", "", "")),
+        (CharacterKind.Boy, new AppearanceState(0, 5, 2, 3, "mushroom_hoodie", "jeans", "sneakers", "mushroom_hat", "", "mushroom_backpack")),
+        (CharacterKind.Girl, new AppearanceState(1, 3, 6, 4, "striped_tee", "skirt", "rain_boots", "", "round_glasses", "ladybug_backpack")),
+        (CharacterKind.Boy, new AppearanceState(5, 0, 1, 1, "overalls_top", "overalls", "rain_boots", "beanie", "spider_silk_scarf", "")),
+    };
+
     private CharacterModel[] _models = Array.Empty<CharacterModel>();
     private string _pose = "front";
     private float _time;
@@ -63,12 +75,16 @@ public partial class PlayerPreview : Node3D
         AddChild(ground);
 
         string only = OS.GetEnvironment("PLAYER_PREVIEW_CHARACTER").ToLowerInvariant();
+        bool looks = OS.GetEnvironment("PLAYER_PREVIEW_LOOKS") is "1" or "true";
         _models = only switch
         {
+            _ when looks => Array.ConvertAll(Dressed, d => CharacterModel.Create(d.Kind)),
             "girl" => new[] { CharacterModel.Create(CharacterKind.Girl) },
             "boy" => new[] { CharacterModel.Create(CharacterKind.Boy) },
             _ => new[] { CharacterModel.Create(CharacterKind.Girl), CharacterModel.Create(CharacterKind.Boy) },
         };
+        for (int i = 0; i < _models.Length; i++)
+            _models[i].Apply(looks ? CharacterLook.From(Dressed[i].Look, Dressed[i].Kind) : CharacterLook.Default(_models[i].Kind));
         bool back = _pose == "back";
         bool archery = _pose is "draw" or "drawback" or "release" or "swing";
         for (int i = 0; i < _models.Length; i++)
@@ -80,6 +96,12 @@ public partial class PlayerPreview : Node3D
             float x = _models.Length == 1 ? 0f : i == 0 ? -0.75f : 0.75f;
             if (archery && _models.Length > 1)
                 x = i == 0 ? -1.0f : 0.9f;
+            if (looks)
+            {
+                x = (i - 1.5f) * (archery ? 1.7f : 1.25f);
+                if (!back && !archery)
+                    yaw = Mathf.Pi + (i - 1.5f) * 0.25f;
+            }
             _models[i].Transform = new Transform3D(new Basis(Vector3.Up, yaw), new Vector3(x, 0f, 0f));
         }
 
@@ -89,6 +111,8 @@ public partial class PlayerPreview : Node3D
             // Like the game's camera: over the right shoulder, from behind and a little above.
             camera.LookAtFromPosition(new Vector3(0.5f + (_models.Length == 1 ? 0f : 0.9f), 1.9f, 3.4f),
                 new Vector3(0.4f, 1.1f, -1f), Vector3.Up);
+        else if (looks)
+            camera.LookAtFromPosition(new Vector3(0f, 1.5f, 6.6f), new Vector3(0f, 0.7f, 0f), Vector3.Up);
         else if (_models.Length == 1)
             camera.LookAtFromPosition(new Vector3(0f, 1.4f, 3.2f), new Vector3(0f, 0.85f, 0f), Vector3.Up);
         else

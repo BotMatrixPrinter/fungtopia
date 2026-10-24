@@ -6,6 +6,7 @@ using Fungtopia.Input;
 using Fungtopia.Map;
 using Fungtopia.Shell;
 using Fungtopia.StartScreen;
+using Fungtopia.Wardrobe;
 
 namespace Fungtopia.Player;
 
@@ -19,7 +20,7 @@ namespace Fungtopia.Player;
 /// </summary>
 public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessageHandler<DamagePlayer>,
     IMessageHandler<TeleportPlayer>, IMessageHandler<DialogueState>, IMessageHandler<BowState>,
-    IMessageHandler<GameStart>, IMessageHandler<StartScreenState>
+    IMessageHandler<GameStart>, IMessageHandler<StartScreenState>, IMessageHandler<AppearanceState>
 {
     public const float WalkSpeed = 5f;
     public const float JumpHeight = 1.2f;
@@ -79,6 +80,18 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
     /// <summary>The latest input's <c>PlayerInput.HasAim</c>.</summary>
     public bool HasAim => _input.HasAim;
 
+    /// <summary>The latest <see cref="AppearanceState"/> (the Wardrobe's), valid when <see cref="HasAppearance"/>.</summary>
+    public AppearanceState Appearance { get; private set; }
+
+    /// <summary>Whether an <see cref="AppearanceState"/> has arrived; until then the character keeps its built-in look.</summary>
+    public bool HasAppearance { get; private set; }
+
+    /// <summary>Counts the changes of <see cref="Appearance"/>, so the view redresses the character only when it changes.</summary>
+    public int AppearanceVersion { get; private set; }
+
+    /// <summary>What the character looks like: <see cref="Appearance"/> on <see cref="Character"/>, or its built-in look.</summary>
+    public CharacterLook Look => HasAppearance ? CharacterLook.From(Appearance, Character) : CharacterLook.Default(Character);
+
     /// <summary>The state published on the latest tick.</summary>
     public PlayerState State { get; private set; }
 
@@ -93,6 +106,7 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
         bus.Subscribe<BowState>(this);
         bus.Subscribe<GameStart>(this);
         bus.Subscribe<StartScreenState>(this);
+        bus.Subscribe<AppearanceState>(this);
         State = MakeState();
     }
 
@@ -146,6 +160,22 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
     public void Handle(in BowState message) => _bowDraw = message.Draw;
 
     public void Handle(in StartScreenState message) => _screenOpen = message.Open;
+
+    /// <summary>Keeps the latest look (it arrives every tick; only a change counts).</summary>
+    public void Handle(in AppearanceState message)
+    {
+        if (HasAppearance && Same(Appearance, message))
+            return;
+        Appearance = message;
+        HasAppearance = true;
+        AppearanceVersion++;
+    }
+
+    private static bool Same(in AppearanceState a, in AppearanceState b) =>
+        a.Skin == b.Skin && a.HairStyle == b.HairStyle && a.HairColor == b.HairColor && a.EyeColor == b.EyeColor &&
+        string.Equals(a.Top, b.Top, StringComparison.Ordinal) && string.Equals(a.Bottom, b.Bottom, StringComparison.Ordinal) &&
+        string.Equals(a.Shoes, b.Shoes, StringComparison.Ordinal) && string.Equals(a.Head, b.Head, StringComparison.Ordinal) &&
+        string.Equals(a.Face, b.Face, StringComparison.Ordinal) && string.Equals(a.Back, b.Back, StringComparison.Ordinal);
 
     /// <summary>The first one picks the character and shows the player at the home door; later ones are ignored.</summary>
     public void Handle(in GameStart message)

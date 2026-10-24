@@ -11,6 +11,8 @@ namespace Fungtopia.Player.View;
 /// The character setting is <see cref="Character"/> ("Girl" or "Boy"), which the command-line
 /// user argument <c>--character=boy</c> (after <c>--</c>) overrides, and the start screen's
 /// choice replaces once the game starts. Hidden until then (<see cref="PlayerModule.Visible"/>).
+/// Dressed by <see cref="PlayerModule.Look"/> (the Wardrobe's <c>AppearanceState</c>), redressed
+/// the frame it changes, so the wardrobe screen shows each pick at once.
 /// </summary>
 public partial class PlayerView : Node3D, IModuleView
 {
@@ -25,6 +27,7 @@ public partial class PlayerView : Node3D, IModuleView
     private ArcheryState _previousArchery = ArcheryState.Relaxed;
     private ArcheryState _currentArchery = ArcheryState.Relaxed;
     private long _seenTicks = -1;
+    private int _dressedVersion = -1;
 
     public void Bind(IModule module) => _player = (PlayerModule)module;
 
@@ -53,6 +56,7 @@ public partial class PlayerView : Node3D, IModuleView
         _model?.QueueFree();
         _model = CharacterModel.Create(kind);
         AddChild(_model);
+        _dressedVersion = -1;
     }
 
     public override void _Process(double delta)
@@ -70,6 +74,14 @@ public partial class PlayerView : Node3D, IModuleView
         }
         if (_current.Character != _model.Kind)
             ShowModel(_current.Character);
+        if (_player.AppearanceVersion != _dressedVersion)
+        {
+            var look = _player.HasAppearance
+                ? CharacterLook.From(_player.Appearance, _model.Kind)
+                : CharacterLook.Default(_model.Kind);
+            _model.Apply(look);
+            _dressedVersion = _player.AppearanceVersion;
+        }
         // Hidden behind the start screen until GameStart (which also picks the character).
         _model.Visible = _player.Visible;
         if (!_model.Visible)

@@ -8,14 +8,15 @@ after defeat until it is teleported (to the clinic the next morning).
 
 - `Contract/` — `Fungtopia.Player.Contract` (namespace `Fungtopia.Player`), see below.
 - `Core/` — `Fungtopia.Player.Core`: `PlayerModule`, the module's one `IModule`; `ArcheryPose`
-  and `ArcheryState` (the archery pose as pure functions, for the view).
+  and `ArcheryState` (the archery pose as pure functions, for the view); `CharacterLook`, `Rig`
+  and `BuiltinPieces` (what the character looks like from the Wardrobe's `AppearanceState`).
 - `Godot/` — `Main.tscn` with `PlayerView`, which draws the character; `CharacterModel` (the
   model, toon materials and procedural animation); `Preview.tscn` (both characters side by side,
   for screenshots); `Shaders/` (toon surface with hit flash, ink outline).
 - `Models/` — `characters.py`, the Blender script that builds and exports `girl.glb` and
   `boy.glb` next to it.
-- `Tests/` — `PlayerModuleTests.cs`: xUnit tests of `PlayerModule` (with a fake `IMessageBus`)
-  and `ArcheryPose`.
+- `Tests/` — `PlayerModuleTests.cs`: xUnit tests of `PlayerModule` (with a fake `IMessageBus`),
+  `ArcheryPose` and `CharacterLook`.
 
 Test it with `./test.sh Player` from the repository root.
 
@@ -35,6 +36,7 @@ positive turns left; the direction of yaw `a` is `(-sin a, 0, -cos a)`.
 
 `PlayerModule` reads `Fungtopia.Input.PlayerInput`, `Fungtopia.Dialogue.DialogueState`,
 `Fungtopia.Bow.BowState`, `Fungtopia.StartScreen.GameStart` and `StartScreenState`,
+`Fungtopia.Wardrobe.AppearanceState` (and the Wardrobe's `Catalog` and `Looks`),
 `TeleportPlayer` and `DamagePlayer`, and the world from the Map Contract (`Ground`, `Areas`,
 `Places`). The Player Contract references the Map Contract (for `Area`). The game starts at
 `Places.HomeDoor`, facing out.
@@ -69,6 +71,30 @@ Each tick:
 - **Archery.** `Archery` (an `ArcheryState`) is advanced every tick by `ArcheryPose.Advance`
   from the latest `BowState.Draw` (see the View for what it means).
 
+- **Look.** The latest `AppearanceState` is kept as `Appearance` (`HasAppearance` once one came;
+  `AppearanceVersion` counts its changes, not its arrivals). `Look` is the `CharacterLook` of it on
+  `Character` (`CharacterLook.From`), or `CharacterLook.Default` before any.
+
+`CharacterLook` (plain values, no allocations) says how to draw the character:
+
+- `SkinColor` tints the skin parts (material `Skin`), `EyeColor` the eyes (`Eye`), `HairColor` the
+  hair style's `Hair` material (all from `Looks`); `HairModel` is the hair style's `ModelPath`, which
+  replaces the built-in hair.
+- `Top`, `Bottom`, `Shoes`, `Head`, `Face`, `Back` (`Model(slot)`): the `Catalog` `ModelPath` of the
+  item worn there. An item counts only in its own slot and when it fits the character; unknown
+  ids are nothing. A catalog dress replaces the bottom.
+- `Builtin` (`Shows(piece)`): the old fixed outfits are the defaults, one `BuiltinPieces` per slot,
+  each shown while nothing is worn there: `Top` (the Girl's pink spotted dress; the Boy's blue
+  shirt, sleeves and bow tie), `Bottom` (the Boy's trousers; hidden under a dress), `Shoes`,
+  `Head` (the Girl's ribbon bow), and `Hair` (until a hair style is chosen). The Girl's built-in
+  dress does not hide a worn bottom (it shows under it).
+- Out-of-range look indices keep the built-in color or hair. `CharacterLook.Default(kind)`
+  (`Custom` false) is the model as characters.py drew it.
+
+`Rig`: the attach points (`Head`, `Body`, `LegL`, `LegR`; `IsAttachPoint`), the node name
+prefixes of the built-in pieces (`NodePrefix`), the pieces each character has (`Pieces`), and
+the built-in colors.
+
 Settings and helpers: `Character` (the character setting, Girl by default, until `GameStart`
 picks it), `PlaceAt(feet,
 facing)` puts the player on the ground somewhere. The view also reads `CameraYaw`,
@@ -80,14 +106,21 @@ latest input's aim). No allocations per tick.
 `PlayerView` sets the Core's `Character` from its exported `Character` property (`"Girl"` in
 `Main.tscn`), which the user argument `--character=boy` overrides (for example
 `godot --path . -- --character=boy`), until the start screen's choice replaces it. The model is
-hidden while `Visible` is false (behind the start screen). It places the model between the last two ticks
+hidden while `Visible` is false (behind the start screen). The frame `AppearanceVersion` changes
+(or the character does) it redresses the model with the look (`CharacterModel.Apply`), so the
+wardrobe screen and character creation show each pick at once. It places the model between the last two ticks
 (`Engine.GetPhysicsInterpolationFraction`), turned to `Facing`; a teleport jumps instead of
 gliding. The view has no camera: the camera module follows `PlayerState`.
 
 `CharacterModel` loads `girl.glb` or `boy.glb` at run time with `GltfDocument` from the file's
 bytes (so a fresh checkout runs without an editor import; an export must include `*.glb` as
 non-resource files), replaces each material with the toon shader in the glTF material's color
-plus an ink outline, and animates the parts: walk bob, leg and arm swing, body sway, arms up and
+plus an ink outline, and animates the parts. `Apply(CharacterLook)` dresses it: it tints the
+character's own `Skin`, `Eye` and `Hair` materials, shows or hides the built-in pieces, and loads
+the hair style's and each worn item's .glb (cached bytes) the same way, parenting each of its
+objects to the rig part of the same name with no offset (`Fungtopia.Wardrobe.Attach`), so worn
+models move with every animation and the archery pose; while a `Back` item is worn the slung bow
+sits 0.13 m further out behind it. The animation: walk bob, leg and arm swing, body sway, arms up and
 legs tucked in the air, stretch rising and squash on landing, a blinking white flash while
 invulnerable, and tipping over on its back when defeated.
 
@@ -114,7 +147,13 @@ facing) says what `CharacterModel` draws:
 ## Models
 
 `blender -b --factory-startup --python modules/Player/Models/characters.py` (from the
-repository root) writes `girl.glb` and `boy.glb`; commit both with the script. Chibi kids from
+repository root) writes `girl.glb` and `boy.glb`; commit both with the script. Both are the same
+modular rig: skin parts (material `Skin`: a small torso and hips the clothes cover, legs whose
+round ends are the feet, arms, hands, the head) with dark eyes (`Eye`), and the old outfit and
+hair as separate child objects of their part, at its pivot, for the game to hide: `Hair` (Head),
+`DefaultTop` (Body; the Boy's sleeves `DefaultTopArmL`/`R`), `DefaultBottom` (Body) and
+`DefaultBottomLegL`/`R` (the Boy's trousers), `DefaultShoesLegL`/`R`, `DefaultHead` (the Girl's
+ribbon). The Wardrobe's clothes are sized for it (its `kit.py`). Chibi kids from
 the drawing: a big round head with large dark oval eyes with sparkles, rosy cheeks, a small
 smile and hair; a simple rounded body; short arms with little round hands; stubby legs with round
 shoes; a wooden bow slung on the back with mushroom-red tips, and for shooting the same bow
@@ -133,4 +172,5 @@ origin, facing -Z in Godot.
 variable `PLAYER_PREVIEW` picks the pose: `front` (default), `back`, `walk`, `jump`, `hit`,
 `draw` (full draw), `drawback` (full draw from behind, like the game camera), `release` (just
 after a shot) or `swing` (the bow on its way back); `PLAYER_PREVIEW_CHARACTER=girl` or `boy`
-shows only that character, larger.
+shows only that character, larger; `PLAYER_PREVIEW_LOOKS=1` shows four characters dressed from
+different Wardrobe looks (skin, hair style and color, eyes, clothes) in the chosen pose.

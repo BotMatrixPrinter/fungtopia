@@ -5,7 +5,9 @@
 #
 # Chibi kids from the drawing: a big round head with large dark oval eyes, a simple rounded
 # body, little round hands, stubby legs and a bow carried on the back. The Girl has a ribbon
-# bow on her head and a triangle dress; the Boy a bow tie and a rounded body.
+# bow on her head and a triangle dress; the Boy a bow tie, a rounded shirt and trousers. Both
+# share one modular rig (skin body parts) with the outfit and hair as separate child objects, so
+# the game can swap them for the Wardrobe's hair styles and clothes (see build()).
 #
 # Meters, feet at the origin, facing Blender +Y (Godot's -Z, forward, after the glTF export).
 # Separate objects, each with its pivot where it moves, so the game can animate them:
@@ -52,7 +54,6 @@ KINDS = {
         "Hair": (0.45, 0.22, 0.14),
         "Cloth": (0.92, 0.3, 0.5),     # the dress
         "Ribbon": (0.95, 0.24, 0.36),   # the bow on her head
-        "Legs": (0.98, 0.68, 0.52),
         "Spots": (1.0, 0.96, 0.9),
     },
     "boy": {
@@ -173,13 +174,24 @@ class Part:
         m = Matrix.Translation(Vector(center) - self.pivot) @ rotation
         self._add(make, mat, m)
 
-    def build(self):
+    def build(self, parent=None):
+        """The object; with a parent (a built part with the same pivot) it is its child at no offset."""
         obj = new_mesh_object(self.name, self.bm)
         for mat in self.materials:
             obj.data.materials.append(mat)
         obj.location = self.pivot
         obj.rotation_euler = self.rotation.to_euler()
+        if parent is not None:
+            # Same pivot and rotation as the parent: no offset from it.
+            obj.parent = parent
+            obj.location = (0, 0, 0)
+            obj.rotation_euler = (0, 0, 0)
         return obj
+
+
+def piece(name, part):
+    """A built-in piece of the default outfit (or the hair) on a part: same pivot, its own object."""
+    return Part(name, part.pivot, rotation=part.rotation)
 
 
 def ribbon_bow(part, mat, center, size):
@@ -203,6 +215,12 @@ def build(kind):
     head_r = 0.4
     head_c = Vector((0, 0, neck_z + head_r * 0.92))
 
+    # The modular rig, the same for both: skin parts (material "Skin", tinted with the chosen skin
+    # tone in the game), dark eyes ("Eye", tinted with the eye color), and the default outfit and
+    # hair as separate objects parented to their part, which the game hides when something else
+    # is worn there: Hair, DefaultTop* (the Girl's dress; the Boy's shirt, sleeves and bow tie),
+    # DefaultBottom* (the Boy's trousers), DefaultShoes*, DefaultHead (the Girl's ribbon bow).
+
     # Head: big and round, large dark oval eyes with sparkles, rosy cheeks, a small smile, hair.
     head = Part("Head", (0, 0, neck_z))
     head.sphere(mats["Skin"], head_c, (head_r, head_r * 0.96, head_r * 0.94), segments=40, rings=24)
@@ -217,64 +235,88 @@ def build(kind):
                     rotation=Matrix.Rotation(math.radians(side * -38), 4, "Z"), segments=16, rings=8)
     head.torus(mats["Mouth"], head_c + Vector((0, head_r * 0.92, -0.17)), 0.035, 0.009,
                rotation=Matrix.Rotation(math.radians(90), 4, "X") @ Matrix.Rotation(math.radians(-90), 4, "Z"), arc=0.42)
+    head_obj = head.build()
     # Hair: a cap over the top and back of the head (cut open over the face), with a fringe.
-    head.sphere(mats["Hair"], head_c + Vector((0, -0.02, 0.03)), (head_r * 1.07, head_r * 1.06, head_r * 1.04),
+    hair = piece("Hair", head)
+    hair.sphere(mats["Hair"], head_c + Vector((0, -0.02, 0.03)), (head_r * 1.07, head_r * 1.06, head_r * 1.04),
                 segments=40, rings=24, cut=(head_c + Vector((0, 0.1, -0.1)), Vector((0, 0.85, -0.53))))
     for x in (-0.22, -0.08, 0.08, 0.22):
-        head.sphere(mats["Hair"], head_c + Vector((x, head_r * 0.8 - abs(x) * 0.35, 0.24 - abs(x) * 0.3)),
+        hair.sphere(mats["Hair"], head_c + Vector((x, head_r * 0.8 - abs(x) * 0.35, 0.24 - abs(x) * 0.3)),
                     (0.1, 0.07, 0.075), segments=16, rings=8)
     if girl:
-        # Two little pigtail puffs and a big ribbon bow on top.
+        # Two little pigtail puffs, and a big ribbon bow on top.
         for side in (-1, 1):
-            head.sphere(mats["Hair"], head_c + Vector((side * 0.4, -0.08, -0.12)), (0.12, 0.12, 0.16), segments=16, rings=8)
-        ribbon_bow(head, mats["Ribbon"], head_c + Vector((0.12, 0.05, head_r * 0.98)), 0.13)
+            hair.sphere(mats["Hair"], head_c + Vector((side * 0.4, -0.08, -0.12)), (0.12, 0.12, 0.16), segments=16, rings=8)
+        ribbon = piece("DefaultHead", head)
+        ribbon_bow(ribbon, mats["Ribbon"], head_c + Vector((0.12, 0.05, head_r * 0.98)), 0.13)
+        ribbon.build(head_obj)
     else:
         # A cowlick tuft.
-        head.sphere(mats["Hair"], head_c + Vector((0.05, 0.05, head_r * 1.0)), (0.05, 0.05, 0.1),
+        hair.sphere(mats["Hair"], head_c + Vector((0.05, 0.05, head_r * 1.0)), (0.05, 0.05, 0.1),
                     rotation=Matrix.Rotation(math.radians(25), 4, "Y"), segments=12, rings=6)
-    head.build()
+    hair.build(head_obj)
 
-    # Body.
+    # Body: a small rounded skin torso and hips (the clothes cover them; the Wardrobe's tops wrap
+    # the chest ellipsoid below), with the bow's strap across the chest.
+    chest_c = (0, 0, (hip_z + neck_z) / 2 - 0.02)
+    chest_r = (0.25, 0.22, 0.27)
     body = Part("Body", (0, 0, hip_z))
+    body.sphere(mats["Skin"], chest_c, (0.19, 0.17, 0.25), segments=32, rings=16)
+    body.sphere(mats["Skin"], (0, 0, hip_z + 0.04), (0.235, 0.205, 0.1), segments=32, rings=10)
+    strap = Matrix.Rotation(math.radians(35), 4, "Y")
+    body.sphere(mats["Wood"], (0, 0, (hip_z + neck_z) / 2 + 0.06), (0.27, 0.24, 0.025), rotation=strap,
+                segments=32, rings=6)
+    body_obj = body.build()
+    top = piece("DefaultTop", body)
     if girl:
         # A triangle dress flaring out over the legs, with white spots like a mushroom cap.
-        body.cone(mats["Cloth"], (0, 0, hip_z - 0.08), 0.33, 0.13, neck_z - hip_z + 0.1, segments=40)
-        body.sphere(mats["Cloth"], (0, 0, neck_z - 0.01), (0.14, 0.13, 0.06), segments=24, rings=8)
+        top.cone(mats["Cloth"], (0, 0, hip_z - 0.08), 0.33, 0.13, neck_z - hip_z + 0.1, segments=40)
+        top.sphere(mats["Cloth"], (0, 0, neck_z - 0.01), (0.14, 0.13, 0.06), segments=24, rings=8)
         for i, (a, z) in enumerate(((20, 0.32), (-40, 0.29), (75, 0.36), (-95, 0.3), (140, 0.33),
                                     (-150, 0.34), (5, 0.48), (-70, 0.47), (110, 0.5))):
             t = math.radians(a + 90)
             r = 0.33 - (z - (hip_z - 0.08)) / (neck_z - hip_z + 0.1) * 0.2 + 0.005
-            body.sphere(mats["Spots"], (math.cos(t) * r, math.sin(t) * r, z), (0.035, 0.035, 0.035),
-                        segments=12, rings=6)
+            top.sphere(mats["Spots"], (math.cos(t) * r, math.sin(t) * r, z), (0.035, 0.035, 0.035),
+                       segments=12, rings=6)
     else:
-        # A rounded body in a shirt, with a bow tie at the collar.
-        body.sphere(mats["Cloth"], (0, 0, (hip_z + neck_z) / 2 - 0.02), (0.25, 0.22, 0.27), segments=32, rings=16)
-        body.sphere(mats["Legs"], (0, 0, hip_z + 0.04), (0.235, 0.205, 0.1), segments=32, rings=10)
-        ribbon_bow(body, mats["Ribbon"], (0, 0.17, neck_z - 0.08), 0.07)
+        # A rounded shirt, with a bow tie at the collar and two buttons.
+        top.sphere(mats["Cloth"], chest_c, chest_r, segments=32, rings=16)
+        ribbon_bow(top, mats["Ribbon"], (0, 0.17, neck_z - 0.08), 0.07)
         for z in (0.44, 0.36):
-            body.sphere(mats["Spots"], (0, 0.215, z), (0.018, 0.012, 0.018), segments=10, rings=5)
-    # The bow's strap across the chest.
-    strap = Matrix.Rotation(math.radians(35), 4, "Y")
-    body.sphere(mats["Wood"], (0, 0, (hip_z + neck_z) / 2 + 0.06),
-                (0.27 if not girl else 0.21, 0.24 if not girl else 0.2, 0.025), rotation=strap, segments=32, rings=6)
-    body.build()
+            top.sphere(mats["Spots"], (0, 0.215, z), (0.018, 0.012, 0.018), segments=10, rings=5)
+    top.build(body_obj)
+    if not girl:
+        # The trousers' seat.
+        seat = piece("DefaultBottom", body)
+        seat.sphere(mats["Legs"], (0, 0, hip_z + 0.04), (0.24, 0.21, 0.105), segments=32, rings=10)
+        seat.build(body_obj)
 
-    # Legs: stubby, with round shoes; pivot at the hip.
+    # Legs: stubby skin legs, pivot at the hip; the feet are their round ends, where the shoes go.
     for side, name in ((-1, "LegL"), (1, "LegR")):
         x = side * 0.11
         leg = Part(name, (x, 0, hip_z + 0.02))
-        leg.capsule(mats["Legs"], (x, 0, hip_z + 0.02), (x, 0, 0.1), 0.065)
-        leg.sphere(mats["Shoe"], (x, 0.04, 0.06), (0.085, 0.12, 0.065), segments=20, rings=10)
-        leg.build()
+        leg.capsule(mats["Skin"], (x, 0, hip_z + 0.02), (x, 0, 0.1), 0.065)
+        leg_obj = leg.build()
+        if not girl:
+            trousers = piece("DefaultBottom" + name, leg)
+            trousers.capsule(mats["Legs"], (x, 0, hip_z + 0.02), (x, 0, 0.1), 0.069)
+            trousers.build(leg_obj)
+        shoe = piece("DefaultShoes" + name, leg)
+        shoe.sphere(mats["Shoe"], (x, 0.04, 0.06), (0.085, 0.12, 0.065), segments=20, rings=10)
+        shoe.build(leg_obj)
 
     # Arms: short and round with little round hands; pivot at the shoulder.
     shoulder_z = neck_z - 0.1
     for side, name in ((-1, "ArmL"), (1, "ArmR")):
-        sx = side * (0.17 if girl else 0.22)
+        sx = side * 0.22
         arm = Part(name, (sx, 0, shoulder_z))
         hand = Vector((sx + side * 0.13, 0.02, shoulder_z - 0.22))
-        arm.capsule(mats["Cloth"] if not girl else mats["Skin"], (sx, 0, shoulder_z), hand, 0.05)
-        arm.build()
+        arm.capsule(mats["Skin"], (sx, 0, shoulder_z), hand, 0.05)
+        arm_obj = arm.build()
+        if not girl:
+            sleeve = piece("DefaultTop" + name, arm)
+            sleeve.capsule(mats["Cloth"], (sx, 0, shoulder_z), hand, 0.054)
+            sleeve.build(arm_obj)
         hand_part = Part("Hand" + name[-1], hand)
         hand_part.sphere(mats["Skin"], hand, (0.075, 0.075, 0.075), segments=20, rings=10)
         hand_part.build()

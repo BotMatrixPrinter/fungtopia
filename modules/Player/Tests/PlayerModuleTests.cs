@@ -7,6 +7,7 @@ using Fungtopia.Input;
 using Fungtopia.Map;
 using Fungtopia.Shell;
 using Fungtopia.StartScreen;
+using Fungtopia.Wardrobe;
 using Xunit;
 
 namespace Fungtopia.Player.Tests;
@@ -1044,6 +1045,190 @@ public class PlayerModuleTests
 
     // ---- Performance ----
 
+    // ---- Look (the character drawn from the Wardrobe's AppearanceState) ----
+
+    private static AppearanceState Dressed(string top = "", string bottom = "", string shoes = "", string head = "",
+        string face = "", string back = "", int skin = 0, int hairStyle = 0, int hairColor = 0, int eyeColor = 0) =>
+        new(skin, hairStyle, hairColor, eyeColor, top, bottom, shoes, head, face, back);
+
+    private static string ModelOf(string id)
+    {
+        Assert.True(Catalog.TryGet(id, out var item), id);
+        return item.ModelPath;
+    }
+
+    [Theory]
+    [InlineData(CharacterKind.Girl)]
+    [InlineData(CharacterKind.Boy)]
+    public void WithoutAnAppearanceTheCharacterKeepsItsBuiltInLookAndOutfit(CharacterKind kind)
+    {
+        var look = CharacterLook.Default(kind);
+        Assert.False(look.Custom);
+        Assert.Equal("", look.HairModel);
+        foreach (Slot slot in Enum.GetValues<Slot>())
+            Assert.Equal("", look.Model(slot));
+        Assert.Equal(Rig.BuiltinSkin, look.SkinColor);
+        Assert.Equal(Rig.BuiltinEye, look.EyeColor);
+        Assert.Equal(Rig.BuiltinHair(kind), look.HairColor);
+        Assert.True(look.Shows(BuiltinPieces.Hair | BuiltinPieces.Top | BuiltinPieces.Shoes));
+        // The Girl's ribbon bow and dress (no trousers); the Boy's shirt and trousers (no ribbon).
+        Assert.Equal(kind == CharacterKind.Girl, look.Shows(BuiltinPieces.Head));
+        Assert.Equal(kind == CharacterKind.Boy, look.Shows(BuiltinPieces.Bottom));
+    }
+
+    [Fact]
+    public void SkinHairAndEyeColorsAreTheChosenLooks()
+    {
+        var look = CharacterLook.From(Dressed(skin: 5, hairStyle: 4, hairColor: 6, eyeColor: 2), CharacterKind.Boy);
+        Assert.True(look.Custom);
+        Assert.Equal(Looks.SkinTones[5], look.SkinColor);
+        Assert.Equal(Looks.HairColors[6], look.HairColor);
+        Assert.Equal(Looks.EyeColors[2], look.EyeColor);
+        // The chosen hair style's model replaces the built-in hair.
+        Assert.Equal(Looks.HairStyles[4].ModelPath, look.HairModel);
+        Assert.Equal("res://modules/Wardrobe/Models/Hair/top_bun.glb", look.HairModel);
+        Assert.False(look.Shows(BuiltinPieces.Hair));
+    }
+
+    [Theory]
+    [InlineData(CharacterKind.Girl)]
+    [InlineData(CharacterKind.Boy)]
+    public void NothingWornShowsTheOldOutfitWithTheChosenColorsAndHair(CharacterKind kind)
+    {
+        var look = CharacterLook.From(Dressed(skin: 3, hairStyle: 1), kind);
+        foreach (Slot slot in Enum.GetValues<Slot>())
+            Assert.Equal("", look.Model(slot));
+        Assert.Equal(Rig.Pieces(kind) & ~BuiltinPieces.Hair, look.Builtin);
+        Assert.Equal(Looks.HairStyles[1].ModelPath, look.HairModel);
+    }
+
+    [Fact]
+    public void EachWornItemsModelGoesInItsSlotAndReplacesThatBuiltInPiece()
+    {
+        var look = CharacterLook.From(Dressed("striped_tee", "jeans", "sneakers", "mushroom_hat", "round_glasses",
+            "mushroom_backpack"), CharacterKind.Boy);
+        Assert.Equal(ModelOf("striped_tee"), look.Top);
+        Assert.Equal("res://modules/Wardrobe/Models/Clothes/striped_tee.glb", look.Model(Slot.Top));
+        Assert.Equal(ModelOf("jeans"), look.Model(Slot.Bottom));
+        Assert.Equal(ModelOf("sneakers"), look.Model(Slot.Shoes));
+        Assert.Equal(ModelOf("mushroom_hat"), look.Model(Slot.Head));
+        Assert.Equal(ModelOf("round_glasses"), look.Model(Slot.Face));
+        Assert.Equal(ModelOf("mushroom_backpack"), look.Model(Slot.Back));
+        Assert.Equal(BuiltinPieces.None, look.Builtin);
+    }
+
+    [Fact]
+    public void AnEmptySlotKeepsItsBuiltInPieceAlone()
+    {
+        // Only shoes worn: the Boy keeps his shirt and trousers, the Girl her dress and ribbon.
+        var boy = CharacterLook.From(Dressed(shoes: "rain_boots"), CharacterKind.Boy);
+        Assert.Equal(BuiltinPieces.Top | BuiltinPieces.Bottom, boy.Builtin);
+        var girl = CharacterLook.From(Dressed(head: "beanie"), CharacterKind.Girl);
+        Assert.Equal(BuiltinPieces.Top | BuiltinPieces.Shoes, girl.Builtin);
+        Assert.Equal(ModelOf("beanie"), girl.Head);
+        // A top over the Boy's built-in trousers.
+        var tee = CharacterLook.From(Dressed("sweater_vest"), CharacterKind.Boy);
+        Assert.Equal(BuiltinPieces.Bottom | BuiltinPieces.Shoes, tee.Builtin);
+    }
+
+    [Theory]
+    [InlineData(CharacterKind.Girl, "spotted_dress")]
+    [InlineData(CharacterKind.Boy, "party_dress")]
+    public void ADressReplacesTheBottom(CharacterKind kind, string dress)
+    {
+        // Even when a bottom is (wrongly) still listed with it, and with no bottom: no built-in trousers.
+        var look = CharacterLook.From(Dressed(dress, "jeans", "mary_janes"), kind);
+        Assert.Equal(ModelOf(dress), look.Top);
+        Assert.Equal("", look.Bottom);
+        Assert.False(look.Shows(BuiltinPieces.Bottom));
+        Assert.False(look.Shows(BuiltinPieces.Top));
+        Assert.False(CharacterLook.From(Dressed(dress), kind).Shows(BuiltinPieces.Bottom));
+        // Not a dress: the bottom shows.
+        Assert.Equal(ModelOf("jeans"), CharacterLook.From(Dressed("striped_tee", "jeans"), kind).Bottom);
+    }
+
+    [Fact]
+    public void ABottomUnderTheGirlsBuiltInDressStillShows()
+    {
+        var look = CharacterLook.From(Dressed(bottom: "jeans"), CharacterKind.Girl);
+        Assert.Equal(ModelOf("jeans"), look.Bottom);
+        Assert.True(look.Shows(BuiltinPieces.Top));
+    }
+
+    [Fact]
+    public void UnknownWrongSlotAndUnfittingItemsAreNotWorn()
+    {
+        // "flower_dress" fits only the Girl; sneakers are not a top; "cape" is not in the catalog.
+        var boy = CharacterLook.From(Dressed("flower_dress", "skirt", "cape", head: "sneakers"), CharacterKind.Boy);
+        Assert.Equal("", boy.Top);
+        Assert.Equal("", boy.Bottom);
+        Assert.Equal("", boy.Shoes);
+        Assert.Equal("", boy.Head);
+        Assert.Equal(Rig.Pieces(CharacterKind.Boy) & ~BuiltinPieces.Hair, boy.Builtin);
+        var girl = CharacterLook.From(Dressed("flower_dress", "skirt"), CharacterKind.Girl);
+        Assert.Equal(ModelOf("flower_dress"), girl.Top);
+        Assert.Equal("", girl.Bottom); // under the dress
+        Assert.Equal(ModelOf("skirt"), CharacterLook.From(Dressed("striped_tee", "skirt"), CharacterKind.Girl).Bottom);
+    }
+
+    [Fact]
+    public void OutOfRangeLooksKeepTheBuiltInColorsAndHair()
+    {
+        var look = CharacterLook.From(new AppearanceState(-1, 99, 99, 6, "", "", "", "", "", ""), CharacterKind.Girl);
+        Assert.Equal(Rig.BuiltinSkin, look.SkinColor);
+        Assert.Equal(Rig.BuiltinHair(CharacterKind.Girl), look.HairColor);
+        Assert.Equal(Rig.BuiltinEye, look.EyeColor);
+        Assert.Equal("", look.HairModel);
+        Assert.True(look.Shows(BuiltinPieces.Hair));
+    }
+
+    [Fact]
+    public void WornModelsAttachToTheRigsHeadBodyAndLegParts()
+    {
+        foreach (var part in new[] { "Head", "Body", "LegL", "LegR" })
+            Assert.True(Rig.IsAttachPoint(part), part);
+        foreach (var other in new[] { "ArmL", "HandR", "BackBow", "Hair", "" })
+            Assert.False(Rig.IsAttachPoint(other), other);
+        Assert.Equal("DefaultTop", Rig.NodePrefix(BuiltinPieces.Top));
+        Assert.Equal("Hair", Rig.NodePrefix(BuiltinPieces.Hair));
+    }
+
+    [Fact]
+    public void ThePlayerFollowsTheLatestAppearanceForItsCharacter()
+    {
+        Assert.False(_player.HasAppearance);
+        Assert.False(_player.Look.Custom);
+        int version = _player.AppearanceVersion;
+        var look = Dressed("party_dress", shoes: "sneakers", skin: 4, hairStyle: 2, hairColor: 5, eyeColor: 3);
+        _bus.Publish(look);
+        TickWith(Idle);
+        Assert.True(_player.HasAppearance);
+        Assert.Equal(version + 1, _player.AppearanceVersion);
+        Assert.Equal(ModelOf("party_dress"), _player.Look.Top);
+        Assert.Equal(Looks.SkinTones[4], _player.Look.SkinColor);
+        Assert.Equal(CharacterKind.Girl, _player.Look.Character);
+        // The same look every tick is not a change; a new one applies at once.
+        _bus.Publish(look);
+        TickWith(Idle);
+        Assert.Equal(version + 1, _player.AppearanceVersion);
+        _bus.Publish(Dressed("party_dress", shoes: "rain_boots", skin: 4, hairStyle: 2, hairColor: 5, eyeColor: 3));
+        Assert.Equal(version + 2, _player.AppearanceVersion);
+        Assert.Equal(ModelOf("rain_boots"), _player.Look.Shoes);
+    }
+
+    [Fact]
+    public void TheLookIsOnTheCharacterTheStartScreenPicked()
+    {
+        var (bus, player) = BehindTheStartScreen();
+        bus.Publish(Dressed(bottom: "jeans"));
+        PressStart(bus, GameStart.Boy);
+        player.Tick(new TickContext(0, Step));
+        Assert.Equal(CharacterKind.Boy, player.Look.Character);
+        Assert.True(player.Look.Shows(BuiltinPieces.Top));
+        Assert.False(player.Look.Shows(BuiltinPieces.Bottom));
+        Assert.Equal(ModelOf("jeans"), player.Look.Bottom);
+    }
+
     [Fact]
     public void TicksWithoutAllocating()
     {
@@ -1052,7 +1237,13 @@ public class PlayerModuleTests
         player.Start(bus);
         player.Handle(new GameStart(GameStart.Girl, GameStart.Cat));
         var input = Moving(0.6f, 0.8f, fire: true, aim: new Vector3(0.3f, 0f, -1f), jump: true);
+        var look = new AppearanceState(2, 4, 5, 2, "party_dress", "", "sneakers", "mushroom_hat", "round_glasses", "little_backpack");
+        var otherLook = new AppearanceState(1, 0, 0, 0, "striped_tee", "jeans", "", "", "", "");
         player.Handle(input);
+        player.Handle(look);
+        _ = player.Look;
+        player.Handle(otherLook);
+        _ = player.Look;
         player.Tick(new TickContext(0, Step)); // warm up
         long before = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < 600; i++)
@@ -1062,6 +1253,8 @@ public class PlayerModuleTests
             player.Handle(new DialogueState(i % 200 < 100, 1));
             player.Handle(new BowState(i % 60 < 40 ? (i % 60) / 36f : 0f, 0));
             player.Handle(new StartScreenState(false));
+            player.Handle(i % 120 < 60 ? look : otherLook);
+            _ = player.Look;
             player.Tick(new TickContext(i + 1, Step));
         }
         Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
