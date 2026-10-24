@@ -485,8 +485,163 @@ public class ForestTests
         // obstacle's radius stays inside the obstacle's circle.
         Assert.Equal(1f, ForestScenery.StemMeshMaxRadius);
         for (float t = 0f; t <= 1f; t += 0.01f)
-            Assert.InRange(ForestScenery.StemProfile(t), 0.3f, ForestScenery.StemMeshMaxRadius);
-        Assert.Equal(1f, ForestScenery.StemProfile(0f), 4);
+            Assert.InRange(ForestScenery.StemProfile(t), 0.3f, ForestScenery.StemFootRadius);
+        Assert.Equal(ForestScenery.StemFootRadius, ForestScenery.StemProfile(0f), 4);
+    }
+
+    // Planting on the uneven ground
+
+    /// <summary>The ground under a footprint, much denser than ForestFooting samples it: the center, 48 points on the rim and rings at 1/4, 1/2 and 3/4 of the radius.</summary>
+    private static (float Low, float High) DenseGround(float x, float z, float radius)
+    {
+        float low = Ground.HeightAt(x, z), high = low;
+        foreach (float f in new[] { 0.25f, 0.5f, 0.75f, 1f })
+            for (int k = 0; k < 48; k++)
+            {
+                float a = k * MathF.Tau / 48f + f;
+                float h = Ground.HeightAt(x + MathF.Cos(a) * radius * f, z + MathF.Sin(a) * radius * f);
+                low = MathF.Min(low, h);
+                high = MathF.Max(high, h);
+            }
+        return (low, high);
+    }
+
+    /// <summary>Every mushroom the view draws: giants, medium, the ring and the tiny ones.</summary>
+    private static List<DrawnMushroom> AllDrawnMushrooms()
+    {
+        var all = new List<DrawnMushroom>();
+        all.AddRange(ForestScenery.Giants.ToArray());
+        all.AddRange(ForestScenery.MediumMushrooms.ToArray());
+        all.AddRange(ForestScenery.RingMushrooms.ToArray());
+        foreach (var d in ForestScenery.Decoration)
+            if (d.Kind is DecorKind.Mushroom or DecorKind.DarkMushroom)
+                all.Add(ForestScenery.AsMushroom(d));
+        return all;
+    }
+
+    /// <summary>Asserts a stem planted by ForestFooting touches or goes into the ground all round its foot, sunk at most 0.3 m below its lowest point, its cap clear of the ground.</summary>
+    private static void AssertPlanted(DrawnMushroom m)
+    {
+        var p = ForestFooting.Plant(m);
+        var (low, high) = DenseGround(m.X, m.Z, m.StemRadius);
+        string at = $"mushroom (r {m.StemRadius}) at ({m.X}, {m.Z})";
+        Assert.True(p.BaseY <= low, $"{at}: base {p.BaseY} floats above the ground {low}");
+        Assert.True(p.BaseY >= low - 0.3f, $"{at}: base {p.BaseY} sunk more than 0.3 m below the ground {low}");
+        if (m.Height >= 0.8f)
+            Assert.True(p.BaseY <= low - 0.08f, $"{at}: base {p.BaseY} does not sink into the ground {low}");
+        // The stem reaches from the base up to the cap, well above the high side of its foot.
+        Assert.Equal(p.CapY + m.CapHeight * 0.18f, p.BaseY + p.StemHeight, 3);
+        Assert.True(p.CapY > high, $"{at}: cap {p.CapY} sunk into the ground {high}");
+        // The cap stands as tall above the ground at the center as asked, never lower.
+        float ground = Ground.HeightAt(m.X, m.Z);
+        Assert.True(p.CapY + m.CapHeight >= ground + m.Height - 1e-3f, $"{at}: cap lower than its height");
+        // Nor does the ground under the cap's rim reach it (to a few centimeters on the cliffs).
+        Assert.True(p.CapY + 0.02f * m.CapHeight >= DenseGround(m.X, m.Z, m.CapRadius * 0.93f).High - 0.05f, $"{at}: cap rim in the ground");
+    }
+
+    [Fact]
+    public void EveryDrawnMushroomStandsWhollyOnTheGround()
+    {
+        var all = AllDrawnMushrooms();
+        Assert.True(all.Count > 800, $"only {all.Count} mushrooms");
+        foreach (var m in all)
+            AssertPlanted(m);
+    }
+
+    [Fact]
+    public void StemsArePlantedOnSlopesHillsAndRoughGround()
+    {
+        // Many sample positions and sizes: over the forest's hills, the Deep Forest's rough
+        // ground, the cliffs past the ring and the roads; where the ground slopes, the base drops.
+        int sloped = 0;
+        for (int i = 0; i < 1500; i++)
+        {
+            float x = -280f + 380f * ForestRandom.Value(i, 900);
+            float z = -130f + 260f * ForestRandom.Value(i, 901);
+            float r = 0.05f + 3.45f * ForestRandom.Value(i, 902);
+            float height = r < 0.3f ? 0.3f : 2f + 10f * ForestRandom.Value(i, 903);
+            float capRadius = r * (1.5f + 2f * ForestRandom.Value(i, 904));
+            var m = new DrawnMushroom(DecorKind.Mushroom, x, z, 0f, r, height, capRadius, MathF.Min(capRadius * 0.6f, height * 0.5f), i);
+            AssertPlanted(m);
+            if (Ground.HeightAt(x, z) - DenseGround(x, z, r).Low > 0.2f)
+                sloped++;
+        }
+        Assert.True(sloped > 100, $"only {sloped} samples on sloped ground");
+    }
+
+    [Fact]
+    public void FootingTakesTheLowestOfTheFootprint()
+    {
+        for (int i = 0; i < 400; i++)
+        {
+            float x = -250f + 340f * ForestRandom.Value(i, 910), z = -100f + 200f * ForestRandom.Value(i, 911);
+            float r = 0.1f + 3f * ForestRandom.Value(i, 912);
+            float low = ForestFooting.Lowest(x, z, r);
+            Assert.True(low <= Ground.HeightAt(x, z));
+            Assert.True(ForestFooting.RimSamples >= 8);
+            for (int k = 0; k < ForestFooting.RimSamples; k++)
+            {
+                float a = k * MathF.Tau / ForestFooting.RimSamples;
+                Assert.True(low <= Ground.HeightAt(x + MathF.Cos(a) * r, z + MathF.Sin(a) * r) + 1e-5f);
+            }
+            Assert.True(ForestFooting.Highest(x, z, r) >= Ground.HeightAt(x, z));
+            Assert.Equal(low - ForestFooting.SinkFor(5f), ForestFooting.BaseY(x, z, r, 5f));
+            Assert.InRange(ForestFooting.SinkFor(5f), 0.1f, 0.2f);
+        }
+        // On flat ground a giant stands where it did: cap top Height above the ground, base just sunk.
+        var flat = new DrawnMushroom(DecorKind.Mushroom, 600f, 600f, 0f, 2f, 10f, 5f, 3f, 1);
+        var p = ForestFooting.Plant(flat);
+        Assert.Equal(Areas.HomeFloorY - ForestFooting.Sink, p.BaseY, 4);
+        Assert.Equal(Areas.HomeFloorY + 10f, p.CapY + 3f, 4);
+    }
+
+    [Fact]
+    public void BigStemsFlareIntoTheGround()
+    {
+        // The skirt is wider than the stem's foot up to the ground line, never wider than the stem's
+        // circle, and its top hides inside the stem.
+        Assert.Equal(ForestScenery.StemMeshMaxRadius, ForestScenery.SkirtProfile(0f), 4);
+        Assert.Equal(ForestScenery.StemMeshMaxRadius, ForestScenery.SkirtProfile(ForestFooting.SkirtGroundFraction), 4);
+        for (float t = 0f; t <= 1f; t += 0.01f)
+        {
+            Assert.InRange(ForestScenery.SkirtProfile(t), ForestFooting.SkirtTopRadius - 1e-4f, ForestScenery.StemMeshMaxRadius);
+            Assert.True(ForestScenery.SkirtProfile(1f) < ForestScenery.StemProfile(t));
+        }
+        int flared = 0;
+        foreach (var m in AllDrawnMushrooms())
+        {
+            var p = ForestFooting.Plant(m);
+            if (m.StemRadius < ForestFooting.FlareMinRadius)
+            {
+                Assert.Equal(0f, p.SkirtHeight);
+                continue;
+            }
+            flared++;
+            // It rises out of the ground past the high side of the foot, and stays inside the stem.
+            Assert.True(p.BaseY + p.SkirtHeight > DenseGround(m.X, m.Z, m.StemRadius).High,
+                $"flare of the mushroom at ({m.X}, {m.Z}) hidden in the ground");
+            Assert.True(p.SkirtHeight <= p.StemHeight * ForestFooting.SkirtMaxFraction + 1e-4f);
+            // Where it meets the high side of the ground it sticks out of the stem, visibly.
+            float ground = DenseGround(m.X, m.Z, m.StemRadius).High - p.BaseY;
+            float skirtR = ForestScenery.SkirtProfile(ground / p.SkirtHeight), stemR = ForestScenery.StemProfile(ground / p.StemHeight);
+            Assert.True(skirtR >= stemR + 0.04f, $"flare of the mushroom at ({m.X}, {m.Z}) hidden in the stem: {skirtR} vs {stemR}");
+        }
+        Assert.True(flared >= Ground.ForestTrunkCount, $"only {flared} flared stems");
+    }
+
+    [Fact]
+    public void RingMushroomsAreDrawnOnTheRingCircles()
+    {
+        var ring = ForestRing.Mushrooms;
+        var drawn = ForestScenery.RingMushrooms;
+        Assert.Equal(ring.Length, drawn.Length);
+        for (int i = 0; i < ring.Length; i++)
+        {
+            Assert.Equal(ring[i].X, drawn[i].X);
+            Assert.Equal(ring[i].Z, drawn[i].Z);
+            Assert.Equal(ring[i].Radius, drawn[i].StemRadius);
+            Assert.True(drawn[i].Height > 7f);
+        }
     }
 
     [Fact]

@@ -12,7 +12,7 @@ internal static class ForestMeshes
 {
     private const int Segments = 28;
 
-    /// <summary>A fat stem of height 1 bulging to radius 1 at the foot (<see cref="ForestScenery.StemProfile"/>): never wider than its circle.</summary>
+    /// <summary>A fat stem of height 1 bulging to <see cref="ForestScenery.StemFootRadius"/> at the foot (<see cref="ForestScenery.StemProfile"/>): never wider than its circle.</summary>
     public static ArrayMesh Stem()
     {
         var profile = new List<Vector2> { new(0f, 1f) };
@@ -23,6 +23,20 @@ internal static class ForestMeshes
         }
         var b = new Builder();
         b.Lathe(profile.ToArray(), (i, n) => profile[i].Y);
+        return b.Commit();
+    }
+
+    /// <summary>A root flare of height 1 widening to radius 1 at its base (<see cref="ForestScenery.SkirtProfile"/>), sunk into the ground round a stem's foot.</summary>
+    public static ArrayMesh Skirt()
+    {
+        var profile = new List<Vector2>();
+        for (int i = 12; i >= 0; i--)
+        {
+            float t = i / 12f;
+            profile.Add(new Vector2(ForestScenery.SkirtProfile(t), t));
+        }
+        var b = new Builder();
+        b.Lathe(profile.ToArray(), (i, n) => profile[i].Y * 0.3f);
         return b.Commit();
     }
 

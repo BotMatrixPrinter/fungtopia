@@ -40,21 +40,41 @@ public static class ForestScenery
     /// <summary>Footprint radius (meters) of the flower mesh at scale 1.</summary>
     public const float FlowerMeshRadius = 0.6f;
 
-    /// <summary>The widest the stem mesh gets at radius scale 1 (its bulging foot): never wider than its circle.</summary>
+    /// <summary>The widest a stem's meshes get at radius scale 1 (the root flare's base): never wider than its circle.</summary>
     public const float StemMeshMaxRadius = 1f;
 
-    /// <summary>The stem mesh's radius at height fraction <paramref name="t"/> (0 foot .. 1 top), at most <see cref="StemMeshMaxRadius"/>.</summary>
-    public static float StemProfile(float t) => 0.72f + 0.28f * MathF.Pow(1f - t, 4f) - 0.1f * t;
+    /// <summary>The stem mesh's radius at its foot, a little inside <see cref="StemMeshMaxRadius"/> so a root flare shows round it.</summary>
+    public const float StemFootRadius = 0.94f;
+
+    /// <summary>The stem mesh's radius at height fraction <paramref name="t"/> (0 foot .. 1 top), at most <see cref="StemFootRadius"/>.</summary>
+    public static float StemProfile(float t) => 0.68f + 0.26f * MathF.Pow(1f - t, 4f) - 0.1f * t;
+
+    /// <summary>
+    /// The root flare's radius at height fraction <paramref name="t"/> (0 base .. 1 top) at radius
+    /// scale 1: <see cref="StemMeshMaxRadius"/>, wider than the stem's foot, from its base up to
+    /// <see cref="ForestFooting.SkirtGroundFraction"/> (where <see cref="ForestFooting.Plant"/> puts
+    /// the high side of the ground), then narrowing smoothly to <see cref="ForestFooting.SkirtTopRadius"/>
+    /// at its top, inside the stem there.
+    /// </summary>
+    public static float SkirtProfile(float t)
+    {
+        float u = Math.Clamp((t - ForestFooting.SkirtGroundFraction) / (1f - ForestFooting.SkirtGroundFraction), 0f, 1f);
+        return StemMeshMaxRadius - (StemMeshMaxRadius - ForestFooting.SkirtTopRadius) * u * u * (3f - 2f * u);
+    }
 
     private static readonly DrawnMushroom[] s_giants = PlaceGiants();
     private static readonly DrawnMushroom[] s_medium = PlaceMedium();
     private static readonly Decoration[] s_decoration = PlaceDecoration();
+    private static readonly DrawnMushroom[] s_ring = PlaceRing();
 
     /// <summary>One giant mushroom per forest trunk (the first <see cref="Ground.ForestTrunkCount"/> of <see cref="Obstacles.All"/>), in order.</summary>
     public static ReadOnlySpan<DrawnMushroom> Giants => s_giants;
 
     /// <summary>One medium mushroom per Map prop of kind MediumMushroom in the forest, in <see cref="Props.All"/> order.</summary>
     public static ReadOnlySpan<DrawnMushroom> MediumMushrooms => s_medium;
+
+    /// <summary>One giant mushroom per <see cref="ForestRing.Mushrooms"/>, in order, stem exactly its circle.</summary>
+    public static ReadOnlySpan<DrawnMushroom> RingMushrooms => s_ring;
 
     /// <summary>Small walkable ground decoration, every piece under <see cref="DecorationMaxHeight"/>.</summary>
     public static ReadOnlySpan<Decoration> Decoration => s_decoration;
@@ -93,6 +113,25 @@ public static class ForestScenery
         }
         return list.ToArray();
     }
+
+    private static DrawnMushroom[] PlaceRing()
+    {
+        var ring = ForestRing.Mushrooms;
+        var drawn = new DrawnMushroom[ring.Length];
+        for (int i = 0; i < ring.Length; i++)
+        {
+            var r = ring[i];
+            float capRadius = r.Radius * (2.4f + 1.4f * Rand(r.Id, 34));
+            float capHeight = capRadius * (0.5f + 0.3f * Rand(r.Id, 6));
+            drawn[i] = new DrawnMushroom(DecorKind.Mushroom, r.X, r.Z, Rand(r.Id, 1) * MathF.Tau, r.Radius,
+                7f + 9f * Rand(r.Id, 33) + capHeight * 0.82f, capRadius, capHeight, r.Id);
+        }
+        return drawn;
+    }
+
+    /// <summary>A tiny decoration mushroom (<see cref="DecorKind.Mushroom"/> or <see cref="DecorKind.DarkMushroom"/>) as the view draws it, its stem a third of its cap.</summary>
+    public static DrawnMushroom AsMushroom(in Decoration d) =>
+        new(d.Kind, d.X, d.Z, d.Yaw, d.Radius * 0.35f, d.Height, d.Radius, d.CapHeight, d.Id + 7);
 
     private static Decoration[] PlaceDecoration()
     {

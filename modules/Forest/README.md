@@ -13,7 +13,8 @@ whether it is night, for the glowing mushrooms.
   reads `Fungtopia.DayNight.TimeOfDay` into `IsNight`), `ForestRing`, where the view's ring of
   giant mushrooms may stand and where it stands (`Mushrooms`), `ForestProps`, where props may
   stand, the west gap's overgrown trail and tiny dark mushrooms, `ForestScenery`, everything the view
-  draws standing in the forest and how big (giant and medium mushrooms, small decoration), and
+  draws standing in the forest and how big (giant, medium and ring mushrooms, small decoration),
+  `ForestFooting`, how each of them is planted on the uneven ground (see **Planting** below), and
   `ForestRandom`, the fixed hash the layout uses.
 - `Godot/` — `Main.tscn` with `ForestView`, which draws the forest from the Contract.
 - `Tests/` — `ForestTests.cs`: xUnit tests of the Contract (its forwarding values equal the Map's; `Obstacles` are exactly the Map's obstacles in the forest area; at least 80, radii up to 3 m, inside the square or on its wall, the same on every call, off paths, clearings, road gaps and the start, with no fixed count, so they hold once the Map adds solid props),
@@ -21,7 +22,10 @@ whether it is night, for the glowing mushrooms.
   as wide as the Map's path and is closed along the rest of the strip), of `ForestProps` (no prop
   blocks the west gap or the trail), of `ForestScenery` (the drawn medium mushrooms are exactly the
   Map's forest `MediumMushroom` props; giant stems are exactly the trunk circles and the stem mesh is
-  never wider than its circle; all decoration is under 0.4 m tall and 0.6 m across; everything
+  never wider than its circle; ring mushrooms are drawn on the ring's circles; every drawn mushroom,
+  and stems at 1500 sample positions over hills, the Deep Forest's rough ground and cliffs, have their base at or
+  below the ground everywhere under the foot and at most 0.3 m below its lowest point, caps clear of the ground;
+  big stems flare into the ground, sticking out of the stem where it meets the ground and never wider than their circle; all decoration is under 0.4 m tall and 0.6 m across; everything
   taller inside the square stands within an obstacle) and of `ForestModule` with a fake `IMessageBus`.
 
 Test it with `./test.sh Forest` from the repository root.
@@ -84,6 +88,22 @@ decoration is scattered freely, and walkers cross it. Tiny mushrooms, ferns and 
 where `ForestProps.Open` allows: inside the square, off obstacles, paths, the trail and the Deep
 Forest path. Only ankle-high grass tufts grow on the trail and in the gap (the
 overgrowth); off the square they keep off the Map's walkable ground.
+
+## Planting
+
+Nothing the view stands on the ground floats where the ground drops away under its edge.
+`ForestFooting.Lowest` samples `Map.Ground.HeightAt` at the footprint's center, 16 points on its
+radius and 8 at half of it; the base goes at the lowest of them, `Sink` (0.15 m) deeper (15 % of
+the height for things under 1 m: tiny mushrooms, ferns, flowers, grass, whose footprint is their root clump, 0.4 of their radius).
+`ForestFooting.Plant` plants a mushroom: its stem runs from that base up to its cap, and its cap's
+top stays `Height` above the ground at its center (so the stem above the high side looks as it
+did), lifted only where the ground under the cap's rim (on the cliffs past the ring) would reach
+it. Stems of `FlareMinRadius` (0.6 m) or more get a root flare (`ForestScenery.SkirtProfile`, one
+more MultiMesh) sunk round its foot: the stem mesh's foot is 0.94 of its radius (`StemFootRadius`),
+the flare's the full radius (never wider than its circle) from the base up to the high side of the
+foot's ground, which `Plant` puts at most halfway up the flare, so the flare sticks out of the stem
+all round where it meets the ground; above that it narrows smoothly to 0.55 of the radius, inside
+the stem, at least 0.4 of the radius above the high side (at most 0.8 of the stem).
 
 A `PreviewCamera` stands at `PlayerStart` at eye height (1.6 m) looking north up the path; it is
 current only until another module makes its own camera current.
