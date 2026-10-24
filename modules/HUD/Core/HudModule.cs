@@ -5,6 +5,7 @@ using Fungtopia.Map;
 using Fungtopia.NPCs;
 using Fungtopia.Player;
 using Fungtopia.Shell;
+using Fungtopia.StartScreen;
 using Fungtopia.Wallet;
 
 namespace Fungtopia.HUD;
@@ -14,13 +15,15 @@ namespace Fungtopia.HUD;
 /// <see cref="WalletState"/> (popping, with a floating "+50" per <see cref="CoinsEarned"/>), the bow
 /// draw ring from <see cref="BowState"/>, the fade to black after <see cref="PlayerDefeated"/> and the
 /// wake-up text after <see cref="WokeUp"/>, the place-name banner when <see cref="PlayerState.Area"/>
-/// changes, the clock from <see cref="TimeOfDay"/> and the quest tracker from <see cref="QuestState"/>.
+/// changes, the clock from <see cref="TimeOfDay"/> and the quest tracker from <see cref="QuestState"/>;
+/// all of it hidden while <see cref="StartScreenState.Open"/>.
 /// Animations run on the fixed ticks; the view reads them at a fraction between two ticks.
 /// </summary>
 public sealed class HudModule : IModule,
     IMessageHandler<PlayerState>, IMessageHandler<PlayerDefeated>,
     IMessageHandler<WalletState>, IMessageHandler<CoinsEarned>, IMessageHandler<BowState>,
-    IMessageHandler<TimeOfDay>, IMessageHandler<WokeUp>, IMessageHandler<QuestState>
+    IMessageHandler<TimeOfDay>, IMessageHandler<WokeUp>, IMessageHandler<QuestState>,
+    IMessageHandler<StartScreenState>
 {
     public const int HealthPerHeart = 2;
     public const float ShakeSeconds = 0.4f;
@@ -75,6 +78,12 @@ public sealed class HudModule : IModule,
     /// <summary>Banners started so far (one per new named place entered).</summary>
     public int BannerCount { get; private set; }
 
+    /// <summary>The banner's place is a spooky one (the Deep Forest): the view draws it darker.</summary>
+    public bool BannerSpooky => HudText.IsSpooky(BannerArea);
+
+    /// <summary>The start screen is open: the whole HUD is hidden (shown again once it closes).</summary>
+    public bool Hidden { get; private set; }
+
     public bool HasClock { get; private set; }
     public int Day { get; private set; }
 
@@ -107,6 +116,7 @@ public sealed class HudModule : IModule,
         bus.Subscribe<TimeOfDay>(this);
         bus.Subscribe<WokeUp>(this);
         bus.Subscribe<QuestState>(this);
+        bus.Subscribe<StartScreenState>(this);
     }
 
     public void Tick(in TickContext context)
@@ -190,6 +200,8 @@ public sealed class HudModule : IModule,
         WakeDay = message.Day;
         _wakeElapsed = 0f;
     }
+
+    public void Handle(in StartScreenState message) => Hidden = message.Open;
 
     public void Handle(in QuestState message)
     {

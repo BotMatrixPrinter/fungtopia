@@ -32,18 +32,34 @@ public partial class MushroomPanel : Control
     /// <summary>Height of the cream band at the bottom, in pixels.</summary>
     public float BandHeight { get; set; } = 56f;
 
+    /// <summary>The spookier style (the Deep Forest banner): a dusky violet cap, faint spots and a dark band.</summary>
+    public bool Spooky
+    {
+        get => _spooky;
+        set
+        {
+            if (_spooky == value)
+                return;
+            _spooky = value;
+            _band.BgColor = value ? HudStyle.SpookyBand : HudStyle.Cream;
+            QueueRedraw();
+        }
+    }
+
+    private bool _spooky;
+
     public MushroomPanel() => MouseFilter = MouseFilterEnum.Ignore;
 
     public override void _Draw()
     {
         if (_shapeSize != Size)
             Build();
-        DrawColoredPolygon(_shape, HudStyle.Cap);
+        DrawColoredPolygon(_shape, _spooky ? HudStyle.SpookyCap : HudStyle.Cap);
         float w = Size.X, capHeight = Size.Y - BandHeight;
         foreach (var spot in Spots)
         {
             // x across the panel, y down the cap, radius: fractions of the cap's height.
-            DrawCircle(new Vector2(spot.X * w, spot.Y * capHeight), spot.Z * capHeight, HudStyle.Spot);
+            DrawCircle(new Vector2(spot.X * w, spot.Y * capHeight), spot.Z * capHeight, _spooky ? HudStyle.SpookySpot : HudStyle.Spot);
         }
         DrawPolyline(_outline, HudStyle.Ink, Outline, true);
 

@@ -6,8 +6,8 @@ namespace Fungtopia.HUD.View;
 /// <summary>
 /// Draws the HUD Core on top of the game: hearts in a mushroom-cap panel at the top left (shaking
 /// on a hit), the Mushroom Coins panel at the top right (popping, with floating "+50"s), the bow
-/// draw ring around the center crosshair, the clock and below it the quest tracker under the hearts, the place-name banner sliding down at the top center, and the fade to black with "You
-/// fainted..." and then the wake-up text. It reads the Core
+/// draw ring around the center crosshair, the clock and below it the quest tracker under the hearts, the place-name banner sliding down at the top center (darker in the Deep Forest), and the fade to black with "You
+/// fainted..." and then the wake-up text; all hidden while the start screen is open. It reads the Core
 /// between the last two ticks (<c>Engine.GetPhysicsInterpolationFraction</c>) and sets texts only
 /// when they change.
 /// </summary>
@@ -39,6 +39,8 @@ public partial class HudView : CanvasLayer, IModuleView
     private MushroomPanel _banner = null!;
     private Label _bannerLabel = null!;
     private int _shownBanner = -1;
+    private readonly LabelSettings _bannerText = HudStyle.Text(40, HudStyle.Ink, 0);
+    private readonly LabelSettings _spookyBannerText = HudStyle.Text(40, HudStyle.Mist, 8);
 
     private PanelContainer _clockPill = null!;
     private SkyIcon _sky = null!;
@@ -122,7 +124,7 @@ public partial class HudView : CanvasLayer, IModuleView
         _root.AddChild(_banner);
         _bannerLabel = new Label
         {
-            LabelSettings = HudStyle.Text(40, HudStyle.Ink, 0),
+            LabelSettings = _bannerText,
             Position = new Vector2(0f, PanelHeight - 60f),
             Size = new Vector2(BannerWidth, 56f),
             HorizontalAlignment = HorizontalAlignment.Center,
@@ -185,6 +187,10 @@ public partial class HudView : CanvasLayer, IModuleView
     {
         if (_hud == null)
             return;
+        // The whole HUD stays hidden while the start screen is open.
+        _root.Visible = !_hud.Hidden;
+        if (_hud.Hidden)
+            return;
         float f = (float)Engine.GetPhysicsInterpolationFraction();
 
         _heartsPanel.Visible = _hud.HasPlayer;
@@ -243,6 +249,9 @@ public partial class HudView : CanvasLayer, IModuleView
         {
             _shownBanner = _hud.BannerCount;
             _bannerLabel.Text = HudText.AreaName(_hud.BannerArea);
+            bool spooky = _hud.BannerSpooky;
+            _banner.Spooky = spooky;
+            _bannerLabel.LabelSettings = spooky ? _spookyBannerText : _bannerText;
         }
         float slide = _hud.BannerSlide(f);
         _banner.Visible = slide > 0f;

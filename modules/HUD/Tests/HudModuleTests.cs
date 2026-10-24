@@ -7,6 +7,7 @@ using Fungtopia.Map;
 using Fungtopia.NPCs;
 using Fungtopia.Player;
 using Fungtopia.Shell;
+using Fungtopia.StartScreen;
 using Fungtopia.Wallet;
 using Xunit;
 
@@ -76,6 +77,7 @@ public class HudModuleTests
         Assert.True(_bus.Has<WalletState>());
         Assert.True(_bus.Has<CoinsEarned>());
         Assert.True(_bus.Has<BowState>());
+        Assert.True(_bus.Has<StartScreenState>());
         Tick(10);
         Assert.Equal(0, _bus.Published);
     }
@@ -458,6 +460,38 @@ public class HudModuleTests
         Assert.Equal("Pet City", HudText.AreaName(_hud.BannerArea));
     }
 
+    [Theory]
+    [InlineData(Area.DeepForest, true)]
+    [InlineData(Area.Town, false)]
+    [InlineData(Area.Forest, false)]
+    [InlineData(Area.PetCity, false)]
+    [InlineData(Area.Home, false)]
+    [InlineData(Area.Road, false)]
+    public void OnlyTheDeepForestBannerIsSpooky(Area area, bool spooky)
+    {
+        Assert.Equal(spooky, HudText.IsSpooky(area));
+    }
+
+    [Fact]
+    public void EnteringTheDeepForestSlidesInASpookyDeepForestBanner()
+    {
+        Send(In(Area.Forest));
+        Tick(Ticks(HudModule.BannerSeconds));
+        Assert.False(_hud.BannerSpooky);
+        Send(In(Area.DeepForest));
+        Tick();
+        Assert.True(_hud.BannerVisible);
+        Assert.Equal(Area.DeepForest, _hud.BannerArea);
+        Assert.Equal("Deep Forest", HudText.AreaName(_hud.BannerArea));
+        Assert.True(_hud.BannerSpooky);
+        Assert.Equal(2, _hud.BannerCount);
+
+        Send(In(Area.Forest)); // back out: the ordinary style again
+        Tick();
+        Assert.Equal(Area.Forest, _hud.BannerArea);
+        Assert.False(_hud.BannerSpooky);
+    }
+
     [Fact]
     public void NoBannerWhileFaintedThenTheWakingPlace()
     {
@@ -619,6 +653,28 @@ public class HudModuleTests
         Assert.Equal(Run(), Run());
     }
 
+    // Start screen
+
+    [Fact]
+    public void HiddenWhileTheStartScreenIsOpenThenShown()
+    {
+        Assert.False(_hud.Hidden); // no start screen (yet): the HUD shows
+        Send(new StartScreenState(true));
+        Send(Player(10));
+        Tick();
+        Assert.True(_hud.Hidden);
+        Send(new StartScreenState(true));
+        Tick(30);
+        Assert.True(_hud.Hidden);
+        Send(new StartScreenState(false)); // "Start!" pressed
+        Tick();
+        Assert.False(_hud.Hidden);
+        Assert.True(_hud.HasPlayer);
+        Send(new StartScreenState(false));
+        Tick(30);
+        Assert.False(_hud.Hidden);
+    }
+
     [Fact]
     public void TicksAndHandlersDoNotAllocate()
     {
@@ -634,6 +690,9 @@ public class HudModuleTests
         var woke = new WokeUp(2);
         var quest = Quest(2);
         var questMore = Quest(3);
+        var open = new StartScreenState(true);
+        var closed = new StartScreenState(false);
+        var deep = In(Area.DeepForest);
         var context = new TickContext(0, Step);
         // Warm up (JIT) before measuring.
         for (int i = 0; i < 3; i++)
@@ -648,6 +707,8 @@ public class HudModuleTests
         {
             _hud.Handle(full); _hud.Handle(hit); _hud.Handle(wallet); _hud.Handle(earned);
             _hud.Handle(bow); _hud.Handle(defeated); _hud.Tick(context);
+            _hud.Handle(open); _hud.Handle(closed); _hud.Handle(deep); _hud.Handle(forest);
+            _ = _hud.Hidden; _ = _hud.BannerSpooky;
             _hud.HeartsShake(0.5f); _hud.CoinsPopScale(0.5f); _hud.FaintFade(0.5f);
             _hud.BannerSlide(0.5f); _hud.WakeTextAlpha(0.5f); _hud.FaintTextAlpha(0.5f); _hud.QuestPopScale(0.5f);
         }

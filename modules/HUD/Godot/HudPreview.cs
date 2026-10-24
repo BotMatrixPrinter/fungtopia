@@ -17,7 +17,8 @@ namespace Fungtopia.HUD.View;
 /// Day 3 at 2:05 PM, just entered Mushroom Forest with its banner sliding in, the quest at 3/5, just
 /// hit down to 7 of 10, a "+50" rising after 1,200 M¢, the bow two-thirds drawn), "night" (10:40 PM
 /// under the moon, the quest complete with its check), "fainted" (black after a defeat) or "woke"
-/// (Day 4's wake-up text as the screen comes back in Mushroom Town).
+/// (Day 4's wake-up text as the screen comes back in Mushroom Town); "deep" is "play" entering the
+/// Deep Forest (the spookier banner).
 /// </summary>
 public partial class HudPreview : Node
 {
@@ -28,7 +29,7 @@ public partial class HudPreview : Node
     }
 
     private readonly HudModule _hud = new();
-    private bool _fainted, _woke, _night;
+    private bool _fainted, _woke, _night, _deep;
     private int _frame;
 
     public override void _Ready()
@@ -37,6 +38,7 @@ public partial class HudPreview : Node
         _woke = mode.Equals("woke", StringComparison.OrdinalIgnoreCase);
         _fainted = _woke || mode.Equals("fainted", StringComparison.OrdinalIgnoreCase);
         _night = mode.Equals("night", StringComparison.OrdinalIgnoreCase);
+        _deep = mode.Equals("deep", StringComparison.OrdinalIgnoreCase);
         var backdrop = new TextureRect
         {
             Texture = new GradientTexture2D
@@ -71,7 +73,7 @@ public partial class HudPreview : Node
         }
         bool awake = _woke ? _frame >= 20 : !_fainted || _frame < 10;
         int health = _woke ? (awake ? 10 : 0) : _fainted ? (_frame < 10 ? 2 : 0) : (_frame < 70 ? 10 : 7);
-        var area = _woke ? (awake ? Area.Town : Area.Forest) : _frame < 50 ? Area.Road : Area.Forest;
+        var area = _woke ? (awake ? Area.Town : Area.Forest) : _frame < 50 ? Area.Road : _deep ? Area.DeepForest : Area.Forest;
         if (_woke && _frame == 20)
             _hud.Handle(new WokeUp(4));
         _hud.Handle(new PlayerState(default, 0f, default, true, health, 10, awake, CharacterKind.Girl, area));

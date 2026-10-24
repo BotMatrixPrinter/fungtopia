@@ -15,6 +15,11 @@ public static class HudStyle
     public static readonly Color Gold = new(1f, 0.82f, 0.33f);
     public static readonly Color GoldShade = new(0.93f, 0.64f, 0.2f);
     public static readonly Color Dusk = new(0.23f, 0.16f, 0.3f);
+    // The spookier Deep Forest banner: a dusky violet cap, faint greenish spots, misty lilac band and text.
+    public static readonly Color SpookyCap = new(0.36f, 0.26f, 0.45f);
+    public static readonly Color SpookySpot = new(0.72f, 0.85f, 0.7f, 0.55f);
+    public static readonly Color SpookyBand = new(0.3f, 0.25f, 0.38f);
+    public static readonly Color Mist = new(0.88f, 0.86f, 0.97f);
 
     private static Font? _font;
 

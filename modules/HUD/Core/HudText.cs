@@ -26,6 +26,9 @@ public static class HudText
         _ => "",
     };
 
+    /// <summary>Places whose banner gets the spookier style (darker cap, pale text): the Deep Forest.</summary>
+    public static bool IsSpooky(Area area) => area == Area.DeepForest;
+
     /// <summary>The clock's day: "Day 3".</summary>
     public static string Day(int day) => "Day " + day.ToString(CultureInfo.InvariantCulture);
 
