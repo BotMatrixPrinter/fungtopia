@@ -14,7 +14,10 @@
 #                       roof. PetStoreInside: its pet beds, cages and the crow's perch.
 #   Counter             the shop counter (5 m x 1 m), drawn at the store's open front.
 #   Kitten, Puppy, Bunny, Hamster, MushroomCrow  the pets on display, at their spots in the store.
-#   Fountain            the plaza's paw-print fountain (7 m across) with a big bone on top.
+#   CityLamp, Bench, Planter, Statue  the Map's solid props (drawn scaled to each prop's size):
+#                       a glowing mushroom street lamp (0.6 m across, 2.6 m tall), a bench (1.6 m long,
+#                       0.9 m tall, its seat along X, facing +Y), a round planter (1.2 m across, 0.7 m
+#                       tall), a verdigris Mushroom Cat statue on a pedestal (2.2 m across, 3.4 m tall).
 # Every piece stands at the origin on the ground, centered on its footprint, its front toward
 # Blender +Y (Godot -Z, as a Map building at rotation 0). The store's contents are placed in the
 # store's own frame. Only creatures (the pets) have eyes; buildings and objects never do.
@@ -65,6 +68,8 @@ COLORS = {
     "Stone": (0.86, 0.84, 0.9),
     "Water": (0.5, 0.82, 1.0),
     "Bone": (1.0, 0.96, 0.88),
+    "Bronze": (0.5, 0.78, 0.7),
+    "Pot": (0.94, 0.56, 0.42),
     # The pets (only they have eyes).
     "Eye": (0.07, 0.04, 0.06),
     "EyeShine": (1.0, 1.0, 1.0),
@@ -568,36 +573,66 @@ def mushroom_crow():
     return p.finish(location=(-3.4, 1.4, 2.82))
 
 
-# The plaza's fountain ------------------------------------------------------------------------------
+# The Map's props -----------------------------------------------------------------------------------
 
 
-def fountain():
-    p = Piece("Fountain")
-    # A paw print seen from above: a big pad pool and four toe pools, a stone bone held up high over
-    # the pad, water bubbling from each toe, little lamps on the rim.
-    pools = [(0.0, -0.9, 2.2, 1.0)] + [(math.sin(a) * 2.45, math.cos(a) * 2.0 + 0.35, 0.85, 0.75)
-                                        for a in (math.radians(-60), math.radians(-22), math.radians(22), math.radians(60))]
-    for x, y, r, h in pools:
-        p.add(cylinder(r + 0.25, h, T(x, y, h / 2 - 0.15), segments=32), "Stone")
-        p.add(cylinder(r, 0.1, T(x, y, h - 0.25), segments=32), "Water")
-    for x, y, r, h in pools[1:]:
-        p.add(cylinder(0.12, 0.7, T(x, y, h + 0.1), radius2=0.03, segments=10), "Water")
-        p.add(sphere(0.18, T(x, y, h + 0.45), segments=10, rings=5), "Water")
-    p.add(cylinder(0.5, 1.8, T(0, -0.9, 1.6), radius2=0.35, segments=20), "Stone")
-    p.add(cylinder(0.75, 0.25, T(0, -0.9, 2.55), segments=24), "Stone")
-    bone = T(0, -0.9, 2.95)
-    p.add(cylinder(0.22, 1.6, bone @ R("Y", 90), segments=16), "Bone")
-    for side in (-1, 1):
-        for k in (-1, 1):
-            p.add(sphere(0.3, bone @ T(side * 0.85, 0, k * 0.2), segments=14, rings=7), "Bone")
-    heart(p, 0.5, bone @ T(0, 0.25, -0.35), depth=0.1)
-    for i in range(6):
-        a = 2 * math.pi * i / 6
-        p.add(sphere(0.2, T(math.cos(a) * 0.65, -0.9 + math.sin(a) * 0.65, 2.0), scale=(1, 1, 1.4),
-                     segments=10, rings=5), "Water")
-    for i in range(8):
-        a = math.pi + math.pi * i / 7
-        p.add(sphere(0.13, T(math.cos(a) * 2.45, -0.9 + math.sin(a) * 2.45, 0.95), segments=10, rings=5), "Glow")
+def city_lamp():
+    p = Piece("CityLamp")
+    # A slim post on a round foot, a glowing bulb under a little spotted mushroom cap.
+    p.add(cylinder(0.3, 0.2, T(0, 0, 0.1), segments=20), "Plinth")
+    p.add(cylinder(0.09, 2.1, T(0, 0, 1.2), radius2=0.07, segments=12), "Trim")
+    p.add(sphere(0.18, T(0, 0, 2.3), segments=14, rings=7), "Glow")
+    p.add(dome(0.3, 0.22, T(0, 0, 2.38)), "StoreRoof")
+    spots_on_dome(p, 0.3, 0.22, T(0, 0, 2.38), count=5, size=0.06)
+    return p.finish()
+
+
+def bench():
+    p = Piece("Bench")
+    # A wooden bench: seat along X, backrest behind it (-Y), so it faces +Y; little heart on the back.
+    for x in (-0.65, 0.65):
+        p.add(box((0.1, 0.5, 0.42), T(x, 0, 0.21), bevel=0.03), "WoodDark")
+        p.add(box((0.1, 0.1, 0.9), T(x, -0.22, 0.45), bevel=0.03), "WoodDark")
+    p.add(box((1.6, 0.5, 0.1), T(0, 0, 0.47), bevel=0.04), "Wood")
+    for z in (0.66, 0.82):
+        p.add(box((1.6, 0.07, 0.12), T(0, -0.24, z), bevel=0.03), "Wood")
+    heart(p, 0.16, T(0, -0.19, 0.74), depth=0.04)
+    return p.finish()
+
+
+def planter():
+    p = Piece("Planter")
+    # A round terracotta pot with leaves, yellow flowers and a tiny mushroom.
+    p.add(cylinder(0.6, 0.45, T(0, 0, 0.225), radius2=0.5, segments=24), "Pot")
+    p.add(cylinder(0.62, 0.08, T(0, 0, 0.45), segments=24), "Trim")
+    for i in range(7):
+        a = 2 * math.pi * i / 7
+        p.add(sphere(0.2, T(math.cos(a) * 0.32, math.sin(a) * 0.32, 0.5), segments=10, rings=5), "Leaf")
+        p.add(sphere(0.07, T(math.cos(a + 0.4) * 0.38, math.sin(a + 0.4) * 0.38, 0.64), segments=8, rings=4), "Flower")
+    p.add(sphere(0.22, T(0, 0, 0.52), segments=10, rings=5), "Leaf")
+    p.add(cylinder(0.04, 0.14, T(0.1, 0.05, 0.6), segments=8), "Stem")
+    p.add(dome(0.09, 0.07, T(0.1, 0.05, 0.66), segments=12, rings=4), "Cap")
+    return p.finish()
+
+
+def statue():
+    p = Piece("Statue")
+    # A big verdigris Mushroom Cat sitting on a stone pedestal, looking forward (+Y). No eyes: a statue.
+    p.add(box((2.2, 2.2, 0.3), T(0, 0, 0.15), bevel=0.08), "Plinth")
+    p.add(box((1.8, 1.8, 0.9), T(0, 0, 0.75), bevel=0.08), "Stone")
+    p.add(box((2.0, 2.0, 0.2), T(0, 0, 1.3), bevel=0.06), "Plinth")
+    heart(p, 0.5, T(0, 0.91, 0.75), depth=0.06)
+    p.add(sphere(0.6, T(0, 0, 1.95), scale=(1, 0.9, 1.05), segments=20, rings=10), "Bronze")
+    for x in (-0.25, 0.25):
+        p.add(sphere(0.17, T(x, 0.45, 1.5), scale=(1, 1.3, 0.8), segments=10, rings=5), "Bronze")
+    p.add(cylinder(0.12, 0.9, T(0.55, -0.45, 1.75) @ R("Y", 30), segments=10), "Bronze")
+    p.add(sphere(0.55, T(0, 0.1, 2.75), segments=20, rings=10), "Bronze")
+    p.add(sphere(0.22, T(0, 0.58, 2.62), scale=(1.3, 0.8, 0.8), segments=12, rings=6), "Bronze")
+    p.add(sphere(0.07, T(0, 0.76, 2.7), segments=8, rings=4), "Bronze")
+    for x in (-0.33, 0.33):
+        p.add(cylinder(0.17, 0.3, T(x, 0.1, 3.25) @ R("Y", 20 if x > 0 else -20), radius2=0.0, segments=10), "Bronze")
+    # Its little mushroom cap hat.
+    p.add(dome(0.32, 0.18, T(0.12, 0.05, 3.18) @ R("Y", 12)), "Bronze")
     return p.finish()
 
 
@@ -617,7 +652,10 @@ puppy()
 bunny()
 hamster()
 mushroom_crow()
-fountain()
+city_lamp()
+bench()
+planter()
+statue()
 
 path = os.path.join(HERE, "petcity.glb")
 bpy.ops.export_scene.gltf(filepath=path, export_format="GLB", export_yup=True)

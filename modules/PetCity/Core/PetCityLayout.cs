@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Numerics;
 using Fungtopia.Map;
 
@@ -11,8 +12,6 @@ public enum PieceKind
     PetStore,
     /// <summary>A tall city block (a <see cref="BuildingKind.CityBlock"/> building).</summary>
     CityBlock,
-    /// <summary>The pet-themed fountain in the middle of the plaza (not a Map building).</summary>
-    Fountain,
 }
 
 /// <summary>
@@ -23,7 +22,7 @@ public enum PieceKind
 public readonly struct Piece
 {
     public readonly PieceKind Kind;
-    /// <summary>The index in <see cref="Buildings.All"/> it draws, or -1 (the fountain).</summary>
+    /// <summary>The index in <see cref="Buildings.All"/> it draws.</summary>
     public readonly int BuildingIndex;
     public readonly Vector3 Position;
     public readonly float Yaw;
@@ -46,9 +45,38 @@ public readonly struct Piece
 }
 
 /// <summary>
+/// One solid prop of the Map the view draws (a lamp, bench, planter, statue, ...): the
+/// <see cref="Props.All"/> prop <see cref="PropIndex"/>, standing at <see cref="Position"/> (its x,
+/// z; y the lowest ground under it), turned by <see cref="Yaw"/> (its <see cref="Prop.Rotation"/>),
+/// <see cref="Radius"/> (its obstacle radius; half the length of a bench) and <see cref="Height"/> as the Map says.
+/// </summary>
+public readonly struct CityProp
+{
+    public readonly PropKind Kind;
+    /// <summary>The index in <see cref="Props.All"/> it draws.</summary>
+    public readonly int PropIndex;
+    public readonly Vector3 Position;
+    public readonly float Yaw;
+    public readonly float Radius;
+    public readonly float Height;
+
+    public CityProp(PropKind kind, int propIndex, Vector3 position, float yaw, float radius, float height)
+    {
+        Kind = kind;
+        PropIndex = propIndex;
+        Position = position;
+        Yaw = yaw;
+        Radius = radius;
+        Height = height;
+    }
+}
+
+/// <summary>
 /// Everything Pet City draws, computed once from the Map Contract: one piece per
 /// <see cref="Buildings.All"/> building of <see cref="Area.PetCity"/>, exactly on its footprint, in
-/// the Map's order, then the plaza's fountain. Fixed data, the same every run.
+/// the Map's order; and one <see cref="CityProp"/> per
+/// <see cref="Props.All"/> prop of <see cref="Area.PetCity"/>, in the Map's order (Pet City places
+/// nothing solid of its own). Fixed data, the same every run.
 /// </summary>
 public static class PetCityLayout
 {
@@ -67,19 +95,17 @@ public static class PetCityLayout
     /// <summary>Number of color schemes and roofs.</summary>
     public const int StyleCount = 4;
 
-    /// <summary>The fountain's basin diameter (meters) and height.</summary>
-    public const float FountainSize = 7f, FountainHeight = 3.2f;
-
     /// <summary>The pet store's counter: width along the store's front and depth (meters).</summary>
     public const float CounterWidth = 5f, CounterDepth = 1f;
 
     private static readonly Piece[] s_pieces = Build();
+    private static readonly CityProp[] s_props = BuildProps();
 
-    /// <summary>Every piece, buildings first (in <see cref="Buildings.All"/> order), the fountain last.</summary>
+    /// <summary>Every piece: exactly the Map's Pet City buildings, in <see cref="Buildings.All"/> order.</summary>
     public static ReadOnlySpan<Piece> Pieces => s_pieces;
 
-    /// <summary>The fountain in the middle of the plaza.</summary>
-    public static Piece Fountain => s_pieces[^1];
+    /// <summary>Every Pet City prop of the Map, in <see cref="Props.All"/> order: exactly what the view draws.</summary>
+    public static ReadOnlySpan<CityProp> CityProps => s_props;
 
     /// <summary>Upper stories that fit a city block of <paramref name="height"/> meters, within the models'.</summary>
     public static int StoriesFor(float height) =>
@@ -115,6 +141,45 @@ public static class PetCityLayout
         return low;
     }
 
+    /// <summary>
+    /// The petcity.glb object that draws a prop of <paramref name="kind"/>, and the radius (half the
+    /// length of a bench) and height it is built at, which the view scales to each prop's own; null
+    /// for a kind Pet City has no model of.
+    /// </summary>
+    public static (string Name, float Radius, float Height)? PropModel(PropKind kind) => kind switch
+    {
+        PropKind.Lamp => ("CityLamp", 0.3f, 2.6f),
+        PropKind.Bench => ("Bench", 0.8f, 0.9f),
+        PropKind.Planter => ("Planter", 0.6f, 0.7f),
+        PropKind.Statue => ("Statue", 1.1f, 3.4f),
+        _ => null,
+    };
+
+    /// <summary>The lowest ground height under a prop (its center and four points on its radius).</summary>
+    public static float FootHeight(in Prop p)
+    {
+        float low = Ground.HeightAt(p.X, p.Z);
+        for (int k = 0; k < 4; k++)
+        {
+            float a = k * MathF.PI * 0.5f;
+            low = MathF.Min(low, Ground.HeightAt(p.X + MathF.Sin(a) * p.Radius, p.Z + MathF.Cos(a) * p.Radius));
+        }
+        return low;
+    }
+
+    private static CityProp[] BuildProps()
+    {
+        var all = Props.All;
+        var props = new List<CityProp>();
+        for (int i = 0; i < all.Length; i++)
+        {
+            var p = all[i];
+            if (p.Area == Area.PetCity)
+                props.Add(new CityProp(p.Kind, i, new Vector3(p.X, FootHeight(p), p.Z), p.Rotation, p.Radius, p.Height));
+        }
+        return props.ToArray();
+    }
+
     private static Piece[] Build()
     {
         var all = Buildings.All;
@@ -122,7 +187,7 @@ public static class PetCityLayout
         foreach (var b in all)
             if (b.Area == Area.PetCity)
                 count++;
-        var pieces = new Piece[count + 1];
+        var pieces = new Piece[count];
         int n = 0, blocks = 0;
         for (int i = 0; i < all.Length; i++)
         {
@@ -138,9 +203,6 @@ public static class PetCityLayout
                 _ => throw new InvalidOperationException($"Pet City has no drawing for a {b.Kind}."),
             };
         }
-        var plaza = Buildings.CityPlaza;
-        pieces[n] = new Piece(PieceKind.Fountain, -1, new Vector3(plaza.X, Ground.HeightAt(plaza.X, plaza.Y), plaza.Y), 0f,
-            new Vector3(FountainSize, FountainHeight, FountainSize), 0, 0);
         return pieces;
     }
 }

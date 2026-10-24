@@ -1,9 +1,11 @@
 # PetCity module
 
 Draws Pet City, north of Mushroom Forest: tall, colorful cartoon city blocks with many windows
-around a lilac plaza, a paw-print fountain in its middle, and Lucy's Pet Store at its north end.
-Everything stands exactly where the Map module's `Fungtopia.Map.Buildings` (Area `PetCity`) says;
-the ground, the plaza paving and the road are the Map's. At night the windows, the shop sign's
+around a lilac plaza, and Lucy's Pet Store at its north end.
+Everything stands exactly where the Map module's `Fungtopia.Map.Buildings` (Area `PetCity`) says,
+and the lamps, benches, planters and the statue exactly where, as turned and as large as its
+`Fungtopia.Map.Props` (Area `PetCity`) say, so every one of them is a Map obstacle; Pet City places
+nothing taller than 0.4 m of its own. The ground, the plaza paving and the road are the Map's. At night the windows, the shop sign's
 letters and hearts and the lamps glow.
 
 - `Contract/` — `Fungtopia.PetCity.Contract` (namespace `Fungtopia.PetCity`): empty; the module
@@ -25,15 +27,17 @@ Test it with `./test.sh PetCity` from the repository root.
 nothing per tick and publishes nothing.
 
 `PetCityLayout.Pieces` (fixed data, the same every run) holds one `Piece` per `Buildings.All`
-building of `Area.PetCity`, in the Map's order, then the fountain:
+building of `Area.PetCity`, in the Map's order, and nothing else:
 
-- `Kind` (`PetStore`, `CityBlock`, `Fountain`), `BuildingIndex` (into `Buildings.All`; -1 for the
-  fountain), `Position` (the building's x, z; y the lowest ground under its footprint, so no corner
+- `Kind` (`PetStore`, `CityBlock`), `BuildingIndex` (into `Buildings.All`), `Position` (the building's x, z; y the lowest ground under its footprint, so no corner
   floats), `Yaw` (its `Rotation`), `Size` (`Width`, `Height`, `Depth`).
 - City blocks: `Stories`, the upper stories that fit their height (`StoriesFor`: a 4 m shop floor,
   3 m stories, a 3 m roof; 3..10), and `Style` (one of four color schemes and roofs, in turn).
-- The fountain stands on `Buildings.CityPlaza`, 7 m across. The Map has no obstacle for it, so
-  walkers pass through it (the Map would need a circle there).
+- `CityProps`: one `CityProp` per `Props.All` prop of `Area.PetCity`, in the Map's order and
+  nothing else: `Kind`, `PropIndex` (into `Props.All`), `Position` (its x, z; y the lowest ground
+  under it, `FootHeight`), `Yaw` (its `Rotation`), `Radius`, `Height`. `PropModel(kind)` names the
+  glb object that draws a kind and the radius and height it is built at (null for a kind Pet City
+  has no model of: the view warns and draws nothing).
 - `Counter`: the pet store's counter, along the inside of its open front right behind
   `Places.LucySpot`, facing out like it.
 
@@ -45,9 +49,8 @@ its walls and roof recolored by style (mint/red, lilac/orange, yellow/blue, sky/
 is `PetStore` and `PetStoreInside` scaled to its footprint, the `Counter` at
 `PetCityLayout.Counter` on the store's floor, and the pets on display (a kitten and a puppy in pet
 beds, a bunny and a hamster in golden cages, the Mushroom Crow on its perch) breathing and bobbing a
-little; the `Fountain` on the plaza. When `WindowsLit` changes, the shared window, lamp and sign
-materials switch between daylight glass and a warm glow, the store's light brightens and the
-fountain's light comes on.
+little. When `WindowsLit` changes, the shared window, lamp and sign
+materials switch between daylight glass and a warm glow, and the store's light brightens.
 
 ## Models
 
@@ -63,12 +66,15 @@ centered on its footprint, front toward Godot -Z (as a Map building at rotation 
   a scalloped striped awning, round heart windows, shelves of pet food, lamps, a pink spotted
   mushroom-cap roof. `PetStoreInside`: pet beds, cages, the crow's perch.
 - `Counter`, `Kitten`, `Puppy`, `Bunny`, `Hamster`, `MushroomCrow` (the pets in the store's frame).
-- `Fountain`: a paw-print of pools with a stone bone on top and lamps on the rim.
+- `CityLamp` (0.6 m across, 2.6 m tall: a glowing bulb under a spotted mushroom cap), `Bench`
+  (1.6 m long, 0.9 m tall, seat along X), `Planter` (1.2 m across, 0.7 m tall), `Statue` (a
+  verdigris Mushroom Cat on a pedestal, 2.2 m across, 3.4 m tall): the Map's props, built at the
+  Map's sizes.
 
-Only the pets have eyes; buildings, caps, signs and lamps never do.
+Only the pets have eyes; buildings, caps, signs, lamps and the statue never do.
 
 ## Screenshots
 
 `./screenshot.sh modules/PetCity/Godot/Preview.tscn` shows the plaza from the south entrance, on
-the Map's ground. `PETCITY_PREVIEW=store`, `fountain` or `block` picks another view; add `night`
+the Map's ground. `PETCITY_PREVIEW=store`, `block` or `props` (the statue, benches and lamps) picks another view; add `night`
 (for example `PETCITY_PREVIEW=store,night`) for the city at night.

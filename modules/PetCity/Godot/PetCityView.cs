@@ -8,8 +8,8 @@ namespace Fungtopia.PetCity.View;
 /// <summary>
 /// Draws Pet City from <see cref="PetCityLayout"/>: every Pet City building of the Map exactly on
 /// its footprint (tall colorful city blocks, Lucy's Pet Store with its counter at
-/// <see cref="Places.LucySpot"/> and its pets on display), and the paw-print fountain in the
-/// plaza. At night (<see cref="PetCityModule.WindowsLit"/>) the windows, the sign and the lamps glow
+/// <see cref="Places.LucySpot"/> and its pets on display); and every Pet City prop of the Map (<see cref="PetCityLayout.CityProps"/>: lamps, benches,
+/// planters, the statue) exactly where, as turned and as large as <see cref="Props.All"/> says. At night (<see cref="PetCityModule.WindowsLit"/>) the windows, the sign and the lamps glow
 /// and the store's light shines brighter. The pets on display breathe and bob a little.
 /// </summary>
 public partial class PetCityView : Node3D, IModuleView
@@ -29,7 +29,6 @@ public partial class PetCityView : Node3D, IModuleView
     private readonly Node3D?[] _pets = new Node3D?[Pets.Length];
     private readonly Vector3[] _petRest = new Vector3[Pets.Length];
     private OmniLight3D? _storeLight;
-    private OmniLight3D? _fountainLight;
     private bool _lit;
     private float _time;
 
@@ -46,9 +45,10 @@ public partial class PetCityView : Node3D, IModuleView
             {
                 case PieceKind.CityBlock: AddCityBlock(piece); break;
                 case PieceKind.PetStore: AddPetStore(piece); break;
-                case PieceKind.Fountain: AddFountain(piece); break;
             }
         }
+        foreach (var prop in PetCityLayout.CityProps)
+            AddProp(prop);
         _lit = _city?.WindowsLit ?? false;
         Light(_lit);
     }
@@ -83,8 +83,6 @@ public partial class PetCityView : Node3D, IModuleView
         PetCityModels.SetNight(night);
         if (_storeLight != null)
             _storeLight.LightEnergy = night ? 4f : 1.6f;
-        if (_fountainLight != null)
-            _fountainLight.Visible = night;
     }
 
     private static Transform3D Placed(in Piece piece, Vector3 scale) =>
@@ -152,22 +150,22 @@ public partial class PetCityView : Node3D, IModuleView
         root.AddChild(_storeLight);
     }
 
-    private void AddFountain(in Piece piece)
+    private void AddProp(in CityProp prop)
     {
-        var root = new Node3D { Name = "Fountain", Transform = Placed(piece, new Vector3(piece.Size.X / 7f, piece.Size.Y / 3.2f, piece.Size.Z / 7f)) };
-        AddChild(root);
-        var fountain = PetCityModels.Instance("Fountain");
-        if (fountain != null)
-            root.AddChild(fountain);
-        _fountainLight = new OmniLight3D
+        var model = PetCityLayout.PropModel(prop.Kind);
+        if (model == null)
         {
-            Name = "FountainLight",
-            LightColor = new Color(0.7f, 0.86f, 1f),
-            LightEnergy = 1.4f,
-            OmniRange = 9f,
-            Position = new Vector3(0f, 2.5f, 0f),
-            Visible = false,
-        };
-        root.AddChild(_fountainLight);
+            GD.PushWarning($"Fungtopia: PetCity: no model for a {prop.Kind} (prop {prop.PropIndex}).");
+            return;
+        }
+        var (name, radius, height) = model.Value;
+        var node = PetCityModels.Instance(name);
+        if (node == null)
+            return;
+        float across = prop.Radius / radius;
+        node.Name = $"{name}{prop.PropIndex}";
+        node.Transform = new Transform3D(new Basis(Vector3.Up, prop.Yaw).Scaled(new Vector3(across, prop.Height / height, across)),
+            new Vector3(prop.Position.X, prop.Position.Y, prop.Position.Z));
+        AddChild(node);
     }
 }

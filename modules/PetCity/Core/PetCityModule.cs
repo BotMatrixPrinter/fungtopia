@@ -18,7 +18,7 @@ public sealed class PetCityModule : IModule, IMessageHandler<TimeOfDay>
     /// <summary>Whether it is night (the last <see cref="TimeOfDay"/>; day until one arrives).</summary>
     public bool IsNight { get; private set; }
 
-    /// <summary>Whether the windows, the shop sign and the fountain's lights glow.</summary>
+    /// <summary>Whether the windows, the shop sign and the lamps glow.</summary>
     public bool WindowsLit => IsNight;
 
     public void Start(IMessageBus bus)

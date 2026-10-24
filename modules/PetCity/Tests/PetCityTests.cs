@@ -40,8 +40,7 @@ public class PetCityTests
         var all = Buildings.All;
         var drawn = new int[all.Length];
         foreach (var p in PetCityLayout.Pieces)
-            if (p.BuildingIndex >= 0)
-                drawn[p.BuildingIndex]++;
+            drawn[p.BuildingIndex]++;
         int cityBuildings = 0;
         for (int i = 0; i < all.Length; i++)
         {
@@ -56,8 +55,8 @@ public class PetCityTests
             }
         }
         Assert.True(cityBuildings >= 2);
-        // Plus exactly the plaza's fountain, which is no Map building.
-        Assert.Equal(cityBuildings + 1, PetCityLayout.Pieces.Length);
+        // And nothing else: Pet City draws no building of its own.
+        Assert.Equal(cityBuildings, PetCityLayout.Pieces.Length);
     }
 
     [Fact]
@@ -65,8 +64,6 @@ public class PetCityTests
     {
         foreach (var p in PetCityLayout.Pieces)
         {
-            if (p.BuildingIndex < 0)
-                continue;
             var b = Buildings.All[p.BuildingIndex];
             Assert.Equal(b.Kind == BuildingKind.PetStore ? PieceKind.PetStore : PieceKind.CityBlock, p.Kind);
             Assert.Equal(b.X, p.Position.X);
@@ -134,25 +131,6 @@ public class PetCityTests
     }
 
     [Fact]
-    public void TheFountainStandsInTheMiddleOfThePlazaClearOfEveryBuilding()
-    {
-        var f = PetCityLayout.Fountain;
-        Assert.Equal(PieceKind.Fountain, f.Kind);
-        Assert.Equal(-1, f.BuildingIndex);
-        Assert.Equal(Buildings.CityPlaza.X, f.Position.X);
-        Assert.Equal(Buildings.CityPlaza.Y, f.Position.Z);
-        Assert.Equal(Ground.HeightAt(f.Position.X, f.Position.Z), f.Position.Y);
-        Assert.Equal(Area.PetCity, Areas.At(f.Position.X, f.Position.Z));
-        float r = f.Size.X * 0.5f;
-        Assert.True(Areas.Walkable(f.Position.X, f.Position.Z, r), "the fountain is not on the plaza");
-        foreach (var b in Buildings.All)
-            Assert.False(b.Contains(f.Position.X, f.Position.Z, r + 4f), $"the fountain is too close to a {b.Kind}");
-        // It does not stand in the way of the store's counter.
-        var spot = Places.LucySpot.Position;
-        Assert.True(MathF.Sqrt((spot.X - f.Position.X) * (spot.X - f.Position.X) + (spot.Z - f.Position.Z) * (spot.Z - f.Position.Z)) > r + 5f);
-    }
-
-    [Fact]
     public void TheCounterIsAtLucysSpotInTheStoresOpenFront()
     {
         var counter = PetCityLayout.Counter;
@@ -171,11 +149,95 @@ public class PetCityTests
     }
 
     [Fact]
+    public void TheDrawnPropsAreExactlyTheMapsPetCityProps()
+    {
+        // The Map's Pet City props, in order, and nothing else.
+        var expected = new List<int>();
+        var all = Props.All;
+        for (int i = 0; i < all.Length; i++)
+            if (all[i].Area == Area.PetCity)
+                expected.Add(i);
+        var drawn = PetCityLayout.CityProps;
+        Assert.Equal(expected.Count, drawn.Length);
+        for (int k = 0; k < drawn.Length; k++)
+        {
+            var d = drawn[k];
+            Assert.Equal(expected[k], d.PropIndex);
+            var p = all[d.PropIndex];
+            Assert.Equal(p.Kind, d.Kind);
+            Assert.Equal(p.X, d.Position.X);
+            Assert.Equal(p.Z, d.Position.Z);
+            Assert.Equal(p.Rotation, d.Yaw);
+            Assert.Equal(p.Radius, d.Radius);
+            Assert.Equal(p.Height, d.Height);
+        }
+    }
+
+    [Fact]
+    public void ThePlazaHasLampsBenchesPlantersAndTheStatue()
+    {
+        var count = new Dictionary<PropKind, int>();
+        foreach (var p in PetCityLayout.CityProps)
+            count[p.Kind] = count.GetValueOrDefault(p.Kind) + 1;
+        Assert.True(count.GetValueOrDefault(PropKind.Lamp) >= 8, "too few lamps");
+        Assert.True(count.GetValueOrDefault(PropKind.Bench) >= 4, "too few benches");
+        Assert.True(count.GetValueOrDefault(PropKind.Planter) >= 2, "too few planters");
+        Assert.Equal(1, count.GetValueOrDefault(PropKind.Statue));
+    }
+
+    [Fact]
+    public void EveryPropHasAModelThatScalesToItsSize()
+    {
+        foreach (var p in PetCityLayout.CityProps)
+        {
+            var model = PetCityLayout.PropModel(p.Kind);
+            Assert.True(model.HasValue, $"no model for a {p.Kind}");
+            // Built near the Map's sizes, so scaling keeps its look.
+            Assert.InRange(p.Radius / model!.Value.Radius, 0.5f, 2f);
+            Assert.InRange(p.Height / model.Value.Height, 0.5f, 2f);
+        }
+        Assert.Null(PetCityLayout.PropModel(PropKind.MediumMushroom));
+    }
+
+    [Fact]
+    public void EveryDrawnPropIsSolidAndStandsOnTheGround()
+    {
+        foreach (var p in PetCityLayout.CityProps)
+        {
+            Assert.Equal(Area.PetCity, Areas.At(p.Position.X, p.Position.Z));
+            // Walkers cannot pass through anything drawn.
+            Assert.True(Ground.Blocks(p.Position.X, p.Position.Z), $"prop {p.PropIndex} ({p.Kind}) is not an obstacle");
+            Assert.Equal(PetCityLayout.FootHeight(Props.All[p.PropIndex]), p.Position.Y);
+            float ground = Ground.HeightAt(p.Position.X, p.Position.Z);
+            Assert.True(p.Position.Y <= ground && p.Position.Y > ground - 0.5f, $"prop {p.PropIndex} off the ground");
+        }
+    }
+
+    [Fact]
+    public void EverythingDrawnIsAMapBuildingOrAMapPropOfPetCity()
+    {
+        // Pet City places nothing standing of its own: every piece is a Pet City building of the
+        // Map and every prop a Pet City prop of the Map, so walkers collide with all of it.
+        foreach (var p in PetCityLayout.Pieces)
+        {
+            Assert.InRange(p.BuildingIndex, 0, Buildings.All.Length - 1);
+            Assert.Equal(Area.PetCity, Buildings.All[p.BuildingIndex].Area);
+        }
+        foreach (var p in PetCityLayout.CityProps)
+        {
+            Assert.InRange(p.PropIndex, 0, Props.All.Length - 1);
+            Assert.Equal(Area.PetCity, Props.All[p.PropIndex].Area);
+        }
+        Assert.Equal(new[] { PieceKind.PetStore, PieceKind.CityBlock }, Enum.GetValues<PieceKind>());
+    }
+
+    [Fact]
     public void TheLayoutIsTheSameEveryTime()
     {
         var a = PetCityLayout.Pieces.ToArray();
         var b = PetCityLayout.Pieces.ToArray();
         Assert.Equal(a, b);
+        Assert.Equal(PetCityLayout.CityProps.ToArray(), PetCityLayout.CityProps.ToArray());
     }
 
     // Module
