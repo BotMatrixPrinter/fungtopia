@@ -126,8 +126,6 @@ public partial class HomeView : Node3D, IModuleView
                 model.Show(pet, dt);
         }
 
-        var (x, y) = HeldDirection();
-        _home.Navigate(x, y, dt);
         _panels.Refresh(_home);
     }
 
@@ -177,7 +175,7 @@ public partial class HomeView : Node3D, IModuleView
     {
         if (_home == null || !(_home.ShopOpen || _home.Decorating))
             return;
-        // E / X come through the Input module as Interact; Up / Down are read each frame (Navigate).
+        // E / X come through the Input module as Interact; menu directions come as MenuNav.
         if (Pressed(e, Key.Q, JoyButton.B) || Pressed(e, Key.Escape, JoyButton.B))
             _home.Back();
         else if (Pressed(e, Key.Enter, JoyButton.A) || Pressed(e, Key.KpEnter, JoyButton.A))
@@ -187,28 +185,6 @@ public partial class HomeView : Node3D, IModuleView
         else if (_home.Decorating && Pressed(e, Key.Tab, JoyButton.LeftShoulder))
             _home.NextItem(1);
     }
-
-    /// <summary>The direction held now on the arrow keys, WASD, the first pad's D-pad or left stick (x right, y down).</summary>
-    private static (int x, int y) HeldDirection()
-    {
-        int x = 0, y = 0;
-        if (Held(Key.Left, Key.A, JoyButton.DpadLeft)) x--;
-        if (Held(Key.Right, Key.D, JoyButton.DpadRight)) x++;
-        if (Held(Key.Up, Key.W, JoyButton.DpadUp)) y--;
-        if (Held(Key.Down, Key.S, JoyButton.DpadDown)) y++;
-        if (x == 0 && y == 0)
-        {
-            float sx = Godot.Input.GetJoyAxis(0, JoyAxis.LeftX), sy = Godot.Input.GetJoyAxis(0, JoyAxis.LeftY);
-            if (MathF.Abs(sx) >= StickThreshold && MathF.Abs(sx) >= MathF.Abs(sy) * 0.5f) x = MathF.Sign(sx);
-            if (MathF.Abs(sy) >= StickThreshold && MathF.Abs(sy) >= MathF.Abs(sx) * 0.5f) y = MathF.Sign(sy);
-        }
-        return (x, y);
-    }
-
-    private const float StickThreshold = 0.5f;
-
-    private static bool Held(Key arrow, Key letter, JoyButton button) =>
-        Godot.Input.IsKeyPressed(arrow) || Godot.Input.IsPhysicalKeyPressed(letter) || Godot.Input.IsJoyButtonPressed(0, button);
 
     private static bool Pressed(InputEvent e, Key key, JoyButton button) => e switch
     {

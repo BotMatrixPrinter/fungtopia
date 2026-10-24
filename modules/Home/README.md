@@ -9,8 +9,7 @@ through the Save module (see **Saving** below).
 
 - `Contract/` — `Fungtopia.Home.Contract` (namespace `Fungtopia.Home`): `HomeState`.
 - `Core/` — `Fungtopia.Home.Core`: `HomeModule`, the module's one `IModule`; `Furniture` (the
-  catalog), `HomeRoom` (the floor grid), `HomeText` (the texts, and the prompts and hint lines as RichTextLabel BBCode with button icons per device), `HomeSave` (the saved furniture's JSON), `MenuRepeat` (a held
-  menu direction: one step at once, repeating after a short delay).
+  catalog), `HomeRoom` (the floor grid), `HomeText` (the texts, and the prompts and hint lines as RichTextLabel BBCode with button icons per device), `HomeSave` (the saved furniture's JSON).
 - `Godot/` — `Main.tscn` with `HomeView` (furniture, the catalog book, pets at home, the grid and
   cursor while decorating), `HomePanels` (prompt, shop catalog and decorating help, a
   `CanvasLayer` on layer 11); `Glyphs/key_tab.svg` (the Tab key's icon, which the Input module lacks), `HomePetModel`, `HomeModels` (loads .glb models at run time, toon
@@ -30,7 +29,7 @@ Test it with `./test.sh Home` from the repository root.
 
 ## Core
 
-`HomeModule` reads `Fungtopia.Player.PlayerState`, `Fungtopia.Input.PlayerInput` (`Interact`), `Fungtopia.Input.ActiveDevice` (`Device`, for the prompts),
+`HomeModule` reads `Fungtopia.Player.PlayerState`, `Fungtopia.Input.PlayerInput` (`Interact`), `Fungtopia.Input.MenuNav` (menu steps), `Fungtopia.Input.ActiveDevice` (`Device`, for the prompts),
 `Fungtopia.Wallet.WalletState` and `SpendResult`, `Fungtopia.Pet.OwnedPets`,
 `Fungtopia.Wardrobe.WardrobeState`, `Fungtopia.StartScreen.StartScreenState` and `Fungtopia.Save.CollectSave` and
 `RestorePart`; it publishes `Fungtopia.Save.SavePart`, `Fungtopia.Player.TeleportPlayer`,
@@ -57,10 +56,11 @@ the start screen is open, below):
   (`DecorateFocusOwner`) each publish `UiFocus(owner, true)` at the tick they open and
   `UiFocus(owner, false)` at the tick they close, however they close (Back, walking away, leaving
   the house, fainting, a wardrobe screen or the start screen), so the Input module stops walking,
-  looking, jumping and firing while one is open. `Navigate(x, y, seconds)` takes the direction
-  the view reads as held each frame: one step at once when pressed, then after
-  `MenuRepeat.Delay` (0.35 s) one every `MenuRepeat.Interval` (0.12 s) while held; in the shop it
-  moves the highlight (Up / Down, wrapping), while decorating the cursor. `Confirm()` (Enter, A)
+  looking, jumping and firing while one is open. Selections move only on the Input module's
+  `MenuNav` steps (one when a direction is first pushed, then at most one per 0.2 s while held,
+  from the left stick, D-pad, arrow keys and WASD alike): in the shop each `Vertical` step moves
+  the highlight one line (wrapping), while decorating each step moves the cursor one cell; with no
+  panel open they do nothing. The module reads no stick or keys of its own for this. `Confirm()` (Enter, A)
   acts like an Interact press at the next tick, only while a panel is open.
 - **Catalog.** `Furniture.ForSale`, prices in M¢: Mushroom Bed 300, Rug 120, Lamp 150, Table 200,
   Chair 100, Potted Mushroom 80, Painting (on an easel) 250, Pet Bed 180, Bookshelf 220,
@@ -115,8 +115,8 @@ Input module):
 
 | Action | Keyboard | Gamepad |
 | --- | --- | --- |
-| Shop: choose | Up / Down, W / S (held: repeats) | D-pad up / down, left stick |
-| Decorating: move | Arrow keys, WASD (held: repeats) | D-pad, left stick |
+| Shop: choose | Up / Down, W / S (`MenuNav`) | D-pad up / down, left stick (`MenuNav`) |
+| Decorating: move | Arrow keys, WASD (`MenuNav`) | D-pad, left stick (`MenuNav`) |
 | Decorating: turn | R | RB |
 | Decorating: next item | Tab | LB |
 | Buy / place / pick up | E or Enter | A / Cross (X / Square, Interact, works too) |
@@ -134,7 +134,7 @@ each family's own icons. Icon sizes are parameters (`PromptIconSize` 40 next to 
 `HelpIconSize` 28 in the 18 px hints); the labels fit their content, so the panels grow with the
 icons. `HomePanels` makes each icon it shows loadable when Godot has not imported it (as the Input
 view does for its own), so the preview works without the Input module. E and
-X / Square arrive through the Input module's Interact; the rest the view reads itself. While a
+X / Square arrive through the Input module's Interact and the directions as its `MenuNav`; the rest the view reads itself. While a
 panel is open the player stands still (its `UiFocus` stops movement in the Input module); the
 player walks through furniture (it collides only with the Map's obstacles).
 

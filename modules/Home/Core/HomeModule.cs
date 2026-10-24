@@ -110,7 +110,7 @@ public struct HomePet
 public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessageHandler<PlayerInput>,
     IMessageHandler<SpendResult>, IMessageHandler<WalletState>, IMessageHandler<OwnedPets>, IMessageHandler<WardrobeState>,
     IMessageHandler<StartScreenState>, IMessageHandler<CollectSave>, IMessageHandler<RestorePart>,
-    IMessageHandler<ActiveDevice>
+    IMessageHandler<ActiveDevice>, IMessageHandler<MenuNav>
 {
     /// <summary>How many pieces of furniture the player can own.</summary>
     public const int MaxItems = 64;
@@ -153,7 +153,6 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
     private FurnitureKind _pendingKind;
     private uint _random = 0x9E3779B9u;
     private bool _shopFocus, _decorateFocus;
-    private MenuRepeat _navigation;
     private readonly FurnitureItem[] _restored = new FurnitureItem[MaxItems];
 
     public HomeModule()
@@ -255,6 +254,7 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
         bus.Subscribe<CollectSave>(this);
         bus.Subscribe<RestorePart>(this);
         bus.Subscribe<ActiveDevice>(this);
+        bus.Subscribe<MenuNav>(this);
     }
 
     public void Tick(in TickContext context)
@@ -439,25 +439,21 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
     }
 
     /// <summary>
-    /// The direction held in a panel (x right, y down, each -1, 0 or 1) after
-    /// <paramref name="seconds"/>: moves the shop's highlight (y) or the decorating cursor once when
-    /// pressed, then repeating after a short delay while held (<see cref="MenuRepeat"/>).
+    /// The Input module's paced menu step (one when a direction is first pushed, then at most one per
+    /// 0.2 s while held): moves the shop's highlight (Vertical) or the decorating cursor (both) by
+    /// one. Nothing when no panel is open.
     /// </summary>
-    public void Navigate(int x, int y, float seconds)
+    public void Handle(in MenuNav message)
     {
-        if (!ShopOpen && !Decorating)
+        if (ShopOpen)
         {
-            _navigation.Reset();
-            return;
+            if (message.Vertical != 0)
+                MoveShopSelection(message.Vertical);
         }
-        if (ShopOpen)
-            x = 0;
-        if (!_navigation.Step(Math.Sign(x), Math.Sign(y), seconds))
-            return;
-        if (ShopOpen)
-            MoveShopSelection(Math.Sign(y));
-        else
-            MoveCursor(Math.Sign(x), Math.Sign(y));
+        else if (Decorating && message.Any)
+        {
+            MoveCursor(message.Horizontal, message.Vertical);
+        }
     }
 
     private HomePrompt PromptAt(Vector3 p)

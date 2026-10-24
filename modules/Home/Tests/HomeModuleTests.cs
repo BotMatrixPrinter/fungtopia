@@ -329,65 +329,126 @@ public class HomeModuleTests
         Assert.Equal(8, bus.Focus.Count);
     }
 
+    /// <summary>
+    /// Stands in for the Input module's <see cref="MenuNav"/>, as its Contract describes it: one
+    /// step on the tick a direction is first pushed, then at most one per 0.2 s (12 ticks) while it
+    /// stays held, never two closer than that; every other tick an empty MenuNav.
+    /// </summary>
+    private sealed class FakeMenuNav
+    {
+        private const int RepeatTicks = 12; // 0.2 s at 60 ticks a second
+        private int _sinceStep = RepeatTicks;
+
+        /// <summary>One tick of Input then Home, with (x, y) held (x right, y down).</summary>
+        public void Tick(HomeModule home, FakeBus bus, int x, int y)
+        {
+            _sinceStep++;
+            var nav = default(MenuNav);
+            if ((x != 0 || y != 0) && _sinceStep >= RepeatTicks)
+            {
+                nav = y != 0 ? new MenuNav(y, 0) : new MenuNav(0, x);
+                _sinceStep = 0;
+            }
+            bus.Publish(nav);
+            home.Tick(Step);
+        }
+    }
+
     [Fact]
-    public void UpDownInTheShopPicksItemsAndRepeatsAfterAShortDelayWhenHeld()
+    public void AHeldDirectionInTheShopMovesOneItemPerFifthOfASecond()
     {
         var (home, bus) = Started(coins: 1000);
-        const float frame = 1f / 60f;
-        // No panel open: the direction does nothing.
-        home.Navigate(0, 1, frame);
+        var input = new FakeMenuNav();
+        // No panel open: steps do nothing.
+        input.Tick(home, bus, 0, 1);
         Assert.Equal(0, home.ShopSelection);
+        for (int t = 0; t < 30; t++)
+            input.Tick(home, bus, 0, 0);
 
         Interact(home, bus, Places.FurnitureShopSpot.Position);
-        home.Navigate(0, 1, frame); // Down pressed: one step at once
+        Assert.True(home.ShopOpen);
+        // Down held for one second (60 ticks): a step at once, then one every 12 ticks.
+        for (int t = 0; t < 60; t++)
+        {
+            input.Tick(home, bus, 0, 1);
+            Assert.Equal(t / 12 + 1, home.ShopSelection);
+        }
+        Assert.Equal(5, home.ShopSelection);
+        for (int t = 0; t < 30; t++)
+            input.Tick(home, bus, 0, 0);
+        Assert.Equal(5, home.ShopSelection);
+
+        // Left / right do nothing in the shop.
+        for (int t = 0; t < 30; t++)
+            input.Tick(home, bus, 1, 0);
+        Assert.Equal(5, home.ShopSelection);
+    }
+
+    [Fact]
+    public void AShortFlickMovesExactlyOneItemAndConfirmBuysIt()
+    {
+        var (home, bus) = Started(coins: 1000);
+        var input = new FakeMenuNav();
+        Interact(home, bus, Places.FurnitureShopSpot.Position);
+
+        // A stick flick lasting a few ticks: exactly one step.
+        for (int t = 0; t < 4; t++)
+            input.Tick(home, bus, 0, 1);
+        for (int t = 0; t < 30; t++)
+            input.Tick(home, bus, 0, 0);
         Assert.Equal(1, home.ShopSelection);
-        home.Navigate(0, 1, MenuRepeat.Delay - 2 * frame); // still held, before the delay
-        Assert.Equal(1, home.ShopSelection);
-        home.Navigate(0, 1, 2 * frame); // the delay is over: repeats
-        Assert.Equal(2, home.ShopSelection);
-        home.Navigate(0, 1, MenuRepeat.Interval);
-        Assert.Equal(3, home.ShopSelection);
-        home.Navigate(0, 0, frame); // let go
-        home.Navigate(0, -1, frame); // Up
-        Assert.Equal(2, home.ShopSelection);
-        home.Navigate(0, 0, frame);
-        home.Navigate(1, 0, frame); // left / right do nothing in the shop
-        Assert.Equal(2, home.ShopSelection);
-        home.Navigate(0, 0, frame);
-        home.Navigate(0, -1, frame);
-        home.Navigate(0, 0, frame);
-        home.Navigate(0, -1, frame);
-        home.Navigate(0, 0, frame);
-        home.Navigate(0, -1, frame); // wraps to the last line
-        Assert.Equal(Furniture.ForSale.Length - 1, home.ShopSelection);
+
+        // A one-tick flick up, then two more after a pause: wraps to the last line.
+        input.Tick(home, bus, 0, -1);
+        Assert.Equal(0, home.ShopSelection);
+        for (int k = 0; k < 2; k++)
+        {
+            for (int t = 0; t < 20; t++)
+                input.Tick(home, bus, 0, 0);
+            input.Tick(home, bus, 0, -1);
+        }
+        Assert.Equal(Furniture.ForSale.Length - 2, home.ShopSelection);
+
+        // Steps only come from MenuNav: a tick without one moves nothing.
+        bus.Publish(default(MenuNav));
+        home.Tick(Step);
+        Assert.Equal(Furniture.ForSale.Length - 2, home.ShopSelection);
 
         // Confirm (Enter / A) buys the highlighted item at the next tick, like E.
         home.Confirm();
         home.Tick(Step);
         var spend = Assert.Single(bus.Spends);
-        Assert.Equal(Furniture.Name(Furniture.ForSale[^1]), spend.What);
+        Assert.Equal(Furniture.Name(Furniture.ForSale[^2]), spend.What);
         Assert.Equal(ShopResult.Bought, home.LastShopResult);
     }
 
     [Fact]
-    public void DirectionsWhileDecoratingMoveTheCursorAndConfirmPlaces()
+    public void MenuNavWhileDecoratingMovesTheCursorAtTheSamePaceAndConfirmPlaces()
     {
         var (home, bus) = Started(coins: 1000);
+        var input = new FakeMenuNav();
         home.Buy(FurnitureKind.PottedMushroom);
         Inside(home, bus);
         home.StartDecorating();
         home.Tick(Step);
         Assert.True(home.Decorating);
         home.MoveCursor(-100, -100);
-        home.Navigate(1, 0, 0.016f);
-        home.Navigate(0, 0, 0.016f);
-        home.Navigate(0, 1, 0.016f);
-        home.Navigate(0, 1, MenuRepeat.Delay);
-        Assert.Equal((1, 2), (home.CursorColumn, home.CursorRow));
+
+        // A short flick right: one cell.
+        for (int t = 0; t < 3; t++)
+            input.Tick(home, bus, 1, 0);
+        for (int t = 0; t < 30; t++)
+            input.Tick(home, bus, 0, 0);
+        Assert.Equal((1, 0), (home.CursorColumn, home.CursorRow));
+        // Down held for 0.5 s (30 ticks): steps at ticks 0, 12 and 24.
+        for (int t = 0; t < 30; t++)
+            input.Tick(home, bus, 0, 1);
+        Assert.Equal((1, 3), (home.CursorColumn, home.CursorRow));
+
         home.Confirm();
         home.Tick(Step);
         Assert.True(home.Items[1].Placed);
-        Assert.Equal((1, 2), (home.Items[1].Column, home.Items[1].Row));
+        Assert.Equal((1, 3), (home.Items[1].Column, home.Items[1].Row));
 
         // Confirm with no panel open does nothing (it is not an Interact press).
         home.Back();
