@@ -5,11 +5,16 @@
 # Chunky, cute, mushroom-themed furniture: one object per kind, named like Fungtopia.Home's
 # FurnitureKind (BasicBed, MushroomBed, Rug, Lamp, Table, Chair, PottedMushroom, Painting, PetBed,
 # Bookshelf, ToadstoolStool) plus the CatalogBook on its stand and the Wardrobe that comes with
-# the house (no face: only creatures have eyes). Each stands on the floor at the
-# origin, centered on its footprint (width along X, depth along Blender Y = Godot Z, a little
+# the house. No eyes or faces on any of them (only creatures have faces). Each stands on the
+# floor at the origin, centered on its footprint (width along X, depth along Blender Y = Godot Z, a little
 # smaller than its 0.5 m grid cells), its back toward Blender +Y (Godot -Z, a wall) and its front
 # toward Blender -Y (Godot +Z, into the room). Materials carry plain colors only; the game draws
-# them toon-shaded with ink outlines.
+# them toon-shaded with ink outlines (the mushroom caps glossy, with a rim light).
+#
+# Mushrooms are vivid (the same rule for every mushroom in the game): caps a saturated, bright
+# cherry red or pink, crisp pure white spots, clean light cream stems, and the lamp glows. Other
+# bits that used to share those colors (the blanket's and pet bed's dots, the wardrobe's knobs, the
+# catalog's red dot, the painting's sun) keep their own materials and their old colors.
 import math
 import os
 
@@ -22,17 +27,23 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 COLORS = {
     "Wood": (0.72, 0.46, 0.28),
     "WoodDark": (0.5, 0.3, 0.18),
-    "Cap": (0.9, 0.3, 0.26),
-    "CapPink": (0.98, 0.6, 0.68),
+    "Cap": (0.93, 0.07, 0.1),
+    "CapPink": (1.0, 0.36, 0.64),
+    "CapGlow": (1.0, 0.42, 0.7),
     "CapLilac": (0.72, 0.58, 0.9),
-    "Spots": (1.0, 0.96, 0.86),
-    "Stem": (1.0, 0.92, 0.74),
+    "Spots": (1.0, 1.0, 1.0),
+    "Stem": (1.0, 0.96, 0.86),
+    "Dots": (1.0, 0.96, 0.86),
+    "Knob": (1.0, 0.92, 0.74),
+    "BookDot": (0.9, 0.3, 0.26),
+    "BookCover": (0.98, 0.6, 0.68),
     "Sheet": (0.98, 0.95, 0.9),
     "Blanket": (0.98, 0.58, 0.62),
     "Pillow": (0.86, 0.94, 1.0),
     "Rug": (0.62, 0.84, 0.66),
     "RugDots": (1.0, 0.95, 0.72),
     "Glow": (1.0, 0.9, 0.55),
+    "Sun": (1.0, 0.9, 0.55),
     "Pot": (0.86, 0.5, 0.34),
     "Soil": (0.36, 0.24, 0.16),
     "Leaf": (0.46, 0.76, 0.38),
@@ -44,9 +55,6 @@ COLORS = {
     "BookGreen": (0.44, 0.74, 0.46),
     "BookYellow": (0.98, 0.8, 0.36),
     "Page": (1.0, 0.98, 0.92),
-    "Eye": (0.16, 0.08, 0.06),
-    "EyeShine": (1.0, 1.0, 1.0),
-    "Blush": (1.0, 0.55, 0.6),
 }
 ORDER = list(COLORS)
 
@@ -151,18 +159,6 @@ def spots_on_dome(piece, radius, height, base, count=6, size=0.16, mat="Spots", 
     piece.add(sphere(radius * size * 1.1, base @ T(0, 0, height), scale=(1, 1, 0.4), segments=12, rings=6), mat)
 
 
-def face(piece, matrix, scale=1.0, blush=True):
-    """Big round cute eyes (with sparkles) and rosy cheeks, looking along Blender -Y from `matrix`."""
-    for side in (-1, 1):
-        piece.add(sphere(0.035 * scale, matrix @ T(side * 0.05 * scale, 0, 0), scale=(1, 0.5, 1.2),
-                         segments=14, rings=7), "Eye")
-        piece.add(sphere(0.012 * scale, matrix @ T(side * 0.05 * scale + 0.012 * scale, -0.018 * scale, 0.018 * scale),
-                         segments=8, rings=4), "EyeShine")
-        if blush:
-            piece.add(sphere(0.022 * scale, matrix @ T(side * 0.095 * scale, 0.004 * scale, -0.04 * scale),
-                             scale=(1.2, 0.35, 0.7), segments=10, rings=5), "Blush")
-
-
 def bed(name, width, mushroom):
     p = Piece(name)
     depth = 1.9
@@ -175,16 +171,15 @@ def bed(name, width, mushroom):
     p.add(box((width - 0.02, depth * 0.62, 0.08), T(0, -depth * 0.18, 0.46), bevel=0.04), "Blanket")
     for i, (x, y) in enumerate(((-0.25, -0.5), (0.2, -0.2), (-0.1, 0.1), (0.3, -0.7), (-0.32, -0.15))):
         if abs(x) < width / 2 - 0.08:
-            p.add(sphere(0.06, T(x, y, 0.5), scale=(1, 1, 0.3), segments=12, rings=6), "Spots")
+            p.add(sphere(0.06, T(x, y, 0.5), scale=(1, 1, 0.3), segments=12, rings=6), "Dots")
     p.add(box((width * 0.7, 0.34, 0.14), T(0, depth / 2 - 0.3, 0.52), bevel=0.06), "Pillow")
     # Headboard against the wall.
     if mushroom:
-        # A big upright mushroom cap with a face, standing on a short stem.
+        # A big upright spotted mushroom cap, standing on a short stem.
         back = depth / 2 - 0.1
         p.add(box((width * 0.3, 0.14, 0.5), T(0, back, 0.5)), "Stem")
         p.add(dome(width * 0.6, 0.62, T(0, back, 0.72) @ S(1, 0.22, 1)), "Cap")
         front = back - 0.125
-        face(p, T(0, front, 0.98), scale=1.8)
         for x, z, r in ((-0.6, 0.85, 0.08), (0.62, 0.86, 0.07), (-0.32, 1.18, 0.06), (0.36, 1.15, 0.065), (0, 1.3, 0.05)):
             p.add(sphere(r, T(x * width * 0.6, front + 0.01, z), scale=(1, 0.35, 1), segments=12, rings=6), "Spots")
     else:
@@ -208,13 +203,12 @@ def rug():
 
 def lamp():
     p = Piece("Lamp")
-    # A little mushroom floor lamp: a stem on a round foot, a glowing cap shade with eyes.
+    # A little mushroom floor lamp: a stem on a round foot, a glowing pink cap shade.
     p.add(cylinder(0.17, 0.05, T(0, 0, 0.025)), "WoodDark")
     p.add(cylinder(0.04, 0.85, T(0, 0, 0.47)), "Stem")
     p.add(sphere(0.1, T(0, 0, 0.9), scale=(1, 1, 0.8)), "Glow")
-    p.add(dome(0.24, 0.2, T(0, 0, 0.92)), "CapPink")
+    p.add(dome(0.24, 0.2, T(0, 0, 0.92)), "CapGlow")
     spots_on_dome(p, 0.24, 0.2, T(0, 0, 0.92), count=5, size=0.2)
-    face(p, T(0, -0.2, 1.0), scale=0.9, blush=False)
     return p.finish()
 
 
@@ -248,14 +242,13 @@ def chair():
 
 def potted_mushroom():
     p = Piece("PottedMushroom")
-    # A terracotta pot with a cheeky little mushroom (with a face) and two leaves.
+    # A terracotta pot with a little spotted mushroom and two leaves.
     p.add(cylinder(0.13, 0.22, T(0, 0, 0.11), radius2=0.17), "Pot")
     p.add(cylinder(0.18, 0.05, T(0, 0, 0.23)), "Pot")
     p.add(cylinder(0.155, 0.02, T(0, 0, 0.25)), "Soil")
     p.add(cylinder(0.05, 0.2, T(0, 0, 0.35), radius2=0.045), "Stem")
     p.add(dome(0.16, 0.13, T(0, 0, 0.44)), "Cap")
     spots_on_dome(p, 0.16, 0.13, T(0, 0, 0.44), count=5, size=0.22)
-    face(p, T(0, -0.05, 0.37), scale=0.55, blush=True)
     p.add(sphere(0.06, T(0.09, 0, 0.29) @ R("Y", 40), scale=(1.4, 0.6, 0.3)), "Leaf")
     p.add(sphere(0.05, T(-0.09, 0.02, 0.28) @ R("Y", -40), scale=(1.4, 0.6, 0.3)), "Leaf")
     return p.finish()
@@ -273,7 +266,7 @@ def painting():
     p.add(box((0.38, 0.021, 0.1), T(0, -0.081, 0.52), bevel=0.0), "Leaf")
     p.add(box((0.04, 0.02, 0.1), T(0.02, -0.092, 0.6), bevel=0.0), "Stem")
     p.add(dome(0.1, 0.08, T(0.02, -0.095, 0.64) @ S(1, 0.15, 1)), "Cap")
-    p.add(sphere(0.03, T(0.13, -0.095, 0.79), scale=(1, 0.2, 1), segments=10, rings=5), "Glow")
+    p.add(sphere(0.03, T(0.13, -0.095, 0.79), scale=(1, 0.2, 1), segments=10, rings=5), "Sun")
     return p.finish()
 
 
@@ -289,7 +282,7 @@ def pet_bed():
     for i in range(5):
         a = 2 * math.pi * i / 5
         p.add(sphere(0.04, T(math.cos(a) * 0.38, math.sin(a) * 0.38, 0.25), scale=(1, 1, 0.4), segments=10, rings=5),
-              "Spots")
+              "Dots")
     return p.finish()
 
 
@@ -318,17 +311,15 @@ def bookshelf():
     p.add(cylinder(0.035, 0.12, T(0.35, 0, h + 0.06)), "Stem")
     p.add(dome(0.12, 0.1, T(0.35, 0, h + 0.11)), "CapPink")
     spots_on_dome(p, 0.12, 0.1, T(0.35, 0, h + 0.11), count=4, size=0.22)
-    face(p, T(0.35, -0.04, h + 0.06), scale=0.4, blush=False)
     return p.finish()
 
 
 def toadstool_stool():
     p = Piece("ToadstoolStool")
-    # A toadstool to sit on: a fat stem, a red spotted cap seat, and a sleepy-cute face.
+    # A toadstool to sit on: a fat stem and a red spotted cap seat.
     p.add(cylinder(0.12, 0.32, T(0, 0, 0.16), radius2=0.1), "Stem")
     p.add(dome(0.22, 0.14, T(0, 0, 0.3)), "Cap")
     spots_on_dome(p, 0.22, 0.14, T(0, 0, 0.3), count=6, size=0.18)
-    face(p, T(0, -0.11, 0.17), scale=0.6)
     return p.finish()
 
 
@@ -341,8 +332,8 @@ def catalog_book():
     tilt = T(0, -0.01, 0.9) @ R("X", 20)
     for side in (-1, 1):
         p.add(box((0.2, 0.3, 0.03), tilt @ T(side * 0.105, 0, 0) @ R("Y", side * -6), bevel=0.01), "Page")
-    p.add(box((0.44, 0.32, 0.02), tilt @ T(0, 0, -0.02), bevel=0.01), "CapPink")
-    p.add(sphere(0.03, tilt @ T(-0.1, -0.02, 0.025), scale=(1, 1, 0.3), segments=10, rings=5), "Cap")
+    p.add(box((0.44, 0.32, 0.02), tilt @ T(0, 0, -0.02), bevel=0.01), "BookCover")
+    p.add(sphere(0.03, tilt @ T(-0.1, -0.02, 0.025), scale=(1, 1, 0.3), segments=10, rings=5), "BookDot")
     p.add(box((0.1, 0.012, 0.004), tilt @ T(0.1, 0.05, 0.02), bevel=0.0), "BookBlue")
     p.add(box((0.1, 0.012, 0.004), tilt @ T(0.1, 0.0, 0.02), bevel=0.0), "BookBlue")
     return p.finish()
@@ -352,7 +343,7 @@ def wardrobe():
     p = Piece("Wardrobe")
     # A big, chunky wooden wardrobe (1.5 x 1 m of floor, 2.2 m tall): stubby round feet, two
     # rounded doors with mushroom-shaped panels and round knobs, a drawer below, and a spotted
-    # mushroom-cap crown on top. No face.
+    # mushroom-cap crown on top.
     w, d, h = 1.38, 0.78, 1.9
     for x in (-1, 1):
         for y in (-1, 1):
@@ -362,7 +353,7 @@ def wardrobe():
     front = -d / 2
     # The drawer with a little handle.
     p.add(box((w - 0.16, 0.05, 0.26), T(0, front - 0.005, 0.32), bevel=0.04), "WoodDark")
-    p.add(sphere(0.04, T(0, front - 0.04, 0.32), scale=(1.6, 0.8, 0.8), segments=12, rings=6), "Stem")
+    p.add(sphere(0.04, T(0, front - 0.04, 0.32), scale=(1.6, 0.8, 0.8), segments=12, rings=6), "Knob")
     # Two doors, a seam between them; each door has a mushroom panel (stem and spotted cap).
     door_w, door_h, door_z = w / 2 - 0.1, 1.28, 1.15
     for side in (-1, 1):
@@ -372,7 +363,7 @@ def wardrobe():
         p.add(sphere(0.2, T(x, front - 0.03, door_z), scale=(1, 0.2, 0.55)), "Cap")
         for dx, dz, r in ((-0.09, 0.02, 0.032), (0.08, 0.04, 0.028), (0.0, 0.07, 0.024)):
             p.add(sphere(r, T(x + dx, front - 0.066, door_z + dz), scale=(1, 0.4, 1), segments=10, rings=5), "Spots")
-        p.add(sphere(0.045, T(side * 0.07, front - 0.05, door_z - 0.35), segments=14, rings=7), "Stem")
+        p.add(sphere(0.045, T(side * 0.07, front - 0.05, door_z - 0.35), segments=14, rings=7), "Knob")
     p.add(box((0.02, 0.05, door_h), T(0, front - 0.012, door_z), bevel=0.0), "WoodDark")
     # The mushroom-cap crown on top, with spots.
     p.add(cylinder(0.16, 0.12, T(0, 0, h + 0.13)), "Stem")

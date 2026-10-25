@@ -10,6 +10,10 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="4.0.1" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Plain C# (no Godot): how the view shades each material, checked by MushroomLookTests. -->
+    <Compile Include="../Godot/HomeLook.cs" Link="HomeLook.cs" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="../Core/Fungtopia.Home.Core.csproj" />
     <ProjectReference Include="../Contract/Fungtopia.Home.Contract.csproj" />
     <ProjectReference Include="../../../shell/Contract/Fungtopia.Shell.Contract.csproj" />

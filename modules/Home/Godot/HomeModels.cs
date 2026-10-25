@@ -52,14 +52,16 @@ public static class HomeModels
         s_scenes.Clear();
     }
 
-    /// <summary>A plain toon material (for shapes made in code).</summary>
-    public static ShaderMaterial Toon(Color color, bool outline = true, float glow = 0f)
+    /// <summary>A plain toon material (for shapes made in code); <paramref name="gloss"/> and <paramref name="rim"/> as in <see cref="HomeLook"/>.</summary>
+    public static ShaderMaterial Toon(Color color, bool outline = true, float glow = 0f, float gloss = 0f, float rim = HomeLook.Rim)
     {
         s_toon ??= GD.Load<Shader>(Shaders + "toon.gdshader");
         s_outline ??= new ShaderMaterial { Shader = GD.Load<Shader>(Shaders + "outline.gdshader") };
         var material = new ShaderMaterial { Shader = s_toon };
         material.SetShaderParameter("albedo", color);
         material.SetShaderParameter("self_light", glow);
+        material.SetShaderParameter("gloss", gloss);
+        material.SetShaderParameter("rim", rim);
         if (outline)
             material.NextPass = s_outline;
         return material;
@@ -108,8 +110,8 @@ public static class HomeModels
         if (s_materials.TryGetValue(key, out var cached))
             return cached;
         // glTF stores linear colors; the shader's albedo is an sRGB color like Blender's swatch.
-        float glow = name is "EyeShine" ? 0.6f : name is "Glow" ? 1.2f : 0f;
-        var material = Toon(color.SrgbToLinear(), !NoOutline.Contains(name), glow);
+        var material = Toon(color.SrgbToLinear(), !NoOutline.Contains(name), HomeLook.Glow(name),
+            HomeLook.Gloss(name), HomeLook.RimLight(name));
         s_materials[key] = material;
         return material;
     }

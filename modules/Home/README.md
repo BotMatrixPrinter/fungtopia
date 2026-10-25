@@ -13,11 +13,12 @@ through the Save module (see **Saving** below).
 - `Godot/` — `Main.tscn` with `HomeView` (furniture, the catalog book, pets at home, the grid and
   cursor while decorating), `HomePanels` (prompt, shop catalog and decorating help, a
   `CanvasLayer` on layer 11); `Glyphs/key_tab.svg` (the Tab key's icon, which the Input module lacks), `HomePetModel`, `HomeModels` (loads .glb models at run time, toon
-  materials); `Preview.tscn` (a decorated room, for screenshots); `Shaders/` (toon surface, ink
+  materials), `HomeLook` (each material's glow, gloss and rim, plain C#); `Preview.tscn` (a decorated room, for screenshots); `Shaders/` (toon surface, ink
   outline, floor grid).
 - `Models/` — `furniture.py`, the Blender script that builds and exports `furniture.glb` next to it.
 - `Tests/` — `HomeModuleTests.cs`: xUnit tests of `HomeModule` with a fake `IMessageBus` (which
-  also answers `SpendCoins` like the wallet and records `UiFocus`).
+  also answers `SpendCoins` like the wallet and records `UiFocus`), and `MushroomLookTests`
+  (`furniture.glb`'s colors and faces, read back, and `HomeLook`).
 
 Test it with `./test.sh Home` from the repository root.
 
@@ -106,7 +107,9 @@ Pet Bed 2 x 2, Bookshelf 3 x 1, the rest 1 x 1. No allocations per tick.
 ## View
 
 `HomeView` draws the wardrobe and each placed item from `furniture.glb` at its footprint's center, turned by its
-rotation; while decorating it shows a soft grid over the floor and the held item floating at the
+rotation, toon-shaded (`HomeLook`): mushroom caps (`Cap`, `CapPink`, `CapGlow`, the pets' mushroom
+hats included) get a small soft white specular band and a brighter rim light (0.6, everything else
+0.3); the lamp's `Glow` bulb glows at 2.4 (twice its old 1.2) and its `CapGlow` cap at 0.5; while decorating it shows a soft grid over the floor and the held item floating at the
 cursor over a green (fits) or red (does not) footprint. The pets at home use the Pet module's
 models (`modules/Pet/Models/*.glb`, loaded read-only at run time; nothing shows if they are
 missing) with their own simple animation: a bouncy walk, hops while playing, curled up with
@@ -143,13 +146,19 @@ player walks through furniture (it collides only with the Map's obstacles).
 `blender -b --factory-startup --python modules/Home/Models/furniture.py` (from the repository
 root) writes `furniture.glb`; commit it with the script. One object per `FurnitureKind` plus
 `CatalogBook` and `Wardrobe`, each on the floor at the origin, centered on its footprint, front toward Godot +Z:
-a wooden bed with a spotted blanket; a bed with a big spotted mushroom-cap headboard with a face;
-an oval green polka-dot rug; a mushroom lamp with a glowing pink cap and eyes; a round spotted
-mushroom table; a chair with a mushroom-cap back; a potted mushroom with a face; an easel with a
-mushroom painting; a puffy lilac pet bed; a bookshelf of colorful books; a toadstool stool with a
-face; a mushroom-stem lectern with an open pink book; the `Wardrobe`: a big wooden wardrobe on round
-feet, two doors with spotted mushroom panels and round knobs, a drawer, a mushroom-cap crown (no
-face).
+a wooden bed with a spotted blanket; a bed with a big spotted mushroom-cap headboard; an oval
+green polka-dot rug; a mushroom lamp with a glowing pink cap; a round spotted mushroom table; a
+chair with a mushroom-cap back; a potted mushroom; an easel with a mushroom painting (and a little
+sun); a puffy lilac pet bed; a bookshelf of colorful books with two little mushrooms; a toadstool
+stool; a mushroom-stem lectern with an open pink book; the `Wardrobe`: a big wooden wardrobe on round
+feet, two doors with spotted mushroom panels and round knobs, a drawer, a mushroom-cap crown. No
+object has eyes or a face (only creatures do).
+
+The mushrooms are vivid, as everywhere in the game: caps a cherry red `Cap` (0.93, 0.07, 0.1) or a
+bright pink `CapPink` (1, 0.36, 0.64), the lamp's cap `CapGlow` (1, 0.42, 0.7); spots a pure white
+`Spots` (1, 1, 1); stems a light cream `Stem` (1, 0.96, 0.86). The bits that are not mushrooms keep
+their old colors in their own materials: the blanket's and pet bed's dots `Dots`, the wardrobe's
+knobs and handle `Knob`, the catalog's cover `BookCover` (0.98, 0.6, 0.68) and red dot `BookDot`, the painting's sun `Sun`.
 
 ## Screenshots
 

@@ -1,7 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Numerics;
+using System.Text.Json;
+using Fungtopia.Home.View;
 using Fungtopia.Input;
 using Fungtopia.Map;
 using Fungtopia.Pet;
@@ -1213,5 +1216,162 @@ public class HomeModuleTests
         bus.Publish(new RestorePart(SaveModules.Home, json));
         Assert.Equal(1, home.ItemCount);
         Assert.Single(logs);
+    }
+}
+
+/// <summary>
+/// The furniture's mushrooms are vivid (furniture.glb, built by Models/furniture.py, read back, and
+/// <see cref="HomeLook"/>, how the view shades each material): saturated bright caps with a glossy
+/// band and a rim light, pure white spots, light cream stems, a lamp glowing twice as bright, no
+/// faces on any object, and every other color as it was.
+/// </summary>
+public class MushroomLookTests
+{
+    private static readonly string[] Caps = { "Cap", "CapPink", "CapGlow" };
+    private static readonly string[] FaceParts = { "Eye", "EyeShine", "Blush", "Mouth" };
+
+    /// <summary>The colors of everything that is not a mushroom, as they were before mushrooms got vivid.</summary>
+    private static readonly Dictionary<string, (float R, float G, float B)> Unchanged = new()
+    {
+        ["Wood"] = (0.72f, 0.46f, 0.28f), ["WoodDark"] = (0.5f, 0.3f, 0.18f), ["CapLilac"] = (0.72f, 0.58f, 0.9f),
+        ["Dots"] = (1.0f, 0.96f, 0.86f), ["Knob"] = (1.0f, 0.92f, 0.74f), ["BookDot"] = (0.9f, 0.3f, 0.26f),
+        ["BookCover"] = (0.98f, 0.6f, 0.68f),
+        ["Sheet"] = (0.98f, 0.95f, 0.9f), ["Blanket"] = (0.98f, 0.58f, 0.62f), ["Pillow"] = (0.86f, 0.94f, 1.0f),
+        ["Rug"] = (0.62f, 0.84f, 0.66f), ["RugDots"] = (1.0f, 0.95f, 0.72f), ["Glow"] = (1.0f, 0.9f, 0.55f),
+        ["Sun"] = (1.0f, 0.9f, 0.55f), ["Pot"] = (0.86f, 0.5f, 0.34f), ["Soil"] = (0.36f, 0.24f, 0.16f),
+        ["Leaf"] = (0.46f, 0.76f, 0.38f), ["Canvas"] = (0.96f, 0.98f, 0.9f), ["Sky"] = (0.62f, 0.84f, 1.0f),
+        ["Cushion"] = (0.66f, 0.78f, 0.98f), ["BookRed"] = (0.9f, 0.36f, 0.36f), ["BookBlue"] = (0.4f, 0.58f, 0.92f),
+        ["BookGreen"] = (0.44f, 0.74f, 0.46f), ["BookYellow"] = (0.98f, 0.8f, 0.36f), ["Page"] = (1.0f, 0.98f, 0.92f),
+    };
+
+    /// <summary>furniture.glb read back: each material's base color, and the materials each object uses.</summary>
+    private sealed class Furniture
+    {
+        public readonly Dictionary<string, (float R, float G, float B)> Colors = new();
+        public readonly Dictionary<string, HashSet<string>> Uses = new();
+
+        public Furniture()
+        {
+            var dir = new DirectoryInfo(AppContext.BaseDirectory);
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "project.godot")))
+                dir = dir.Parent;
+            Assert.NotNull(dir);
+            var bytes = File.ReadAllBytes(Path.Combine(dir!.FullName, "modules", "Home", "Models", "furniture.glb"));
+            int length = BitConverter.ToInt32(bytes, 12);
+            var json = JsonDocument.Parse(new ReadOnlyMemory<byte>(bytes, 20, length)).RootElement;
+            var materials = json.GetProperty("materials").EnumerateArray().ToArray();
+            string[] names = materials.Select(m => m.GetProperty("name").GetString()!).ToArray();
+            for (int i = 0; i < materials.Length; i++)
+            {
+                var c = materials[i].TryGetProperty("pbrMetallicRoughness", out var pbr) && pbr.TryGetProperty("baseColorFactor", out var f)
+                    ? f.EnumerateArray().Select(x => x.GetSingle()).ToArray() : new[] { 1f, 1f, 1f };
+                Colors[names[i]] = (c[0], c[1], c[2]);
+            }
+            var meshes = json.GetProperty("meshes");
+            foreach (var node in json.GetProperty("nodes").EnumerateArray())
+                if (node.TryGetProperty("mesh", out var mesh))
+                    Uses[node.GetProperty("name").GetString()!] = meshes[mesh.GetInt32()].GetProperty("primitives").EnumerateArray()
+                        .Select(p => names[p.GetProperty("material").GetInt32()]).ToHashSet();
+        }
+    }
+
+    private static readonly Furniture s_glb = new();
+
+    private static (float H, float S, float V) Hsv((float R, float G, float B) c)
+    {
+        float max = MathF.Max(c.R, MathF.Max(c.G, c.B)), min = MathF.Min(c.R, MathF.Min(c.G, c.B)), d = max - min;
+        float h = d == 0 ? 0 : max == c.R ? 60 * (((c.G - c.B) / d + 6) % 6) : max == c.G ? 60 * ((c.B - c.R) / d + 2) : 60 * ((c.R - c.G) / d + 4);
+        return (h, max == 0 ? 0 : d / max, max);
+    }
+
+    [Fact]
+    public void NoObjectHasEyesOrAFace()
+    {
+        foreach (var (name, used) in s_glb.Uses)
+            Assert.True(!used.Overlaps(FaceParts), $"{name} has a face ({string.Join(", ", used.Intersect(FaceParts))})");
+        Assert.DoesNotContain(s_glb.Colors.Keys, FaceParts.Contains);
+    }
+
+    [Fact]
+    public void MushroomCapsAreSaturatedAndBrightAndTheRedIsAPureCherryRed()
+    {
+        foreach (var cap in Caps)
+        {
+            var (_, sat, value) = Hsv(s_glb.Colors[cap]);
+            Assert.True(sat >= 0.55f, $"{cap} is dull (saturation {sat})");
+            Assert.True(value >= 0.9f, $"{cap} is dark (value {value})");
+        }
+        var red = s_glb.Colors["Cap"];
+        var (hue, s, _) = Hsv(red);
+        Assert.True(hue < 6f || hue > 354f, $"the red cap is not a pure red (hue {hue})");
+        Assert.True(s >= 0.85f && red.G < 0.15f && red.B < 0.15f, $"the red cap is brownish or pinkish ({red})");
+        // Brighter and richer than before: (0.9, 0.3, 0.26) and pink (0.98, 0.6, 0.68).
+        Assert.True(s > Hsv((0.9f, 0.3f, 0.26f)).S + 0.2f);
+        Assert.True(Hsv(s_glb.Colors["CapPink"]).S > Hsv((0.98f, 0.6f, 0.68f)).S + 0.2f);
+    }
+
+    [Fact]
+    public void SpotsArePureWhiteAndStemsACleanLightCream()
+    {
+        Assert.Equal((1f, 1f, 1f), s_glb.Colors["Spots"]);
+        var (r, g, b) = s_glb.Colors["Stem"];
+        Assert.True(r >= 0.98f && g >= 0.93f && b >= 0.8f && b < g && g <= r, $"the stem is not a light cream ({r}, {g}, {b})");
+        Assert.True(Hsv((r, g, b)).S < 0.2f, "the stem is too yellow");
+    }
+
+    [Fact]
+    public void EveryMushroomIsDrawnWithTheMushroomMaterials()
+    {
+        foreach (var name in new[] { "MushroomBed", "Lamp", "Table", "Chair", "PottedMushroom", "Painting", "Bookshelf", "ToadstoolStool", "Wardrobe" })
+            Assert.True(s_glb.Uses[name].Overlaps(Caps), $"{name} has no mushroom cap");
+        foreach (var name in new[] { "MushroomBed", "Lamp", "Table", "PottedMushroom", "Bookshelf", "ToadstoolStool", "Wardrobe", "CatalogBook" })
+            Assert.Contains("Stem", s_glb.Uses[name]);
+        foreach (var name in new[] { "MushroomBed", "Lamp", "PottedMushroom", "Bookshelf", "ToadstoolStool", "Wardrobe", "Table", "Chair" })
+            Assert.Contains("Spots", s_glb.Uses[name]);
+        Assert.Contains("CapGlow", s_glb.Uses["Lamp"]);
+        Assert.Contains("Glow", s_glb.Uses["Lamp"]);
+        // The non-mushroom dots and knobs keep their own colors.
+        Assert.DoesNotContain("Spots", s_glb.Uses["BasicBed"]);
+        Assert.DoesNotContain("Spots", s_glb.Uses["PetBed"]);
+        Assert.DoesNotContain("Glow", s_glb.Uses["Painting"]);
+        // The catalog's cover is a book, not a mushroom: its own old pink, no cap material.
+        Assert.False(s_glb.Uses["CatalogBook"].Overlaps(Caps), "the catalog's cover uses a mushroom cap material");
+        Assert.Contains("BookCover", s_glb.Uses["CatalogBook"]);
+    }
+
+    [Fact]
+    public void EveryOtherColorStaysAsItWas()
+    {
+        var mushroom = new HashSet<string>(Caps) { "Spots", "Stem" };
+        foreach (var name in s_glb.Colors.Keys)
+            Assert.True(mushroom.Contains(name) || Unchanged.ContainsKey(name), $"new material {name}: is it a mushroom?");
+        foreach (var (name, (r, g, b)) in Unchanged)
+        {
+            if (!s_glb.Colors.TryGetValue(name, out var c))
+                continue;
+            Assert.True(MathF.Abs(c.R - r) < 0.002f && MathF.Abs(c.G - g) < 0.002f && MathF.Abs(c.B - b) < 0.002f, $"{name} changed to {c}");
+        }
+    }
+
+    [Fact]
+    public void CapsAreGlossyWithARimLightAndTheLampGlowsTwiceAsBright()
+    {
+        foreach (var cap in Caps)
+        {
+            Assert.True(HomeLook.Gloss(cap) > 0f, $"{cap} has no glossy highlight");
+            Assert.True(HomeLook.RimLight(cap) > HomeLook.Rim, $"{cap} has no brighter rim");
+        }
+        Assert.Equal(2f * 1.2f, HomeLook.Glow("Glow"), 4);
+        Assert.True(HomeLook.Glow("CapGlow") > 0f, "the lamp's cap does not glow");
+        // Nothing else changes: no gloss, the old rim, the old glows (the painting's sun, the pets' eye sparkles).
+        foreach (var other in Unchanged.Keys.Concat(new[] { "Spots", "Stem", "CatFur", "DogFur", "Eye", "EyeShine" }))
+        {
+            Assert.Equal(0f, HomeLook.Gloss(other));
+            Assert.Equal(HomeLook.Rim, HomeLook.RimLight(other));
+        }
+        Assert.Equal(0.3f, HomeLook.Rim);
+        Assert.Equal(1.2f, HomeLook.Glow("Sun"));
+        Assert.Equal(0.6f, HomeLook.Glow("EyeShine"));
+        Assert.Equal(0f, HomeLook.Glow("Wood"));
     }
 }
