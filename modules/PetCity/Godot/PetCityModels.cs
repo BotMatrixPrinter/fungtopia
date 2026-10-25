@@ -6,7 +6,8 @@ namespace Fungtopia.PetCity.View;
 /// <summary>
 /// Loads petcity.glb at run time and draws its objects toon-shaded with ink outlines. Materials are
 /// shared by name, so the city's windows, sign and lamps light up together at night; a city block's
-/// "Wall" and "Roof" are recolored per style.
+/// "Wall" and "Roof" are recolored per style, and its mushroom cap roof ("CapRoof") per style from
+/// <see cref="PetCityLook.StyleCaps"/>. Mushroom caps get <see cref="PetCityLook"/>'s gloss and rim.
 /// </summary>
 public static class PetCityModels
 {
@@ -14,10 +15,10 @@ public static class PetCityModels
     private const string Shaders = "res://modules/PetCity/Godot/Shaders/";
 
     /// <summary>Surfaces drawn without an ink outline (glass, water and small soft details).</summary>
-    private static readonly HashSet<string> NoOutline = new() { "EyeShine", "Blush", "Window", "Water", "Glow" };
+    private static readonly HashSet<string> NoOutline = new() { "EyeShine", "Blush", "Window", "Water", "Glow", "LampGlow" };
 
     /// <summary>Surfaces that glow at night: windows, lamps, the sign's letters and hearts.</summary>
-    private static readonly HashSet<string> NightGlow = new() { "Window", "Glow", "SignText", "Heart" };
+    private static readonly HashSet<string> NightGlow = new() { "Window", "Glow", "LampGlow", "SignText", "Heart" };
 
     private static readonly Color WindowDay = new(0.56f, 0.78f, 0.96f);
     private static readonly Color WindowNight = new(1f, 0.84f, 0.5f);
@@ -29,7 +30,7 @@ public static class PetCityModels
     private static readonly Dictionary<string, Color> s_baseColors = new();
 
     /// <summary>A fresh copy of the object <paramref name="name"/> (or null when missing), keeping its own transform.</summary>
-    public static Node3D? Instance(string name, Color? wall = null, Color? roof = null)
+    public static Node3D? Instance(string name, Color? wall = null, Color? roof = null, Color? cap = null)
     {
         if (s_scene == null)
         {
@@ -53,7 +54,7 @@ public static class PetCityModels
         {
             var original = source.Mesh.SurfaceGetMaterial(i);
             string material = original?.ResourceName ?? "";
-            var color = material == "Wall" ? wall : material == "Roof" ? roof : null;
+            var color = material == "Wall" ? wall : material == "Roof" ? roof : material == "CapRoof" ? cap : null;
             copy.SetSurfaceOverrideMaterial(i, ToonMaterial(original, color));
         }
         return copy;
@@ -74,10 +75,19 @@ public static class PetCityModels
             }
             else
             {
-                material.SetShaderParameter("self_light", night ? (name == "Glow" ? 1.6f : 0.7f) : (name == "Glow" ? 0.5f : 0f));
+                float glow = name switch
+                {
+                    "LampGlow" => night ? PetCityLook.LampGlowNight : PetCityLook.GlowDay,
+                    "Glow" => night ? PetCityLook.GlowNight : PetCityLook.GlowDay,
+                    _ => night ? 0.7f : 0f,
+                };
+                material.SetShaderParameter("self_light", glow);
             }
         }
     }
+
+    /// <summary>A Godot color from a <see cref="Swatch"/>.</summary>
+    public static Color ColorOf(Swatch swatch) => new(swatch.R, swatch.G, swatch.B);
 
     /// <summary>A plain toon material.</summary>
     public static ShaderMaterial Toon(Color color, bool outline = true, float glow = 0f)
@@ -131,8 +141,13 @@ public static class PetCityModels
         string key = name + "#" + color.ToHtml();
         if (s_materials.TryGetValue(key, out var cached))
             return cached;
-        float glow = name is "EyeShine" ? 0.6f : name is "Glow" ? 0.5f : name is "Window" ? 0.12f : name is "Water" ? 0.25f : 0f;
+        float glow = name is "EyeShine" ? 0.6f : name is "Glow" or "LampGlow" ? PetCityLook.GlowDay : name is "Window" ? 0.12f : name is "Water" ? 0.25f : 0f;
         var material = Toon(color, !NoOutline.Contains(name), glow);
+        if (PetCityLook.IsCap(name))
+        {
+            material.SetShaderParameter("gloss", PetCityLook.CapGloss);
+            material.SetShaderParameter("rim_light", PetCityLook.CapRim);
+        }
         s_materials[key] = material;
         return material;
     }

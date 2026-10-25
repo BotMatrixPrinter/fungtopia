@@ -3,7 +3,8 @@
 #   blender -b --factory-startup --python modules/PetCity/Models/petcity.py
 #
 # Chunky, cute cartoon city pieces (one object each; materials carry plain colors only, the game
-# draws them toon-shaded with ink outlines and recolors "Wall" and "Roof" per building):
+# draws them toon-shaded with ink outlines, recolors "Wall" and "Roof" per building and "CapRoof" (a
+# block's mushroom cap roof) per style, and gives the mushroom caps a glossy highlight):
 #   Tower3 .. Tower10   a tall city block on a 12 m x 12 m footprint: a 4 m shop floor (shop window,
 #                       door, striped awning) and 3 .. 10 upper stories of 3 m with arched windows on
 #                       every side; its top at 4 + 3 n m, where a roof goes.
@@ -43,9 +44,14 @@ COLORS = {
     "FlowerBox": (0.58, 0.4, 0.3),
     "Leaf": (0.46, 0.76, 0.38),
     "Flower": (1.0, 0.82, 0.32),
-    "Spots": (1.0, 0.96, 0.88),
-    "Stem": (1.0, 0.92, 0.76),
-    "Cap": (0.9, 0.3, 0.26),
+    # The mushrooms (vivid: saturated bright caps, pure white spots, clean light cream stems; the
+    # same values as PetCityLook in Core, which the tests check this .glb against).
+    "Spots": (1.0, 1.0, 1.0),
+    "Stem": (1.0, 0.96, 0.86),
+    "Cap": (1.0, 0.12, 0.12),
+    "CapRoof": (1.0, 0.1, 0.16),
+    "StoreCap": (1.0, 0.3, 0.6),
+    "LampGlow": (1.0, 0.9, 0.58),
     "StoreWall": (0.78, 0.9, 0.98),
     "StoreRoof": (0.98, 0.56, 0.7),
     "FloorTile": (0.98, 0.9, 0.78),
@@ -71,6 +77,7 @@ COLORS = {
     "Bronze": (0.5, 0.78, 0.7),
     "Pot": (0.94, 0.56, 0.42),
     # The pets (only they have eyes).
+    "Cream": (1.0, 0.96, 0.88),
     "Eye": (0.07, 0.04, 0.06),
     "EyeShine": (1.0, 1.0, 1.0),
     "Blush": (1.0, 0.5, 0.56),
@@ -184,7 +191,7 @@ def dome(radius, height, matrix, segments=32, rings=10):
 
 
 def spots_on_dome(piece, radius, height, base, count=7, size=0.14, mat="Spots", seed=0.0):
-    """Cream spots sitting on a cap of `radius` x `height` whose base is at `base` (a matrix)."""
+    """White spots sitting on a cap of `radius` x `height` whose base is at `base` (a matrix)."""
     for i in range(count):
         a = 2 * math.pi * (i / count) + seed
         t = 0.62 if i % 2 == 0 else 0.3
@@ -332,7 +339,7 @@ def roof_cap():
     p = Piece("RoofCap")
     # A big spotted mushroom cap covering the whole top, on a short cream collar.
     p.add(cylinder(BLOCK * 0.5, 0.5, T(0, 0, 0.25), segments=32), "Trim")
-    p.add(dome(BLOCK * 0.72, 2.6, T(0, 0, 0.4), segments=40), "Roof")
+    p.add(dome(BLOCK * 0.72, 2.6, T(0, 0, 0.4), segments=40), "CapRoof")
     spots_on_dome(p, BLOCK * 0.72, 2.6, T(0, 0, 0.4), count=9, size=0.12, seed=0.4)
     return p.finish()
 
@@ -385,7 +392,7 @@ def pet_store():
     p.add(box((STORE_W, 0.6, 9.2 - OPEN_TOP), T(0, fy - 0.3, (9.2 + OPEN_TOP) / 2), bevel=0.15), "StoreWall")
     p.add(box((STORE_W + 0.6, STORE_D + 0.6, 0.5), T(0, 0, 9.35), bevel=0.15), "Trim")
     # The roof: a big pink spotted mushroom cap.
-    p.add(dome(STORE_W * 0.56, 1.7, T(0, 0, 9.55) @ S(1, 0.72, 1), segments=40), "StoreRoof")
+    p.add(dome(STORE_W * 0.56, 1.7, T(0, 0, 9.55) @ S(1, 0.72, 1), segments=40), "StoreCap")
     spots_on_dome(p, STORE_W * 0.56, 1.7, T(0, 0, 9.55) @ S(1, 0.72, 1), count=9, size=0.08, seed=0.3)
 
     # The big sign: a cream board with a pink border, "Pet Store" and little hearts.
@@ -494,7 +501,7 @@ def kitten():
     # An orange kitten curled in the lilac bed, two spotted mushroom caps for ears.
     p.add(sphere(0.42, T(0, -0.05, 0.3), scale=(1.2, 1.0, 0.65)), "CatFur")
     p.add(sphere(0.34, T(0, 0.28, 0.55)), "CatFur")
-    p.add(sphere(0.18, T(0, 0.52, 0.48), scale=(1.2, 0.6, 0.8)), "Spots")
+    p.add(sphere(0.18, T(0, 0.52, 0.48), scale=(1.2, 0.6, 0.8)), "Cream")
     for side in (-1, 1):
         cap = T(side * 0.2, 0.25, 0.85) @ R("Y", side * 25)
         p.add(dome(0.16, 0.14, cap), "Cap")
@@ -511,7 +518,7 @@ def puppy():
     # A fluffy cream puppy sitting in the pink bed, floppy brown ears, a little mushroom on its back.
     p.add(sphere(0.38, T(0, -0.1, 0.38), scale=(1.0, 1.1, 0.9)), "PupFur")
     p.add(sphere(0.36, T(0, 0.12, 0.85)), "PupFur")
-    p.add(sphere(0.17, T(0, 0.42, 0.75), scale=(1.1, 0.7, 0.8)), "Spots")
+    p.add(sphere(0.17, T(0, 0.42, 0.75), scale=(1.1, 0.7, 0.8)), "Cream")
     p.add(sphere(0.06, T(0, 0.55, 0.8), segments=8, rings=4), "Nose")
     for side in (-1, 1):
         p.add(sphere(0.14, T(side * 0.34, 0.08, 0.8) @ R("Y", side * 20), scale=(0.6, 0.7, 1.4)), "PupEar")
@@ -569,7 +576,7 @@ def mushroom_crow():
     blush(p, T(0, 0.3, 0.6), 0.16, 0.04)
     p.add(cylinder(0.07, 0.16, T(0, 0.38, 0.62) @ R("X", -90), radius2=0.0, segments=10), "Beak")
     for i, (x, y) in enumerate(((-0.18, -0.1), (0.2, 0.0), (0.0, -0.22))):
-        p.add(sphere(0.04, T(x, y, 0.55), scale=(1, 1, 0.4), segments=8, rings=4), "Spots")
+        p.add(sphere(0.04, T(x, y, 0.55), scale=(1, 1, 0.4), segments=8, rings=4), "Cream")
     return p.finish(location=(-3.4, 1.4, 2.82))
 
 
@@ -581,8 +588,8 @@ def city_lamp():
     # A slim post on a round foot, a glowing bulb under a little spotted mushroom cap.
     p.add(cylinder(0.3, 0.2, T(0, 0, 0.1), segments=20), "Plinth")
     p.add(cylinder(0.09, 2.1, T(0, 0, 1.2), radius2=0.07, segments=12), "Trim")
-    p.add(sphere(0.18, T(0, 0, 2.3), segments=14, rings=7), "Glow")
-    p.add(dome(0.3, 0.22, T(0, 0, 2.38)), "StoreRoof")
+    p.add(sphere(0.18, T(0, 0, 2.3), segments=14, rings=7), "LampGlow")
+    p.add(dome(0.3, 0.22, T(0, 0, 2.38)), "StoreCap")
     spots_on_dome(p, 0.3, 0.22, T(0, 0, 2.38), count=5, size=0.06)
     return p.finish()
 

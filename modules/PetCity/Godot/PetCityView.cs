@@ -14,7 +14,7 @@ namespace Fungtopia.PetCity.View;
 /// </summary>
 public partial class PetCityView : Node3D, IModuleView
 {
-    /// <summary>The city blocks' wall and roof colors, one pair per style.</summary>
+    /// <summary>The city blocks' wall and roof (parapet) colors, one pair per style; their mushroom cap roofs are <see cref="PetCityLook.StyleCaps"/>.</summary>
     private static readonly (Color Wall, Color Roof)[] Styles =
     {
         (new Color(0.62f, 0.86f, 0.74f), new Color(0.94f, 0.38f, 0.44f)),
@@ -131,7 +131,8 @@ public partial class PetCityView : Node3D, IModuleView
         var tower = PetCityModels.Instance($"Tower{piece.Stories}", style.Wall, style.Roof);
         if (tower != null)
             root.AddChild(tower);
-        var roof = PetCityModels.Instance(piece.Style % 2 == 0 ? "RoofCap" : "RoofTerrace", style.Wall, style.Roof);
+        var roof = PetCityModels.Instance(piece.Style % 2 == 0 ? "RoofCap" : "RoofTerrace", style.Wall, style.Roof,
+            PetCityModels.ColorOf(PetCityLook.StyleCap(piece.Style)));
         if (roof != null)
         {
             roof.Position = new Vector3(0f, PetCityLayout.GroundFloorHeight + piece.Stories * PetCityLayout.StoryHeight, 0f);

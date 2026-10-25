@@ -1,5 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Text;
+using System.Text.Json;
 using Fungtopia.DayNight;
 using Fungtopia.Map;
 using Fungtopia.Shell;
@@ -417,5 +420,174 @@ public class PetCityTests
         Assert.False(module.WindowsLit);
         bus.Publish(new TimeOfDay(2, 3f, true));
         Assert.True(module.WindowsLit);
+    }
+
+    // Mushrooms (the game's "vivid" rule)
+
+    /// <summary>The colors the mushroom caps had before they were made vivid (glb Cap, StoreRoof; the view's style roofs).</summary>
+    private static readonly Swatch[] DullCaps =
+    {
+        new(0.9f, 0.3f, 0.26f), new(0.98f, 0.56f, 0.7f),
+        new(0.94f, 0.38f, 0.44f), new(0.98f, 0.62f, 0.36f), new(0.5f, 0.6f, 0.96f), new(0.96f, 0.5f, 0.72f),
+    };
+
+    private static Swatch[] Caps() => new[]
+    {
+        PetCityLook.Cap, PetCityLook.StoreCap,
+        PetCityLook.StyleCap(0), PetCityLook.StyleCap(1), PetCityLook.StyleCap(2), PetCityLook.StyleCap(3),
+    };
+
+    [Fact]
+    public void MushroomCapsAreSaturatedAndBright()
+    {
+        var caps = Caps();
+        for (int i = 0; i < caps.Length; i++)
+        {
+            Assert.True(caps[i].Value >= 0.98f, $"cap {i} {caps[i]} is not bright");
+            Assert.True(caps[i].Saturation >= 0.7f, $"cap {i} {caps[i]} is not saturated");
+            Assert.True(caps[i].Saturation >= DullCaps[i].Saturation + 0.1f, $"cap {i} {caps[i]} is not richer than {DullCaps[i]}");
+            Assert.True(caps[i].Value >= DullCaps[i].Value, $"cap {i} {caps[i]} is darker than {DullCaps[i]}");
+        }
+        // The red caps are a pure cherry/tomato red: full red, little green or blue.
+        foreach (var red in new[] { PetCityLook.Cap, PetCityLook.StyleCap(0) })
+        {
+            Assert.Equal(1f, red.R);
+            Assert.True(red.G <= 0.2f && red.B <= 0.2f, $"{red} is not a pure red");
+        }
+        Assert.Equal(PetCityLayout.StyleCount, PetCityLook.StyleCaps.Length);
+    }
+
+    [Fact]
+    public void SpotsArePureWhiteAndStemsALightCream()
+    {
+        Assert.Equal(new Swatch(1f, 1f, 1f), PetCityLook.Spots);
+        var stem = PetCityLook.Stem;
+        Assert.True(stem.Value >= 0.98f && stem.Min >= 0.8f, $"{stem} is not light");
+        Assert.True(stem.Saturation is > 0.05f and < 0.2f, $"{stem} is not a cream");
+        Assert.True(stem.R >= stem.G && stem.G >= stem.B, $"{stem} is not warm");
+    }
+
+    [Fact]
+    public void CapsAreGlossyWithARimAndLampBulbsGlowTwiceAsBrightAtNight()
+    {
+        Assert.InRange(PetCityLook.CapGloss, 0.2f, 0.6f);
+        Assert.InRange(PetCityLook.CapRim, 0.2f, 0.6f);
+        foreach (var cap in new[] { "Cap", "CapRoof", "StoreCap" })
+            Assert.True(PetCityLook.IsCap(cap) && PetCityLook.IsMushroom(cap), cap);
+        foreach (var other in new[] { "Spots", "Stem", "LampGlow", "Roof", "StoreRoof", "Glow", "Bronze" })
+            Assert.False(PetCityLook.IsCap(other), other);
+        foreach (var other in new[] { "Roof", "StoreRoof", "Glow", "Cream", "Wall", "Bronze" })
+            Assert.False(PetCityLook.IsMushroom(other), other);
+        // The bulbs glowed 1.6 at night before, like the store's lamps still do.
+        Assert.Equal(1.6f, PetCityLook.GlowNight);
+        Assert.Equal(2f * 1.6f, PetCityLook.LampGlowNight);
+    }
+
+    /// <summary>The JSON chunk of Models/petcity.glb.</summary>
+    private static JsonDocument ModelJson()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !File.Exists(Path.Combine(dir.FullName, "modules", "PetCity", "Models", "petcity.glb")))
+            dir = dir.Parent;
+        Assert.NotNull(dir);
+        byte[] glb = File.ReadAllBytes(Path.Combine(dir!.FullName, "modules", "PetCity", "Models", "petcity.glb"));
+        Assert.Equal("glTF", Encoding.ASCII.GetString(glb, 0, 4));
+        int length = BitConverter.ToInt32(glb, 12);
+        return JsonDocument.Parse(Encoding.UTF8.GetString(glb, 20, length));
+    }
+
+    /// <summary>Every material of Models/petcity.glb by name, with its base color (glTF's default white when it has none).</summary>
+    private static Dictionary<string, Swatch> ModelColors()
+    {
+        using var json = ModelJson();
+        var colors = new Dictionary<string, Swatch>();
+        foreach (var m in json.RootElement.GetProperty("materials").EnumerateArray())
+        {
+            var color = new Swatch(1f, 1f, 1f);
+            if (m.TryGetProperty("pbrMetallicRoughness", out var pbr) && pbr.TryGetProperty("baseColorFactor", out var f))
+                color = new Swatch(f[0].GetSingle(), f[1].GetSingle(), f[2].GetSingle());
+            colors[m.GetProperty("name").GetString()!] = color;
+        }
+        return colors;
+    }
+
+    /// <summary>The materials object <paramref name="name"/> of Models/petcity.glb is drawn with.</summary>
+    private static HashSet<string> ModelMaterials(string name)
+    {
+        using var json = ModelJson();
+        var root = json.RootElement;
+        var materials = root.GetProperty("materials");
+        var used = new HashSet<string>();
+        foreach (var node in root.GetProperty("nodes").EnumerateArray())
+        {
+            if (!node.TryGetProperty("name", out var n) || n.GetString() != name)
+                continue;
+            var mesh = root.GetProperty("meshes")[node.GetProperty("mesh").GetInt32()];
+            foreach (var primitive in mesh.GetProperty("primitives").EnumerateArray())
+                used.Add(materials[primitive.GetProperty("material").GetInt32()].GetProperty("name").GetString()!);
+        }
+        Assert.NotEmpty(used);
+        return used;
+    }
+
+    private static void AssertColor(Swatch expected, Swatch actual, string name)
+    {
+        Assert.True(MathF.Abs(expected.R - actual.R) < 1e-3f && MathF.Abs(expected.G - actual.G) < 1e-3f
+            && MathF.Abs(expected.B - actual.B) < 1e-3f, $"{name}: expected {expected}, the model has {actual}");
+    }
+
+    [Fact]
+    public void TheModelsMushroomsHaveTheVividColors()
+    {
+        var colors = ModelColors();
+        AssertColor(PetCityLook.Cap, colors["Cap"], "Cap");
+        AssertColor(PetCityLook.StoreCap, colors["StoreCap"], "StoreCap");
+        AssertColor(PetCityLook.StyleCap(0), colors["CapRoof"], "CapRoof");
+        AssertColor(PetCityLook.Spots, colors["Spots"], "Spots");
+        AssertColor(PetCityLook.Stem, colors["Stem"], "Stem");
+        AssertColor(PetCityLook.LampGlow, colors["LampGlow"], "LampGlow");
+    }
+
+    [Fact]
+    public void OnlyMushroomsChangedColor()
+    {
+        // The materials the mushrooms shared before keep their colors on what is not a mushroom:
+        // the terraces' parapets, the store's floor tiles, its ceiling lamps, the pets' muzzles.
+        var colors = ModelColors();
+        AssertColor(new Swatch(0.92f, 0.36f, 0.42f), colors["Roof"], "Roof");
+        AssertColor(new Swatch(0.98f, 0.56f, 0.7f), colors["StoreRoof"], "StoreRoof");
+        AssertColor(new Swatch(1f, 0.9f, 0.58f), colors["Glow"], "Glow");
+        AssertColor(new Swatch(1f, 0.96f, 0.88f), colors["Cream"], "Cream");
+        AssertColor(new Swatch(0.5f, 0.78f, 0.7f), colors["Bronze"], "Bronze");
+
+        Assert.Contains("CapRoof", ModelMaterials("RoofCap"));
+        Assert.DoesNotContain("Roof", ModelMaterials("RoofCap"));
+        Assert.Contains("Roof", ModelMaterials("RoofTerrace"));
+        var lamp = ModelMaterials("CityLamp");
+        Assert.Contains("LampGlow", lamp);
+        Assert.Contains("StoreCap", lamp);
+        Assert.Contains("Spots", lamp);
+        Assert.DoesNotContain("Glow", lamp);
+        Assert.DoesNotContain("StoreRoof", lamp);
+        var store = ModelMaterials("PetStore");
+        Assert.Contains("StoreCap", store);
+        Assert.Contains("StoreRoof", store);
+        Assert.Contains("Glow", store);
+        foreach (var pet in new[] { "Kitten", "Puppy" })
+        {
+            Assert.Contains("Cream", ModelMaterials(pet));
+            Assert.Contains("Cap", ModelMaterials(pet));
+        }
+    }
+
+    [Fact]
+    public void MushroomsHaveNoEyes()
+    {
+        foreach (var name in new[] { "RoofCap", "RoofTerrace", "PetStore", "CityLamp", "Planter", "Statue" })
+        {
+            var used = ModelMaterials(name);
+            Assert.DoesNotContain("Eye", used);
+            Assert.DoesNotContain("EyeShine", used);
+        }
     }
 }
