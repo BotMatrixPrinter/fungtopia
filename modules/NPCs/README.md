@@ -25,7 +25,11 @@ conversation in speech bubbles (the Dialogue module shows them).
   crow (success, not enough coins, walking away, already owned), Abby opening her shop, Pip (where
   they stand, the prompt's range at the counter, greeting then the food menu, the greetings taking
   turns, no prompt or talk while a menu holds `UiFocus`), and saving and restoring (round trip, no
-  side effects, bad or unknown JSON keeps the defaults).
+  side effects, bad or unknown JSON keeps the defaults); and the five `.glb` models read back (the
+  parts and pivots `NpcFigure` animates, the round head floating over the cone body, floating round
+  hands and little feet, no arm or leg meshes, and each one's look: Jeremy's coat, badge and
+  stethoscope, Millie's ears and tail, Lucy's flower and "Pet Store" print, Abby's bun and dress,
+  Pip's hat, muffin apron, spoon and stool).
 
 Test it with `./test.sh NPCs` from the repository root.
 
@@ -117,10 +121,12 @@ grows with the icon, redrawn when `PromptText` changes (another prompt or device
 the icons loadable when Godot has not imported them (as the Input module's view does), so the preview
 shows them too. `NpcFigure` loads its `.glb` at run time from the file's bytes (so a fresh
 checkout runs without an editor import), replaces each material with the toon shader plus an ink
-outline, and animates the parts: breathing, a gentle sway and head tilt, arm swing, and while
-talking a little bounce, nodding and a waving right arm. Jeremy is drawn 1.12 times as big (a
+outline, and animates the parts: breathing, a gentle sway and head tilt, the floating hands
+swinging, and while talking a little bounce, nodding and a waving right hand. The arms and legs are
+empty pivots (nothing draws them): turning an arm moves its hand along, and the feet hang from the
+legs. Jeremy is drawn 1.12 times as big (a
 grown-up); Millie is the liveliest, Abby nearly as lively, Lucy barely moves. Pip stirs the soup
-pot on the counter (the right arm up over its rim, circling, the spoon tipped into it), and when
+pot on the counter (the right hand up over its rim, circling, the spoon tipped into it), and when
 the player comes near (`Noticing`) waves with the left hand for 2.5 s, and while talking.
 
 Screenshots: `./screenshot.sh modules/NPCs/Godot/Preview.tscn` shows the five with Millie's
@@ -134,18 +140,25 @@ as a player walking up to `Places.FoodSpot` sees it.
 
 `blender -b --factory-startup --python modules/NPCs/Models/npcs.py` (from the repository root)
 writes `jeremy.glb`, `millie.glb`, `lucy.glb`, `abby.glb` and `pip.glb` (`... npcs.py -- pip` only
-that one); commit them with the script. Chibi folk in the
-player characters' style: a big round head, a rounded body, short arms with round hands, stubby
-legs. Dr. Jeremy: big dark eyes with sparkles, a neat side parting, a white doctor's coat with
-lapels, buttons and a name badge over a blue shirt and red tie, a stethoscope. Millie: cat ears
-with pink insides, happy ^ ^ closed eyes, honey hair in bunches, a pink bow at her neck, a mint
-dress with white spots and a frilly hem, a little cat tail. Lucy: a pink flower in her purple bob,
-half-lidded unimpressed eyes and a flat little mouth, a pale pink shirt saying "Pet Store" with little
-hearts. Abby: big dark eyes with sparkles, a happy smile, auburn hair with a tall top bun, a pink
-triangle dress with a white collar and hem. Pip: big dark eyes with sparkles, rosy cheeks with
-freckles, a big smile, short ginger hair, a puffy white chef's hat shaped like a mushroom cap with
-red spots and cream gills, a coral shirt under a cream apron with a little muffin printed on it
-(pink cup, blueberries, a cherry), a wooden spoon in the right hand (`Spoon`, a child of `HandR`),
-standing on a little wooden step stool (`Stool`, 0.45 m, to reach over the counter). Objects with
-pivots where they move: `Body`, `Head` (neck), `LegL`/`LegR` (hip), `ArmL`/`ArmR` (shoulder),
-`HandL`/`HandR`. Feet (Pip's stool) at the origin, facing -Z in Godot. No eyes on objects.
+that one); commit them with the script. Folk made of simple shapes in the player characters' new
+style (Saria's "floating hands and heads like Animal Crossing", see the Player README's Models): a
+big round head at the neck pivot (0.72 m) floating a few cm over a smooth cone body (a triangle
+from the front: 0.3 m round at its bottom, 0.13 m up, narrowing to a rounded top at 0.61 m; no
+neck), two round hands floating beside the body a little below its middle (at the ends of
+invisible 0.42 m arms), two little rounded feet under it; no arms, legs or neck. The clothes color
+the cone (no skin on the body). Dr. Jeremy: big dark eyes with sparkles, a neat side parting, his
+white doctor's coat as the cone, open in a V at the top over a blue shirt and red tie, with lapels,
+buttons and a name badge, a stethoscope ringing the top of the cone with its chest piece in front.
+Millie: cat ears with pink insides, happy ^ ^ closed eyes, honey hair in bunches, a mint dress with
+white spots and a frilly hem as the cone, a pink bow at its top, a little curled cat tail behind.
+Lucy: a pink flower in her purple bob, half-lidded unimpressed eyes and a flat little mouth, a pale
+pink shirt saying "Pet Store" with little hearts across the cone over a blue skirt band round its
+bottom. Abby: big dark eyes with sparkles, a happy smile, auburn hair with a tall top bun, the cone
+her pink triangle dress with a white collar and hem. Pip: big dark eyes with sparkles, rosy cheeks
+with freckles, a big smile, short ginger hair, a puffy white chef's hat shaped like a mushroom cap
+with red spots and cream gills, a coral shirt cone with a trousers band, a cream apron over its
+front (tied with a bow at the back) with a little muffin printed on it (pink cup, blueberries, a
+cherry), a wooden spoon in the right hand (`Spoon`, a child of `HandR`), standing on a little
+wooden step stool (`Stool`, 0.45 m, to reach over the counter). Objects with pivots where they
+move: `Body` (hip), `Head` (neck), `LegL`/`LegR` (hip; empty, with the feet `FootL`/`FootR` as
+children), `ArmL`/`ArmR` (shoulder; empty, invisible), `HandL`/`HandR` (hand center). Feet (Pip's stool) at the origin, facing -Z in Godot. No eyes on objects.

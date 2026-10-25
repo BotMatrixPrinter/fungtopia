@@ -8,9 +8,11 @@ namespace Fungtopia.NPCs.View;
 /// One NPC model (jeremy.glb, millie.glb, lucy.glb, abby.glb or pip.glb from modules/NPCs/Models), loaded
 /// at run time from the file's bytes (so a fresh checkout runs without an editor import), drawn
 /// toon-shaded with ink outlines and animated procedurally: breathing, a gentle sway and head
-/// tilt, swinging arms, and a happy bounce with nodding while talking. Pip stirs the soup pot with
+/// tilt, swinging hands, and a happy bounce with nodding while talking. Pip stirs the soup pot with
 /// the wooden spoon instead, and waves with the other hand when the player comes near (and while
-/// talking). Faces -Z at zero rotation.
+/// talking). Like the player characters they have no arms or legs to draw: <c>ArmL</c>/<c>ArmR</c>
+/// and <c>LegL</c>/<c>LegR</c> are empty pivots; turning an arm moves its floating hand (see
+/// <see cref="FollowArm"/>), and the feet hang from the legs. Faces -Z at zero rotation.
 /// </summary>
 public partial class NpcFigure : Node3D
 {
@@ -110,7 +112,7 @@ public partial class NpcFigure : Node3D
             Pose("ArmL", new Vector3(0f, hop, 0f), new Vector3(arm, 0f, -arm * 0.5f), Vector3.One);
             Pose("ArmR", new Vector3(0f, hop, 0f), new Vector3(-arm - wave, 0f, arm * 0.5f + wave), Vector3.One);
         }
-        // The hands stay at the ends of the arms.
+        // The floating hands stay at the ends of the invisible arms.
         FollowArm("ArmL", "HandL");
         FollowArm("ArmR", "HandR");
     }

@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Numerics;
+using System.Text.Json;
 using Fungtopia.DayNight;
 using Fungtopia.Dialogue;
 using Fungtopia.Food;
@@ -1039,5 +1041,346 @@ public class NPCsModuleTests
         float turned = NPCsModule.TurnToward(3.0f, -3.0f, 0.1f);
         Assert.True(turned > 3.0f || turned < -3.0f);
         Assert.Equal(0.5f, NPCsModule.TurnToward(0f, 1f, 0.5f), 5);
+    }
+
+    // The models (modules/NPCs/Models/*.glb, built by npcs.py), read back.
+
+    /// <summary>
+    /// One of the NPC models read back: each node's name, parent, mesh and world transform (glTF's
+    /// frame, Godot's: X right, Y up, -Z forward), and its mesh's vertices by material.
+    /// </summary>
+    private sealed class Glb
+    {
+        public readonly Dictionary<string, int> Index = new();
+        public readonly List<(string Name, int Parent, int Mesh, Matrix4x4 World)> Nodes = new();
+        private readonly JsonElement _json;
+        private readonly byte[] _bin;
+
+        public Glb(string file)
+        {
+            var dir = new DirectoryInfo(AppContext.BaseDirectory);
+            while (dir != null && !Directory.Exists(Path.Combine(dir.FullName, "modules", "NPCs", "Models")))
+                dir = dir.Parent;
+            Assert.NotNull(dir);
+            var bytes = File.ReadAllBytes(Path.Combine(dir!.FullName, "modules", "NPCs", "Models", file + ".glb"));
+            int jsonLength = BitConverter.ToInt32(bytes, 12);
+            _json = JsonDocument.Parse(new ReadOnlyMemory<byte>(bytes, 20, jsonLength)).RootElement;
+            int binStart = 20 + jsonLength;
+            _bin = bytes[(binStart + 8)..(binStart + 8 + BitConverter.ToInt32(bytes, binStart))];
+            var nodes = _json.GetProperty("nodes");
+            var parents = Enumerable.Repeat(-1, nodes.GetArrayLength()).ToArray();
+            for (int i = 0; i < parents.Length; i++)
+                if (nodes[i].TryGetProperty("children", out var children))
+                    foreach (var child in children.EnumerateArray())
+                        parents[child.GetInt32()] = i;
+            var world = new Matrix4x4?[parents.Length];
+            Matrix4x4 World(int i) => world[i] ??= Local(nodes[i]) * (parents[i] < 0 ? Matrix4x4.Identity : World(parents[i]));
+            for (int i = 0; i < parents.Length; i++)
+            {
+                string name = nodes[i].GetProperty("name").GetString()!;
+                Index[name] = i;
+                Nodes.Add((name, parents[i], nodes[i].TryGetProperty("mesh", out var mesh) ? mesh.GetInt32() : -1, World(i)));
+            }
+        }
+
+        private static Matrix4x4 Local(JsonElement node)
+        {
+            float[] Floats(string key, params float[] fallback) =>
+                node.TryGetProperty(key, out var v) ? v.EnumerateArray().Select(x => x.GetSingle()).ToArray() : fallback;
+            var t = Floats("translation", 0, 0, 0);
+            var r = Floats("rotation", 0, 0, 0, 1);
+            var s = Floats("scale", 1, 1, 1);
+            return Matrix4x4.CreateScale(s[0], s[1], s[2]) * Matrix4x4.CreateFromQuaternion(new Quaternion(r[0], r[1], r[2], r[3])) *
+                Matrix4x4.CreateTranslation(t[0], t[1], t[2]);
+        }
+
+        public bool Has(string name) => Index.ContainsKey(name);
+
+        public (string Name, int Parent, int Mesh, Matrix4x4 World) Node(string name)
+        {
+            Assert.True(Index.ContainsKey(name), $"no node {name}");
+            return Nodes[Index[name]];
+        }
+
+        public Vector3 Origin(string name) => Node(name).World.Translation;
+
+        public string ParentOf(string name) => Node(name).Parent < 0 ? "" : Nodes[Node(name).Parent].Name;
+
+        /// <summary>The materials of the node's own mesh.</summary>
+        public IEnumerable<string> Materials(string name)
+        {
+            int mesh = Node(name).Mesh;
+            if (mesh < 0)
+                yield break;
+            foreach (var primitive in _json.GetProperty("meshes")[mesh].GetProperty("primitives").EnumerateArray())
+                yield return _json.GetProperty("materials")[primitive.GetProperty("material").GetInt32()].GetProperty("name").GetString()!;
+        }
+
+        /// <summary>The world positions of the node's own mesh's vertices (only those in <paramref name="materials"/> when given).</summary>
+        public List<Vector3> Vertices(string name, params string[] materials)
+        {
+            var result = new List<Vector3>();
+            var node = Node(name);
+            if (node.Mesh < 0)
+                return result;
+            foreach (var primitive in _json.GetProperty("meshes")[node.Mesh].GetProperty("primitives").EnumerateArray())
+            {
+                string mat = _json.GetProperty("materials")[primitive.GetProperty("material").GetInt32()].GetProperty("name").GetString()!;
+                if (materials.Length > 0 && !materials.Contains(mat))
+                    continue;
+                var accessor = _json.GetProperty("accessors")[primitive.GetProperty("attributes").GetProperty("POSITION").GetInt32()];
+                var view = _json.GetProperty("bufferViews")[accessor.GetProperty("bufferView").GetInt32()];
+                int start = (view.TryGetProperty("byteOffset", out var vo) ? vo.GetInt32() : 0) +
+                    (accessor.TryGetProperty("byteOffset", out var ao) ? ao.GetInt32() : 0);
+                int stride = view.TryGetProperty("byteStride", out var st) ? st.GetInt32() : 12;
+                for (int i = 0; i < accessor.GetProperty("count").GetInt32(); i++)
+                {
+                    int at = start + i * stride;
+                    var local = new Vector3(BitConverter.ToSingle(_bin, at), BitConverter.ToSingle(_bin, at + 4), BitConverter.ToSingle(_bin, at + 8));
+                    result.Add(Vector3.Transform(local, node.World));
+                }
+            }
+            return result;
+        }
+
+        /// <summary>The vertices of the node and every node under it.</summary>
+        public List<Vector3> VerticesUnder(string name)
+        {
+            var result = Vertices(name);
+            for (int i = 0; i < Nodes.Count; i++)
+                if (Nodes[i].Parent == Index[name])
+                    result.AddRange(VerticesUnder(Nodes[i].Name));
+            return result;
+        }
+    }
+
+    /// <summary>Each model, how high it stands (Pip on the step stool) and the clothes that color its cone body.</summary>
+    public static readonly TheoryData<string, float, string[]> NpcModels = new()
+    {
+        { "jeremy", 0f, new[] { "Coat" } },
+        { "millie", 0f, new[] { "Dress" } },
+        { "lucy", 0f, new[] { "Shirt", "Skirt" } },
+        { "abby", 0f, new[] { "Dress" } },
+        { "pip", 0.45f, new[] { "Shirt", "Trousers" } },
+    };
+
+    private static float Radius(Vector3 v) => MathF.Sqrt(v.X * v.X + v.Z * v.Z);
+
+    /// <summary>The widest the vertices get round the vertical axis between heights y0 and y1.</summary>
+    private static float WidestBetween(List<Vector3> vertices, float y0, float y1) =>
+        vertices.Where(v => v.Y >= y0 && v.Y <= y1).Max(Radius);
+
+    private static Vector3 Min(List<Vector3> v) => v.Aggregate(Vector3.Min);
+    private static Vector3 Max(List<Vector3> v) => v.Aggregate(Vector3.Max);
+
+    [Theory]
+    [MemberData(nameof(NpcModels))]
+    public void TheModelsKeepThePartsAndPivotsNpcFigureAnimates(string file, float lift, string[] cloth)
+    {
+        _ = cloth;
+        var glb = new Glb(file);
+        foreach (var part in new[] { "Body", "Head", "LegL", "LegR", "ArmL", "ArmR", "HandL", "HandR", "FootL", "FootR" })
+            Assert.True(glb.Has(part), part);
+        // The player characters' rig: the neck, the hip, the shoulders, the hands at the ends of 0.42 m (invisible) arms.
+        Assert.True(Vector3.Distance(new Vector3(0f, 0.72f + lift, 0f), glb.Origin("Head")) < 0.001f);
+        Assert.True(Vector3.Distance(new Vector3(0f, 0.3f + lift, 0f), glb.Origin("Body")) < 0.001f);
+        foreach (var (arm, hand, leg, foot, side) in new[] { ("ArmL", "HandL", "LegL", "FootL", -1f), ("ArmR", "HandR", "LegR", "FootR", 1f) })
+        {
+            Assert.True(Vector3.Distance(new Vector3(side * 0.23f, 0.65f + lift, 0f), glb.Origin(arm)) < 0.001f, arm);
+            var reach = glb.Origin(hand) - glb.Origin(arm);
+            Assert.Equal(0.42f, reach.Length(), 3);
+            Assert.True(reach.X * side > 0.1f && reach.Y < -0.3f, $"{hand} hangs down beside the body");
+            var hip = glb.Origin(leg);
+            Assert.InRange(hip.Y - lift, 0.28f, 0.36f);
+            Assert.InRange(hip.X * side, 0.08f, 0.16f);
+            // The feet hang from the legs' pivots, so they move with them.
+            Assert.Equal(leg, glb.ParentOf(foot));
+        }
+        // Pip's spoon is held in the right hand, and Pip stands on the 0.45 m step stool.
+        Assert.Equal(file == "pip", glb.Has("Spoon"));
+        Assert.Equal(file == "pip", glb.Has("Stool"));
+        if (file == "pip")
+        {
+            Assert.Equal("HandR", glb.ParentOf("Spoon"));
+            Assert.Contains("Wood", glb.Materials("Spoon"));
+            var stool = glb.Vertices("Stool");
+            Assert.Equal(0f, Min(stool).Y, 2);
+            Assert.Equal(0.45f, Max(stool).Y, 2);
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(NpcModels))]
+    public void TheModelsAreARoundHeadFloatingOverATriangleBody(string file, float lift, string[] cloth)
+    {
+        var glb = new Glb(file);
+        // The big round head, where and as big as the player characters'.
+        var head = glb.Vertices("Head", "Skin");
+        var min = Min(head);
+        var max = Max(head);
+        Assert.Equal(1.088f + lift, (min.Y + max.Y) / 2, 2);
+        Assert.Equal(0f, (min.X + max.X) / 2, 2);
+        Assert.Equal(0.75f, max.Y - min.Y, 2);
+        Assert.Equal(0.77f, max.Z - min.Z, 2);
+        Assert.Contains("Eye", glb.Materials("Head"));
+        Assert.Contains("Mouth", glb.Materials("Head"));
+
+        // A gap of a few cm between everything on the head (hair, ears, hat) and everything on the
+        // body: no neck.
+        float bodyTop = glb.VerticesUnder("Body").Max(v => v.Y);
+        float headBottom = glb.VerticesUnder("Head").Min(v => v.Y);
+        Assert.InRange(headBottom - bodyTop, 0.03f, 0.15f);
+
+        // The clothes color a smooth cone: a triangle from the front, wide at the bottom, narrowing
+        // steadily to a rounded top, round all the way round, from just over the feet up to the top.
+        var body = glb.Vertices("Body", cloth);
+        float bottom = body.Min(v => v.Y), top = body.Max(v => v.Y), h = top - bottom;
+        Assert.InRange(bottom - lift, 0.08f, 0.2f);
+        Assert.InRange(top - lift, 0.55f, 0.66f);
+        float last = float.MaxValue;
+        for (int i = 0; i < 5; i++)
+        {
+            float widest = WidestBetween(body, bottom + h * i / 5f, bottom + h * (i + 1) / 5f);
+            Assert.True(widest < last - 0.02f, $"slice {i}: {widest} not narrower than {last}");
+            last = widest;
+        }
+        float base_ = WidestBetween(body, bottom, bottom + h * 0.2f);
+        Assert.InRange(base_, 0.26f, 0.34f);
+        Assert.True(WidestBetween(body, bottom + h * 0.8f, top) < 0.5f * base_);
+        Assert.True(body.Count > 500, "a smooth cone");
+        var rim = body.Where(v => v.Y > bottom + h * 0.3f && v.Y < bottom + h * 0.35f).Select(Radius).ToList();
+        Assert.True(rim.Max() - rim.Min() < 0.02f, "round");
+    }
+
+    [Theory]
+    [MemberData(nameof(NpcModels))]
+    public void TheModelsHaveFloatingRoundHandsAndLittleFeetButNoArmsOrLegs(string file, float lift, string[] cloth)
+    {
+        var glb = new Glb(file);
+        // No arm or leg meshes: the arms and legs are only pivots, and the only skin is the head and the hands.
+        foreach (var limb in new[] { "ArmL", "ArmR", "LegL", "LegR" })
+            Assert.Equal(-1, glb.Node(limb).Mesh);
+        Assert.Equal(new[] { "HandL", "HandR", "Head" },
+            glb.Nodes.Where(n => glb.Materials(n.Name).Contains("Skin")).Select(n => n.Name).OrderBy(n => n, StringComparer.Ordinal));
+
+        var body = glb.Vertices("Body", cloth);
+        float bottom = body.Min(v => v.Y), top = body.Max(v => v.Y), h = top - bottom;
+        var everything = glb.Vertices("Body");
+        foreach (var (hand, side) in new[] { ("HandL", -1f), ("HandR", 1f) })
+        {
+            // Round, beside the body a little below its middle, with air between them and the body.
+            var v = glb.Vertices(hand);
+            var size = Max(v) - Min(v);
+            Assert.InRange(size.X, 0.12f, 0.2f);
+            Assert.InRange(size.Y / size.X, 0.9f, 1.1f);
+            Assert.InRange(size.Z / size.X, 0.9f, 1.1f);
+            var center = glb.Origin(hand);
+            Assert.True(center.X * side > 0, hand);
+            Assert.InRange(center.Y, bottom + h * 0.2f, bottom + h * 0.6f);
+            float inner = v.Min(p => p.X * side);
+            Assert.True(inner > WidestBetween(everything.Where(p => MathF.Abs(p.Z) < 0.1f).ToList(), center.Y - 0.1f, center.Y + 0.1f) + 0.03f,
+                $"{hand} touches the body");
+        }
+        foreach (var (foot, side) in new[] { ("FootL", -1f), ("FootR", 1f) })
+        {
+            // Little rounded feet on the ground (or the stool) under the triangle.
+            var v = glb.Vertices(foot);
+            var low = Min(v);
+            var high = Max(v);
+            Assert.InRange(low.Y - lift, -0.01f, 0.02f);
+            Assert.True(high.Y <= bottom + 0.02f, $"{foot} reaches into the body");
+            Assert.InRange(high.Y - low.Y, 0.08f, 0.16f);
+            Assert.InRange(high.X - low.X, 0.12f, 0.24f);
+            Assert.True((low.X + high.X) / 2 * side > 0.05f, foot);
+            Assert.True(Math.Max(MathF.Abs(low.X), MathF.Abs(high.X)) < WidestBetween(body, bottom, bottom + 0.05f), $"{foot} sticks out sideways");
+        }
+    }
+
+    /// <summary>Asserts that the node's mesh has each of the materials.</summary>
+    private static void HasMaterials(Glb glb, string node, params string[] materials)
+    {
+        var has = glb.Materials(node).ToList();
+        foreach (var material in materials)
+            Assert.True(has.Contains(material), $"{node} has no {material}");
+    }
+
+    /// <summary>True when all of the material's vertices on the node are on the front (Godot -Z).</summary>
+    private static bool InFront(Glb glb, string node, string material) => glb.Vertices(node, material).All(v => v.Z < 0f);
+
+    [Fact]
+    public void JeremyKeepsHisCoatBadgeAndStethoscope()
+    {
+        var glb = new Glb("jeremy");
+        HasMaterials(glb, "Head", "Hair", "Eye", "EyeShine", "Blush");
+        HasMaterials(glb, "Body", "Coat", "Shirt", "Tie", "Lapel", "Button", "Badge", "BadgeStripe", "Tube", "Metal");
+        // The coat opens in a V at the top of the front over the shirt and tie; the badge is on his left.
+        var shirt = glb.Vertices("Body", "Shirt");
+        Assert.True(InFront(glb, "Body", "Shirt") && InFront(glb, "Body", "Tie"));
+        Assert.True(shirt.Min(v => v.Y) > 0.3f, "the shirt shows only at the top");
+        Assert.True(InFront(glb, "Body", "Badge") && glb.Vertices("Body", "Badge").All(v => v.X < 0f));
+        // The stethoscope rings the top of the cone, its chest piece in front.
+        var tube = glb.Vertices("Body", "Tube");
+        Assert.True(tube.Any(v => v.Z > 0.05f) && tube.Any(v => v.Z < -0.05f));
+        Assert.True(InFront(glb, "Body", "Metal"));
+    }
+
+    [Fact]
+    public void MillieKeepsHerCatEarsTailAndSpottedDress()
+    {
+        var glb = new Glb("millie");
+        HasMaterials(glb, "Head", "Hair", "EarInner", "Eye", "Blush");
+        Assert.DoesNotContain("EyeShine", glb.Materials("Head")); // happy closed eyes
+        // The cat ears stand up over the head.
+        Assert.True(glb.Vertices("Head", "EarInner").Max(v => v.Y) > glb.Vertices("Head", "Skin").Max(v => v.Y) + 0.05f);
+        HasMaterials(glb, "Body", "Dress", "Frill", "Spots", "Bow", "Hair");
+        Assert.True(InFront(glb, "Body", "Bow"));
+        // The little tail sticks out behind the cone.
+        var tail = glb.Vertices("Body", "Hair");
+        Assert.True(tail.All(v => v.Z > 0f));
+        Assert.True(tail.Max(v => v.Z) > 0.3f);
+    }
+
+    [Fact]
+    public void LucyKeepsHerFlowerAndPetStoreShirt()
+    {
+        var glb = new Glb("lucy");
+        HasMaterials(glb, "Head", "Hair", "Lid", "Petal", "FlowerMiddle", "Eye");
+        HasMaterials(glb, "Body", "Shirt", "Skirt", "Print", "Heart");
+        // "Pet Store" across the front of the cone, hearts around it, the skirt a band round the bottom.
+        var print = glb.Vertices("Body", "Print");
+        Assert.True(InFront(glb, "Body", "Print"));
+        Assert.True(Max(print).X - Min(print).X > 0.12f);
+        Assert.True(InFront(glb, "Body", "Heart"));
+        var skirt = glb.Vertices("Body", "Skirt");
+        Assert.True(skirt.Max(v => v.Y) < glb.Vertices("Body", "Shirt").Min(v => v.Y) + 0.06f);
+    }
+
+    [Fact]
+    public void AbbyKeepsHerTopBunAndTriangleDress()
+    {
+        var glb = new Glb("abby");
+        HasMaterials(glb, "Head", "Hair", "Band", "Eye", "EyeShine");
+        // The tall top bun.
+        Assert.True(glb.Vertices("Head", "Hair").Max(v => v.Y) > glb.Vertices("Head", "Skin").Max(v => v.Y) + 0.25f);
+        // The cone is her dress (checked as a triangle above), with a white collar at the top and a white hem.
+        HasMaterials(glb, "Body", "Dress", "Collar", "Hem");
+        var dress = glb.Vertices("Body", "Dress");
+        Assert.True(glb.Vertices("Body", "Collar").Min(v => v.Y) > dress.Max(v => v.Y) - 0.15f);
+        Assert.True(glb.Vertices("Body", "Hem").Max(v => v.Y) < dress.Min(v => v.Y) + 0.1f);
+    }
+
+    [Fact]
+    public void PipKeepsTheChefHatMuffinApronSpoonAndStool()
+    {
+        var glb = new Glb("pip");
+        HasMaterials(glb, "Head", "Hair", "Hat", "HatSpots", "Gills", "Freckle", "Eye", "EyeShine");
+        HasMaterials(glb, "Body", "Shirt", "Trousers", "Apron", "Cup", "MuffinTop", "Berry", "Cherry");
+        // The muffin printed on the front of the apron.
+        foreach (var part in new[] { "Cup", "MuffinTop", "Berry", "Cherry" })
+            Assert.True(InFront(glb, "Body", part), part);
+        // The spoon hangs down from the right hand.
+        var spoon = glb.Vertices("Spoon");
+        Assert.True(Min(spoon).Y < glb.Origin("HandR").Y - 0.3f);
+        HasMaterials(glb, "Stool", "Wood", "WoodDark");
     }
 }
