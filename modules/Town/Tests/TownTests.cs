@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Numerics;
 using Fungtopia.DayNight;
 using Fungtopia.Map;
+using Fungtopia.Player;
 using Fungtopia.Shell;
 using Xunit;
 
@@ -41,6 +42,9 @@ public class TownTests
     }
 
     private static readonly TickContext Step = new(0, 1.0 / 60);
+
+    private static PlayerState In(Area area) =>
+        new(Vector3.Zero, 0f, Vector3.Zero, true, 10, 10, true, CharacterKind.Girl, area);
 
     private static TimeOfDay At(int day, float hour) => new(day, hour, TimeOfDay.IsNightAt(hour));
 
@@ -142,14 +146,20 @@ public class TownTests
         Assert.Equal(1, drawn);
     }
 
-    /// <summary>The JSON chunk of Models/town.glb.</summary>
-    private static JsonDocument ModelJson()
+    /// <summary>The repository's root (the folder holding modules/Town/Models/town.glb).</summary>
+    private static string RepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir != null && !File.Exists(Path.Combine(dir.FullName, "modules", "Town", "Models", "town.glb")))
             dir = dir.Parent;
         Assert.NotNull(dir);
-        byte[] glb = File.ReadAllBytes(Path.Combine(dir!.FullName, "modules", "Town", "Models", "town.glb"));
+        return dir!.FullName;
+    }
+
+    /// <summary>The JSON chunk of Models/town.glb.</summary>
+    private static JsonDocument ModelJson()
+    {
+        byte[] glb = File.ReadAllBytes(Path.Combine(RepoRoot(), "modules", "Town", "Models", "town.glb"));
         Assert.Equal("glTF", Encoding.ASCII.GetString(glb, 0, 4));
         int length = BitConverter.ToInt32(glb, 12);
         return JsonDocument.Parse(Encoding.UTF8.GetString(glb, 20, length));
@@ -694,6 +704,120 @@ public class TownTests
         bus.Publish(new WokeUp(2));
         bus.Publish(At(2, 7f));
         Assert.False(town.LampsLit);
+    }
+
+    // ---- The module: the town's music ----
+
+    /// <summary>Publishes the player in <paramref name="area"/> and ticks, once per tick like the Player module; returns the level after each tick.</summary>
+    private static float[] Walk(FakeBus bus, TownModule town, Area area, int ticks)
+    {
+        var levels = new float[ticks];
+        for (int i = 0; i < ticks; i++)
+        {
+            bus.Publish(In(area));
+            town.Tick(Step);
+            levels[i] = town.MusicLevel;
+        }
+        return levels;
+    }
+
+    [Fact]
+    public void TheMusicIsSilentBeforeThePlayerExists()
+    {
+        var bus = new FakeBus();
+        var town = new TownModule();
+        town.Start(bus);
+        Assert.Equal(0f, town.MusicLevel);
+        for (int i = 0; i < 600; i++)
+            town.Tick(Step);
+        Assert.Equal(0f, town.MusicLevel);
+    }
+
+    [Fact]
+    public void InTownTheMusicRisesToFullOverTwoSeconds()
+    {
+        var bus = new FakeBus();
+        var town = new TownModule();
+        town.Start(bus);
+        Assert.Equal(120, TownModule.MusicFadeTicks);
+
+        var levels = Walk(bus, town, Area.Town, 240);
+        for (int i = 1; i < 120; i++)
+            Assert.True(levels[i] > levels[i - 1], $"tick {i}: {levels[i]} not above {levels[i - 1]}");
+        Assert.Equal(1f / 120, levels[0], 5);
+        Assert.Equal(0.25f, levels[29], 5); // 0.5 s
+        Assert.Equal(0.5f, levels[59], 5); // 1 s
+        Assert.True(levels[118] < 1f);
+        Assert.Equal(1f, levels[119]); // 2 s
+        for (int i = 120; i < 240; i++)
+            Assert.Equal(1f, levels[i]);
+    }
+
+    [Theory]
+    [InlineData(Area.Road)]
+    [InlineData(Area.Forest)]
+    [InlineData(Area.PetCity)]
+    [InlineData(Area.DeepForest)]
+    [InlineData(Area.Home)]
+    public void OutsideTownTheMusicFallsToSilenceOverTwoSeconds(Area area)
+    {
+        var bus = new FakeBus();
+        var town = new TownModule();
+        town.Start(bus);
+        Walk(bus, town, Area.Town, 120);
+        Assert.Equal(1f, town.MusicLevel);
+
+        var levels = Walk(bus, town, area, 240);
+        for (int i = 1; i < 120; i++)
+            Assert.True(levels[i] < levels[i - 1], $"tick {i}: {levels[i]} not below {levels[i - 1]}");
+        Assert.Equal(119f / 120, levels[0], 5);
+        Assert.Equal(0.5f, levels[59], 5); // 1 s
+        Assert.True(levels[118] > 0f);
+        Assert.Equal(0f, levels[119]); // 2 s
+        for (int i = 120; i < 240; i++)
+            Assert.Equal(0f, levels[i]);
+    }
+
+    [Fact]
+    public void StartingOutsideTownTheMusicStaysSilent()
+    {
+        var bus = new FakeBus();
+        var town = new TownModule();
+        town.Start(bus);
+        Assert.All(Walk(bus, town, Area.Forest, 300), level => Assert.Equal(0f, level));
+    }
+
+    [Fact]
+    public void LeavingMidFadeTurnsTheMusicBackFromWhereItWas()
+    {
+        var bus = new FakeBus();
+        var town = new TownModule();
+        town.Start(bus);
+        Walk(bus, town, Area.Town, 90); // 1.5 s in: 0.75
+        Assert.Equal(0.75f, town.MusicLevel, 5);
+        Walk(bus, town, Area.Road, 30); // 0.5 s out: 0.5
+        Assert.Equal(0.5f, town.MusicLevel, 5);
+        Walk(bus, town, Area.Town, 60); // back in: full after 1 s more
+        Assert.Equal(1f, town.MusicLevel);
+        // Into the house: falls again.
+        Walk(bus, town, Area.Home, 60);
+        Assert.Equal(0.5f, town.MusicLevel, 5);
+    }
+
+    [Fact]
+    public void TheTownSongIsCommittedAsAnMp3AndBrokenBytesAreRejected()
+    {
+        string path = Path.Combine(RepoRoot(), "modules", "Town", "Audio", "mushroom_town.mp3");
+        Assert.True(File.Exists(path), path);
+        Assert.True(TownModule.LooksLikeMp3(File.ReadAllBytes(path)));
+        // A bare MPEG-1 Layer III frame header.
+        Assert.True(TownModule.LooksLikeMp3(new byte[] { 0xFF, 0xFB, 0x90, 0x64 }));
+
+        Assert.False(TownModule.LooksLikeMp3(Array.Empty<byte>()));
+        Assert.False(TownModule.LooksLikeMp3(new byte[] { (byte)'I', (byte)'D', (byte)'3' }));
+        Assert.False(TownModule.LooksLikeMp3(Encoding.ASCII.GetBytes("<html>not found</html>")));
+        Assert.False(TownModule.LooksLikeMp3(Encoding.ASCII.GetBytes("version https://git-lfs")));
+        Assert.False(TownModule.LooksLikeMp3(new byte[] { 0xFF, 0xF1, 0x50, 0x80 })); // AAC (ADTS), layer 0
     }
 
     [Fact]

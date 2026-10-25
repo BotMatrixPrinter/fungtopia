@@ -9,5 +9,6 @@
     <ProjectReference Include="../Contract/Fungtopia.Town.Contract.csproj" />
     <ProjectReference Include="../../Map/Contract/Fungtopia.Map.Contract.csproj" />
     <ProjectReference Include="../../DayNight/Contract/Fungtopia.DayNight.Contract.csproj" />
+    <ProjectReference Include="../../Player/Contract/Fungtopia.Player.Contract.csproj" />
   </ItemGroup>
 </Project>
