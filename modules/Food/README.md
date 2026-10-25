@@ -8,11 +8,12 @@ the food bag, the stall's menu and eating. The bag is saved with the game throug
 - `Contract/` — `Fungtopia.Food.Contract` (namespace `Fungtopia.Food`): `FoodBag`, `FoodEaten`,
   `OpenFoodMenu` and `FoodKinds` (the kinds' numbers).
 - `Core/` — `Fungtopia.Food.Core`: `FoodModule`, the module's one `IModule`; `FoodCatalog` (names,
-  prices, healing), `FoodText` (the texts, and the prompts and hint lines as RichTextLabel BBCode with
+  prices, healing), `FoodLook` (the mushrooms' gloss and rim, the spores' glow), `FoodText` (the texts, and the prompts and hint lines as RichTextLabel BBCode with
   button icons per device) and `FoodSave` (the saved bag's JSON).
 - `Godot/` — `Main.tscn` with `FoodView` (the eating effect, pictures of the foods), `FoodPanels`
   (prompt, menu and food bar, a `CanvasLayer` on layer 11), `FoodModels` (loads food.glb at run time,
-  toon materials); `Preview.tscn` (for screenshots); `Shaders/` (toon surface, ink outline).
+  toon materials); `Preview.tscn` (for screenshots); `Shaders/` (toon surface with a glossy band and
+  rim for the mushroom caps, ink outline).
 - `Models/` — `food.py`, the Blender script that builds and exports `food.glb` next to it.
 - `Tests/` — `FoodModuleTests.cs`: xUnit tests of `FoodModule` with a fake `IMessageBus` (which also
   answers `SpendCoins` like the wallet).
@@ -118,6 +119,13 @@ origin: `BerryMuffin` (a domed muffin in a pleated pink paper cup, blueberries a
 top, a sprinkle of sugar), `MushroomSoup` (a wooden bowl of creamy soup with red mushroom-cap slices
 and a herb leaf), `SporePie` (a golden lattice pie in a blue dish, a spotted mushroom cap baked in
 the middle, glowing spores) and `Crumb` (for the crumbs). No faces: only creatures have eyes.
+
+Mushrooms are vivid (the game's rule for every mushroom): caps a pure cherry red `Cap`
+(0.96, 0.05, 0.08), spots crisp pure white `Spots` (1, 1, 1), stems a clean light cream `Stem`
+(1, 0.95, 0.84). The toon shader gives each cap (and its spots) a soft specular band
+(`FoodLook.CapGloss`) and a brighter rim light (`FoodLook.CapRim`, 0.6, other surfaces 0.3); the
+pie's glow spores glow at `FoodLook.GlowStrength` 2.4 (twice the old 1.2). Every other color is
+unchanged. The stall's own mushrooms are drawn by the module that builds the stall, not here.
 
 ## Screenshots
 

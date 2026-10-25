@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
+using System.IO;
+using System.Text.Json;
 using Fungtopia.Food;
 using Fungtopia.Input;
 using Fungtopia.Map;
@@ -785,5 +787,114 @@ public class FoodModuleTests
         Assert.Equal("Berry Muffin   5 M¢   +1 ♥   0/9", FoodText.MenuLine(FoodKinds.Muffin, 0));
         Assert.Equal("Mushroom Soup   12 M¢   +3 ♥   4/9", FoodText.MenuLine(FoodKinds.Soup, 4));
         Assert.Equal("Spore Pie   35 M¢   all ♥   9/9", FoodText.MenuLine(FoodKinds.Pie, 9));
+    }
+
+    // Looks: the mushrooms are vivid (Tony, 2026-10-25), every other color stays as it was.
+
+    private static string FoodFile(string relative)
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
+        {
+            string path = Path.Combine(dir.FullName, "modules", "Food", relative);
+            if (File.Exists(path))
+                return path;
+        }
+        throw new FileNotFoundException(relative);
+    }
+
+    /// <summary>food.glb's material colors (r, g, b), by material name.</summary>
+    private static Dictionary<string, float[]> GlbColors()
+    {
+        byte[] glb = File.ReadAllBytes(FoodFile("Models/food.glb"));
+        int length = BitConverter.ToInt32(glb, 12);
+        using var json = JsonDocument.Parse(glb.AsMemory(20, length));
+        var colors = new Dictionary<string, float[]>();
+        foreach (var material in json.RootElement.GetProperty("materials").EnumerateArray())
+        {
+            // glTF leaves out a factor of pure white (its default).
+            var pbr = material.GetProperty("pbrMetallicRoughness");
+            colors[material.GetProperty("name").GetString()!] = pbr.TryGetProperty("baseColorFactor", out var factor)
+                ? factor.EnumerateArray().Take(3).Select(c => c.GetSingle()).ToArray()
+                : new[] { 1f, 1f, 1f };
+        }
+        return colors;
+    }
+
+    private static (float Hue, float Saturation, float Value) Hsv(float[] c)
+    {
+        float max = c.Max(), min = c.Min(), d = max - min;
+        float hue = d == 0 ? 0 : max == c[0] ? 60 * ((c[1] - c[2]) / d) : max == c[1] ? 60 * ((c[2] - c[0]) / d + 2) : 60 * ((c[0] - c[1]) / d + 4);
+        return ((hue + 360) % 360, max == 0 ? 0 : d / max, max);
+    }
+
+    [Fact]
+    public void MushroomCapsArePureBrightCherryRed()
+    {
+        var cap = Hsv(GlbColors()["Cap"]);
+        Assert.True(cap.Hue <= 6 || cap.Hue >= 350, $"hue {cap.Hue}");
+        Assert.True(cap.Saturation >= 0.88f, $"saturation {cap.Saturation}");
+        Assert.True(cap.Value >= 0.92f, $"value {cap.Value}");
+        // Clearly more vivid than the old dull tomato (0.9, 0.3, 0.26).
+        Assert.True(cap.Saturation >= Hsv(new[] { 0.9f, 0.3f, 0.26f }).Saturation + 0.15f);
+    }
+
+    [Fact]
+    public void MushroomSpotsArePureWhiteAndStemsLightCream()
+    {
+        var colors = GlbColors();
+        Assert.All(colors["Spots"], c => Assert.True(c >= 0.995f, $"spot {c}"));
+        var stem = colors["Stem"];
+        var hsv = Hsv(stem);
+        Assert.True(hsv.Value >= 0.97f && hsv.Saturation is >= 0.06f and <= 0.2f, $"stem {hsv}");
+        Assert.True(hsv.Hue is >= 30 and <= 55, $"stem hue {hsv.Hue}");
+    }
+
+    [Fact]
+    public void EveryOtherFoodColorStaysAsItWas()
+    {
+        var old = new Dictionary<string, float[]>
+        {
+            ["Paper"] = new[] { 0.98f, 0.62f, 0.72f }, ["PaperDark"] = new[] { 0.9f, 0.48f, 0.6f },
+            ["Muffin"] = new[] { 0.86f, 0.6f, 0.34f }, ["MuffinTop"] = new[] { 0.8f, 0.52f, 0.28f },
+            ["Blueberry"] = new[] { 0.32f, 0.36f, 0.78f }, ["Raspberry"] = new[] { 0.92f, 0.28f, 0.4f },
+            ["Sugar"] = new[] { 1.0f, 0.98f, 0.94f }, ["Bowl"] = new[] { 0.72f, 0.46f, 0.28f },
+            ["BowlDark"] = new[] { 0.52f, 0.32f, 0.2f }, ["Soup"] = new[] { 0.96f, 0.8f, 0.5f },
+            ["Leaf"] = new[] { 0.46f, 0.76f, 0.38f }, ["Crust"] = new[] { 0.94f, 0.7f, 0.36f },
+            ["CrustDark"] = new[] { 0.8f, 0.52f, 0.24f }, ["Filling"] = new[] { 0.7f, 0.34f, 0.6f },
+            ["Dish"] = new[] { 0.66f, 0.84f, 0.96f }, ["Glow"] = new[] { 0.86f, 1.0f, 0.7f },
+            ["Crumb"] = new[] { 0.88f, 0.64f, 0.36f },
+        };
+        var colors = GlbColors();
+        Assert.Equal(old.Count + 3, colors.Count);
+        foreach (var (name, color) in old)
+            for (int i = 0; i < 3; i++)
+                Assert.True(Math.Abs(colors[name][i] - color[i]) < 1e-4f, $"{name} changed");
+    }
+
+    [Fact]
+    public void OnlyMushroomCapsGetAGlossyHighlightAndABrighterRim()
+    {
+        Assert.True(FoodLook.Gloss("Cap") > 0.2f);
+        Assert.True(FoodLook.Gloss("Spots") > 0.2f);
+        Assert.True(FoodLook.RimLight("Cap") >= 1.5f * FoodLook.Rim);
+        Assert.Equal(0.3f, FoodLook.Rim);
+        foreach (var name in GlbColors().Keys.Where(n => !FoodLook.IsMushroom(n)))
+        {
+            Assert.Equal(0f, FoodLook.Gloss(name));
+            Assert.Equal(FoodLook.Rim, FoodLook.RimLight(name));
+        }
+        // The toon shader draws them: a specular band and a rim, both set per material.
+        string shader = File.ReadAllText(FoodFile("Godot/Shaders/toon.gdshader"));
+        Assert.Contains("uniform float gloss", shader);
+        Assert.Contains("uniform float rim", shader);
+        Assert.Contains("SPECULAR_LIGHT", shader);
+    }
+
+    [Fact]
+    public void GlowSporesGlowTwiceAsBright()
+    {
+        Assert.Equal(2f * 1.2f, FoodLook.Glow("Glow"), 4);
+        Assert.Equal(0f, FoodLook.Glow("Cap"));
+        Assert.Equal(0f, FoodLook.Glow("Soup"));
     }
 }

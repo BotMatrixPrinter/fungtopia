@@ -29,9 +29,11 @@ COLORS = {
     "Bowl": (0.72, 0.46, 0.28),
     "BowlDark": (0.52, 0.32, 0.2),
     "Soup": (0.96, 0.8, 0.5),
-    "Cap": (0.9, 0.3, 0.26),
-    "Stem": (1.0, 0.92, 0.74),
-    "Spots": (1.0, 0.96, 0.86),
+    # Mushrooms are vivid (the game's rule): a pure cherry-red cap, a clean light cream stem,
+    # crisp pure white spots; the game adds a glossy highlight and a rim light to the caps.
+    "Cap": (0.96, 0.05, 0.08),
+    "Stem": (1.0, 0.95, 0.84),
+    "Spots": (1.0, 1.0, 1.0),
     "Leaf": (0.46, 0.76, 0.38),
     "Crust": (0.94, 0.7, 0.36),
     "CrustDark": (0.8, 0.52, 0.24),
@@ -131,7 +133,7 @@ def dome(radius, height, matrix, segments=28, rings=12):
 
 
 def spots_on_dome(piece, radius, height, base, count=6, size=0.16, mat="Spots", seed=0):
-    """Little cream spots sitting on a cap of `radius` x `height` whose base is at `base` (a matrix)."""
+    """Little white spots sitting on a cap of `radius` x `height` whose base is at `base` (a matrix)."""
     for i in range(count):
         a = 2 * math.pi * (i / count) + seed
         t = 0.55 if i % 2 == 0 else 0.3
