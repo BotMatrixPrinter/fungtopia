@@ -203,6 +203,9 @@ public partial class NpcFigure : Node3D
         var material = new ShaderMaterial { Shader = s_toon };
         // glTF stores linear colors; the shader's albedo is an sRGB color like Blender's swatch.
         material.SetShaderParameter("albedo", color.SrgbToLinear());
+        // Mushroom caps get a glossy highlight and a rim light along their edge.
+        material.SetShaderParameter("gloss", MushroomLook.Gloss(name));
+        material.SetShaderParameter("rim", MushroomLook.Rim(name));
         if (name is "EyeShine" or "Metal")
             material.SetShaderParameter("self_light", 0.5f);
         if (!NoOutline.Contains(name))

@@ -1116,6 +1116,24 @@ public class NPCsModuleTests
                 yield return _json.GetProperty("materials")[primitive.GetProperty("material").GetInt32()].GetProperty("name").GetString()!;
         }
 
+        /// <summary>The base color of the material (npcs.py's swatch, the sRGB color NpcFigure draws).</summary>
+        public Vector3 Color(string material)
+        {
+            foreach (var mat in _json.GetProperty("materials").EnumerateArray())
+                if (mat.GetProperty("name").GetString() == material)
+                {
+                    // glTF leaves out the default, white.
+                    if (!mat.TryGetProperty("pbrMetallicRoughness", out var pbr) || !pbr.TryGetProperty("baseColorFactor", out var c))
+                        return Vector3.One;
+                    return new Vector3(c[0].GetSingle(), c[1].GetSingle(), c[2].GetSingle());
+                }
+            Assert.Fail($"no material {material}");
+            return default;
+        }
+
+        public IEnumerable<string> AllMaterials() =>
+            _json.GetProperty("materials").EnumerateArray().Select(m => m.GetProperty("name").GetString()!);
+
         /// <summary>The world positions of the node's own mesh's vertices (only those in <paramref name="materials"/> when given).</summary>
         public List<Vector3> Vertices(string name, params string[] materials)
         {
@@ -1382,5 +1400,73 @@ public class NPCsModuleTests
         var spoon = glb.Vertices("Spoon");
         Assert.True(Min(spoon).Y < glb.Origin("HandR").Y - 0.3f);
         HasMaterials(glb, "Stool", "Wood", "WoodDark");
+    }
+
+    /// <summary>HSV saturation of a color.</summary>
+    private static float Saturation(Vector3 c)
+    {
+        float max = MathF.Max(c.X, MathF.Max(c.Y, c.Z)), min = MathF.Min(c.X, MathF.Min(c.Y, c.Z));
+        return max <= 0f ? 0f : (max - min) / max;
+    }
+
+    [Fact]
+    public void PipsMushroomHatIsVivid()
+    {
+        var glb = new Glb("pip");
+        // The spots: a pure cherry red, bright and saturated (not brownish or dull pink).
+        var spots = glb.Color("HatSpots");
+        Assert.True(spots.X >= 0.9f && spots.Y <= 0.12f && spots.Z <= 0.15f, $"HatSpots {spots}");
+        Assert.True(Saturation(spots) >= 0.88f, $"HatSpots saturation {Saturation(spots)}");
+        // The puffy cap: crisp pure white.
+        var hat = glb.Color("Hat");
+        Assert.True(hat.X >= 0.995f && hat.Y >= 0.995f && hat.Z >= 0.995f, $"Hat {hat}");
+        // The gills under its rim: a clean light cream (light, warm, only a little yellow).
+        var gills = glb.Color("Gills");
+        Assert.True(gills.X >= 0.99f && gills.Y >= 0.93f && gills.Z >= 0.78f && gills.Z <= 0.9f && gills.Z < gills.Y, $"Gills {gills}");
+    }
+
+    /// <summary>Pip's colors that are not mushroom parts (npcs.py's swatches): they stay as they were.</summary>
+    public static readonly TheoryData<string, float, float, float> PipOtherColors = new()
+    {
+        { "Skin", 0.98f, 0.68f, 0.52f }, { "Blush", 1.0f, 0.45f, 0.48f }, { "Eye", 0.07f, 0.04f, 0.06f },
+        { "EyeShine", 1.0f, 1.0f, 1.0f }, { "Mouth", 0.55f, 0.16f, 0.2f }, { "Shoe", 0.42f, 0.24f, 0.18f },
+        { "Hair", 0.85f, 0.42f, 0.18f }, { "Freckle", 0.66f, 0.36f, 0.22f }, { "Shirt", 0.92f, 0.38f, 0.36f },
+        { "Apron", 0.95f, 0.8f, 0.56f }, { "Cup", 0.97f, 0.55f, 0.68f }, { "MuffinTop", 0.72f, 0.45f, 0.25f },
+        { "Berry", 0.35f, 0.38f, 0.85f }, { "Cherry", 0.9f, 0.15f, 0.2f }, { "Trousers", 0.45f, 0.35f, 0.3f },
+        { "Wood", 0.8f, 0.58f, 0.36f }, { "WoodDark", 0.55f, 0.36f, 0.22f },
+    };
+
+    [Theory]
+    [MemberData(nameof(PipOtherColors))]
+    public void PipsOtherColorsStayAsTheyWere(string material, float r, float g, float b)
+    {
+        var glb = new Glb("pip");
+        Assert.True(Vector3.Distance(new Vector3(r, g, b), glb.Color(material)) < 0.002f, $"{material} {glb.Color(material)}");
+    }
+
+    [Fact]
+    public void OnlyMushroomCapsGetTheGlossyHighlightAndRimLight()
+    {
+        Assert.True(MushroomLook.IsCap("Hat") && MushroomLook.IsCap("HatSpots"));
+        Assert.True(MushroomLook.Gloss("Hat") > 0f);
+        // No glint inside the little spots (it would look like an eye).
+        Assert.Equal(0f, MushroomLook.Gloss("HatSpots"));
+        Assert.True(MushroomLook.Rim("Hat") > MushroomLook.PlainRim && MushroomLook.Rim("HatSpots") > MushroomLook.PlainRim);
+        // Every other surface of every NPC keeps the plain toon look.
+        foreach (var file in new[] { "jeremy", "millie", "lucy", "abby", "pip" })
+            foreach (var material in new Glb(file).AllMaterials().Where(m => m is not ("Hat" or "HatSpots")))
+            {
+                Assert.False(MushroomLook.IsCap(material), $"{file} {material}");
+                Assert.Equal(0f, MushroomLook.Gloss(material));
+                Assert.Equal(MushroomLook.PlainRim, MushroomLook.Rim(material));
+            }
+        // The toon shader takes them (NpcFigure sets them per material).
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !Directory.Exists(Path.Combine(dir.FullName, "modules", "NPCs", "Godot", "Shaders")))
+            dir = dir.Parent;
+        Assert.NotNull(dir);
+        var shader = File.ReadAllText(Path.Combine(dir!.FullName, "modules", "NPCs", "Godot", "Shaders", "toon.gdshader"));
+        Assert.Contains("uniform float gloss", shader);
+        Assert.Contains("uniform float rim", shader);
     }
 }

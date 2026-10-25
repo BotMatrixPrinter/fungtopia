@@ -12,10 +12,11 @@ conversation in speech bubbles (the Dialogue module shows them).
   - `QuestState(bool Active, string Title, int Progress, int Goal, bool Complete)`: Millie's
     current quest, published every tick (for the HUD). `Title` is empty and `Goal` 0 until she
     gives the first one.
-- `Core/` — `Fungtopia.NPCs.Core`: `NPCsModule`, the module's one `IModule`.
+- `Core/` — `Fungtopia.NPCs.Core`: `NPCsModule`, the module's one `IModule`; `MushroomLook`, how
+  the mushroom parts are shaded.
 - `Godot/` — `Main.tscn` with `NPCsView`; `NpcFigure` (loads a model, toon materials, idle and
   talking animation); `Preview.tscn` (the five side by side, or Pip at the stall, for screenshots);
-  `Shaders/` (toon surface, ink outline).
+  `Shaders/` (toon surface with optional gloss band and rim strength, ink outline).
 - `Models/` — `npcs.py`, the Blender script that builds and exports `jeremy.glb`, `millie.glb`,
   `lucy.glb`, `abby.glb` and `pip.glb` next to it.
 - `Tests/` — `NPCsModuleTests.cs`: xUnit tests of `NPCsModule` with a fake `IMessageBus`, a fake
@@ -29,7 +30,9 @@ conversation in speech bubbles (the Dialogue module shows them).
   parts and pivots `NpcFigure` animates, the round head floating over the cone body, floating round
   hands and little feet, no arm or leg meshes, and each one's look: Jeremy's coat, badge and
   stethoscope, Millie's ears and tail, Lucy's flower and "Pet Store" print, Abby's bun and dress,
-  Pip's hat, muffin apron, spoon and stool).
+  Pip's hat, muffin apron, spoon and stool); Pip's vivid mushroom hat (cherry red spots, pure white
+cap, light cream gills, Pip's other colors unchanged) and `MushroomLook` (only the cap gets the
+gloss and the stronger rim, and the toon shader takes them).
 
 Test it with `./test.sh NPCs` from the repository root.
 
@@ -121,7 +124,9 @@ grows with the icon, redrawn when `PromptText` changes (another prompt or device
 the icons loadable when Godot has not imported them (as the Input module's view does), so the preview
 shows them too. `NpcFigure` loads its `.glb` at run time from the file's bytes (so a fresh
 checkout runs without an editor import), replaces each material with the toon shader plus an ink
-outline, and animates the parts: breathing, a gentle sway and head tilt, the floating hands
+outline (Pip's mushroom-cap hat, `MushroomLook` in Core, also gets a soft glossy highlight band on
+the cap and a stronger rim light along its edge and spots; no glint inside the spots, which would
+look like eyes), and animates the parts: breathing, a gentle sway and head tilt, the floating hands
 swinging, and while talking a little bounce, nodding and a waving right hand. The arms and legs are
 empty pivots (nothing draws them): turning an arm moves its hand along, and the feet hang from the
 legs. Jeremy is drawn 1.12 times as big (a
@@ -155,8 +160,8 @@ Lucy: a pink flower in her purple bob, half-lidded unimpressed eyes and a flat l
 pink shirt saying "Pet Store" with little hearts across the cone over a blue skirt band round its
 bottom. Abby: big dark eyes with sparkles, a happy smile, auburn hair with a tall top bun, the cone
 her pink triangle dress with a white collar and hem. Pip: big dark eyes with sparkles, rosy cheeks
-with freckles, a big smile, short ginger hair, a puffy white chef's hat shaped like a mushroom cap
-with red spots and cream gills, a coral shirt cone with a trousers band, a cream apron over its
+with freckles, a big smile, short ginger hair, a puffy chef's hat shaped like a mushroom cap, vivid
+like every mushroom in the game: crisp pure white with pure cherry red spots and clean light cream gills, a coral shirt cone with a trousers band, a cream apron over its
 front (tied with a bow at the back) with a little muffin printed on it (pink cup, blueberries, a
 cherry), a wooden spoon in the right hand (`Spoon`, a child of `HandR`), standing on a little
 wooden step stool (`Stool`, 0.45 m, to reach over the counter). Objects with pivots where they

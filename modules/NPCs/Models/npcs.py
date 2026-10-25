@@ -725,9 +725,11 @@ KINDS = {
     "pip": (pip, {
         "Hair": (0.85, 0.42, 0.18),
         "Freckle": (0.66, 0.36, 0.22),
-        "Hat": (1.0, 1.0, 0.98),
-        "Gills": (0.98, 0.9, 0.78),
-        "HatSpots": (0.9, 0.2, 0.22),
+        # The mushroom cap, vivid like every mushroom in the game: crisp pure white, pure cherry red
+        # spots, clean light cream gills (NpcFigure adds a glossy highlight and rim light, MushroomLook).
+        "Hat": (1.0, 1.0, 1.0),
+        "Gills": (1.0, 0.95, 0.82),
+        "HatSpots": (0.95, 0.06, 0.1),
         "Shirt": (0.92, 0.38, 0.36),
         "Apron": (0.95, 0.8, 0.56),
         "Cup": (0.97, 0.55, 0.68),
