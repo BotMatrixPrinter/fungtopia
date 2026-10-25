@@ -2,10 +2,12 @@
 
 The look of the **Deep Forest**, the Map's dark area west of Mushroom Forest where the hard
 monsters live (`Fungtopia.Map.DeepForestLayout`, x -280..-110, z -90..90, and its overgrown path
-x -112..-96 through the forest's west gap). Huge, old giant mushrooms in dark purples, deep reds
-and browns stand on every one of the Map's Deep Forest obstacles; their caps and side caps close
+x -112..-96 through the forest's west gap). Huge, old giant mushrooms on clean light cream stems,
+their caps in vivid, saturated purples, cherry reds and orange-browns that pop in the gloom (with
+crisp pure white spots on some, a soft glossy highlight and a light rim), stand on every one of the
+Map's Deep Forest obstacles; their caps and side caps close
 into a dense canopy that throws real shadows, so it is clearly darker than Mushroom Forest by day.
-The air is slightly foggy, faint glowing mushrooms and drifting spores give a little light, roots
+The air is slightly foggy, glowing mushrooms (clearly glowing at night) and drifting spores give a little light, roots
 arch from the stems, webs hang under some caps (the tarantulas live here), and the path in is
 overgrown. Walking in is gradual: canopy, undergrowth, mist and fog thicken from the path to well
 past the entrance. Mushrooms, plants and props never have eyes or faces.
@@ -42,6 +44,12 @@ props of each kind (`Prop`: `Position`, `Rotation`, `Scale` for the unit models,
   circles), in order, the stem exactly the circle (radius, center), 12-30 m tall over the high side
   of its foot, the cap 2.5-4.4 times the stem's radius plus 2 m; the skirt is its root flare, from
   the stem's base to a little over the high side, widening into the ground.
+- Colors (the game's "vivid mushroom" rule): caps (giant, side and toadstool) in clearly saturated
+  purples, pure cherry/tomato reds and orange-browns, deep enough for the gloom (brightest channel
+  0.4-1, saturation at least 0.75); stems `StemCream` (the giant and side stems at most
+  `GiantStemShade` darker, skirts a touch more); bracket shelves a rich orange-brown; glowing
+  mushrooms glow `GlowStrength` to twice it (1.2-2.4, twice the old glow). Roots, ferns, webs,
+  spores and mist keep their own muted colors.
 - Planting: everything standing on the uneven ground has its base at `BaseHeight(x, z, radius,
   sink)`: the lowest `Ground.HeightAt` under its round footprint (`GroundUnder`: the center and
   rings out to the rim, samples at most `FootprintSpacing` 0.5 m apart) minus a sink (`BaseSink`
@@ -76,7 +84,10 @@ props of each kind (`Prop`: `Position`, `Rotation`, `Scale` for the unit models,
 bytes (so a fresh checkout runs without an editor import) and draws each kind as one
 `MultiMeshInstance3D` from its unit mesh (`Stem`, `Skirt`, `Cap`, `Shelf`, `Glow`, `Web`, `Root`, `Fern`;
 spores and mist are quads); toadstools reuse the stem and cap meshes. Stems, skirts, caps, shelves,
-roots and glowing mushrooms have ink outlines; stems, caps, shelves and roots cast shadows. Its
+roots and glowing mushrooms have ink outlines; stems, caps, shelves and roots cast shadows. Caps
+(`cap.gdshader`) have crisp pure white spots and, like the glowing mushrooms' caps, a soft glossy
+specular band and a light rim (`TOON_GLOSS` in `toon.gdshaderinc`, masked by `ROUGHNESS`); the
+soft lights over the glowing clusters have energy 1.6. Its
 own props take less ambient light the deeper in the gloom (`DeepForestGloom`'s ramp in the
 shaders). The fog is `FogVolume` nodes with a lavender `FogMaterial`: DayNight turns volumetric
 fog on with no density of its own, so it shows only here; it needs the Forward+ renderer (the

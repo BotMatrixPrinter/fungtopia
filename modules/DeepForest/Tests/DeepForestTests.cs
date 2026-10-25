@@ -295,16 +295,61 @@ public class DeepForestTests
 
     // ---- The look
 
+    private static float Saturation(Vector3 c) => (Max(c) - MathF.Min(c.X, MathF.Min(c.Y, c.Z))) / Max(c);
+
+    private static float Max(Vector3 c) => MathF.Max(c.X, MathF.Max(c.Y, c.Z));
+
     [Fact]
-    public void CapsAreDarkPurplesRedsAndBrowns()
+    public void CapsAreVividPurplesRedsAndOrangeBrowns()
     {
-        foreach (var kind in new[] { PropKind.GiantCap, PropKind.BranchCap })
+        int reds = 0, purples = 0, oranges = 0;
+        foreach (var kind in new[] { PropKind.GiantCap, PropKind.BranchCap, PropKind.Toadstool })
         {
             foreach (var p in Scenery.Of(kind))
             {
                 var c = p.Color;
-                Assert.True(MathF.Max(c.X, MathF.Max(c.Y, c.Z)) < 0.7f, $"{kind} color {c} is not dark");
-                Assert.True(c.Y < c.X, $"{kind} color {c} is green"); // red, purple or brown: never green-leaning
+                // Clearly saturated and bright enough to pop, but not washed out to white.
+                Assert.True(Saturation(c) >= 0.75f, $"{kind} color {c} is dull");
+                Assert.InRange(Max(c), 0.4f, 1f);
+                Assert.True(c.Y < c.X, $"{kind} color {c} is green"); // red, purple or orange-brown: never green-leaning
+                if (c.Z > c.X * 0.6f)
+                    purples++;
+                else if (c.Y < c.X * 0.2f)
+                {
+                    reds++;
+                    // A pure cherry/tomato red: neither brownish nor pink.
+                    Assert.True(c.Z < c.X * 0.15f, $"red cap {c} is pinkish");
+                }
+                else
+                    oranges++;
+            }
+        }
+        Assert.True(reds > 20 && purples > 20 && oranges > 20, $"{reds} red, {purples} purple, {oranges} orange-brown caps");
+    }
+
+    [Fact]
+    public void ShelvesAreARichOrangeBrown()
+    {
+        foreach (var p in Scenery.Of(PropKind.Shelf))
+        {
+            Assert.True(Saturation(p.Color) >= 0.8f, $"shelf color {p.Color} is dull");
+            Assert.True(p.Color.X > p.Color.Y && p.Color.Y > p.Color.Z, $"shelf color {p.Color} is not orange-brown");
+        }
+    }
+
+    [Fact]
+    public void StemsAreACleanLightCream()
+    {
+        var cream = DeepForestScenery.StemCream;
+        Assert.True(cream.X > 0.85f && cream.X >= cream.Y && cream.Y > cream.Z && cream.Z > 0.65f, $"{cream} is not a light cream");
+        foreach (var kind in new[] { PropKind.GiantStem, PropKind.BranchStem, PropKind.Skirt })
+        {
+            foreach (var p in Scenery.Of(kind))
+            {
+                // The cream itself, at most a little shaded on the old giants (skirts a touch more).
+                float shade = p.Color.X / cream.X;
+                Assert.InRange(shade, DeepForestScenery.GiantStemShade * 0.92f - 0.001f, 1.001f);
+                Assert.True(Vector3.Distance(p.Color, cream * shade) < 0.001f, $"{kind} color {p.Color} is not the cream");
             }
         }
     }
@@ -353,12 +398,20 @@ public class DeepForestTests
     }
 
     [Fact]
-    public void GlowingMushroomsAndSporesGiveFaintLight()
+    public void GlowingMushroomsGlowClearlyAndSporesGiveFaintLight()
     {
         Assert.True(Scenery.Of(PropKind.Glow).Length > 300);
         Assert.True(Scenery.Of(PropKind.Spore).Length > 500);
+        // About twice the old glow (0.6..1.2, 0.9 on average), so they clearly glow at night.
+        float sum = 0f;
         foreach (var p in Scenery.Of(PropKind.Glow))
-            Assert.InRange(p.Glow, 0.3f, 1.5f);
+        {
+            Assert.InRange(p.Glow, DeepForestScenery.GlowStrength, 2f * DeepForestScenery.GlowStrength);
+            sum += p.Glow;
+        }
+        Assert.InRange(sum / Scenery.Of(PropKind.Glow).Length, 1.6f, 2f);
+        foreach (var p in Scenery.Of(PropKind.Spore))
+            Assert.Equal(1f, p.Glow);
         Assert.InRange(Scenery.Lights.Length, 6, DeepForestScenery.MaxLights);
         // Spread out, not all in one corner.
         foreach (var a in Scenery.Lights)

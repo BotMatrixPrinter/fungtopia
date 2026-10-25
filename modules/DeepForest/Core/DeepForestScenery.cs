@@ -116,18 +116,28 @@ public sealed class DeepForestScenery
     /// <summary>The middle of the overgrown path stays this clear (meters each side of z = 0) of undergrowth taller than moss.</summary>
     public const float PathClearHalfWidth = 1.4f;
 
-    // Dark purples, deep reds and browns.
+    // Vivid caps that pop in the gloom: rich purples, cherry/tomato reds and orange-browns, deep
+    // but clearly saturated (the game's one "vivid mushroom" rule; never brownish or dull pink).
     private static readonly Vector3[] s_capColors =
     {
-        new(0.3f, 0.14f, 0.34f), new(0.38f, 0.18f, 0.44f), new(0.24f, 0.12f, 0.3f),
-        new(0.46f, 0.1f, 0.14f), new(0.36f, 0.08f, 0.12f), new(0.52f, 0.16f, 0.16f),
-        new(0.34f, 0.2f, 0.13f), new(0.26f, 0.16f, 0.12f),
+        new(0.46f, 0.1f, 0.68f), new(0.58f, 0.14f, 0.8f), new(0.38f, 0.07f, 0.6f),
+        new(0.8f, 0.05f, 0.07f), new(0.7f, 0.03f, 0.06f), new(0.86f, 0.12f, 0.06f),
+        new(0.74f, 0.3f, 0.06f), new(0.6f, 0.24f, 0.07f),
     };
 
     private static readonly Vector3[] s_glowColors =
     {
         new(0.35f, 0.85f, 0.9f), new(0.55f, 0.5f, 1f), new(0.85f, 0.45f, 0.95f), new(0.45f, 0.95f, 0.6f),
     };
+
+    /// <summary>The clean light cream of every mushroom stem (giant, side and toadstool stems; giant stems a little shaded, by <see cref="GiantStemShade"/>).</summary>
+    public static readonly Vector3 StemCream = new(0.93f, 0.87f, 0.72f);
+
+    /// <summary>How much darker than <see cref="StemCream"/> the old giant stems are at most (their bark still reads cream, just a little aged).</summary>
+    public const float GiantStemShade = 0.82f;
+
+    /// <summary>How brightly the glowing mushrooms glow (their <see cref="Prop.Glow"/>): from this to twice it.</summary>
+    public const float GlowStrength = 1.2f;
 
     private readonly Prop[][] _props;
 
@@ -251,14 +261,14 @@ public sealed class DeepForestScenery
             var rise = new Vector3(c.X, high, c.Z);
             float stemHeight = height + high - foot.Y;
             float spin = Rand(id, 2) * MathF.Tau;
-            var stemColor = new Vector3(0.48f, 0.37f, 0.34f) * (0.85f + 0.3f * Rand(id, 3));
+            var stemColor = StemCream * (GiantStemShade + (1f - GiantStemShade) * Rand(id, 3));
             Add(new Prop(PropKind.GiantStem, foot, Yaw(spin), new Vector3(r, stemHeight, r), stemColor, Rand(id, 4), owner: o));
             // The root flare: from the base to a little over the high side, its top just inside the stem.
             float skirtHeight = high - foot.Y + 0.8f + 0.15f * r;
             float skirtRadius = r * 0.97f * StemProfile(skirtHeight / stemHeight);
             Add(new Prop(PropKind.Skirt, foot, Yaw(spin + 0.4f), new Vector3(skirtRadius, skirtHeight, skirtRadius), stemColor * 0.92f, Rand(id, 64), owner: o));
 
-            var capColor = s_capColors[(int)(Rand(id, 5) * s_capColors.Length)] * (0.85f + 0.3f * Rand(id, 6));
+            var capColor = s_capColors[(int)(Rand(id, 5) * s_capColors.Length)] * (0.9f + 0.15f * Rand(id, 6));
             float capRadius = r * (3f + 1.4f * Rand(id, 7)) + 2f;
             float capHeight = capRadius * (0.32f + 0.16f * Rand(id, 8));
             var tilt = Lean(Rand(id, 9) * MathF.Tau, 0.07f * Rand(id, 10), spin);
@@ -283,9 +293,9 @@ public sealed class DeepForestScenery
                 if (!DeepForestGloom.InArea(tip.X, tip.Z))
                     continue; // would hang out over the cliffs
                 float stemR = MathF.Max(0.35f, r * 0.28f);
-                Add(new Prop(PropKind.BranchStem, basePoint, rot, new Vector3(stemR, length, stemR), new Vector3(0.46f, 0.35f, 0.33f), Rand(bid, 26), owner: o));
+                Add(new Prop(PropKind.BranchStem, basePoint, rot, new Vector3(stemR, length, stemR), StemCream * GiantStemShade, Rand(bid, 26), owner: o));
                 float bcH = branchCap * (0.3f + 0.15f * Rand(bid, 27));
-                var bcColor = s_capColors[(int)(Rand(bid, 28) * s_capColors.Length)] * (0.85f + 0.3f * Rand(bid, 29));
+                var bcColor = s_capColors[(int)(Rand(bid, 28) * s_capColors.Length)] * (0.9f + 0.15f * Rand(bid, 29));
                 Add(new Prop(PropKind.BranchCap, tip - new Vector3(0f, 0.18f * bcH, 0f), Lean(a, lean * 0.2f, Rand(bid, 30) * MathF.Tau),
                     new Vector3(branchCap, bcH, branchCap), bcColor, Rand(bid, 31), Rand(bid, 32) < 0.3f ? 0.6f : 0f, o));
             }
@@ -300,7 +310,7 @@ public sealed class DeepForestScenery
                 float y = 1.5f + Math.Min(6f, height * 0.4f) * Rand(sid, 41);
                 float size = r * (0.5f + 0.4f * Rand(sid, 42)) + 0.4f;
                 Add(new Prop(PropKind.Shelf, rise + new Vector3(0f, y, 0f) + dir * (r * 0.92f), Yaw(-a),
-                    new Vector3(size, size * 0.8f, size), new Vector3(0.48f, 0.3f, 0.2f) * (0.8f + 0.4f * Rand(sid, 43)), Rand(sid, 44), owner: o));
+                    new Vector3(size, size * 0.8f, size), new Vector3(0.78f, 0.34f, 0.08f) * (0.85f + 0.2f * Rand(sid, 43)), Rand(sid, 44), owner: o));
             }
 
             // Big arching roots around the foot.
@@ -370,7 +380,7 @@ public sealed class DeepForestScenery
             var (_, top) = GroundUnder(x, z, size * ToadstoolFoot);
             float baseY = BaseHeight(x, z, size * ToadstoolFoot, SmallSink);
             Add(new Prop(PropKind.Toadstool, new Vector3(x, baseY, z), Yaw(Rand(k, 93) * MathF.Tau), new Vector3(size, size + (top - baseY) / ToadstoolStem, size),
-                s_capColors[(int)(Rand(k, 94) * s_capColors.Length)] * (0.9f + 0.3f * Rand(k, 95)), Rand(k, 96)));
+                s_capColors[(int)(Rand(k, 94) * s_capColors.Length)] * (0.95f + 0.15f * Rand(k, 95)), Rand(k, 96)));
         }
 
         // Ferns: everywhere in the gloom, thickest along the overgrown path and at the entrance.
@@ -454,7 +464,7 @@ public sealed class DeepForestScenery
                 var (_, top) = GroundUnder(x, z, size * GlowFoot);
                 var at = new Vector3(x, BaseHeight(x, z, size * GlowFoot, SmallSink), z);
                 Add(new Prop(PropKind.Glow, at, Yaw(Rand(gid, 5) * MathF.Tau), new Vector3(size, size + (top - at.Y) / GlowHeight, size),
-                    color * (0.85f + 0.3f * Rand(gid, 6)), Rand(gid, 7), 0.6f + 0.6f * Rand(gid, 8)));
+                    color * (0.85f + 0.3f * Rand(gid, 6)), Rand(gid, 7), GlowStrength * (1f + Rand(gid, 8))));
                 sum += at;
                 placed++;
             }

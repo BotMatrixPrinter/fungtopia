@@ -1,14 +1,15 @@
-// Old giant caps: the instance color on top with a few faint, worn spots (INSTANCE_CUSTOM.y,
-// 0 for none), dark gills below (UV.y is 1 on top, 0 underneath). INSTANCE_CUSTOM.x picks the
-// spot pattern. No eyes, no faces.
+// Giant caps and toadstools: the vivid instance color on top with crisp, pure white spots
+// (INSTANCE_CUSTOM.y, 0 for none), a soft glossy highlight and a light rim, dark gills below
+// (UV.y is 1 on top, 0 underneath). INSTANCE_CUSTOM.x picks the spot pattern. No eyes, no faces.
 shader_type spatial;
 render_mode specular_disabled;
 
+#define TOON_GLOSS
 #include "res://modules/DeepForest/Godot/Shaders/toon.gdshaderinc"
 #include "res://modules/DeepForest/Godot/Shaders/gloom.gdshaderinc"
 
 uniform vec3 gill_color : source_color = vec3(0.36, 0.26, 0.3);
-uniform vec3 spot_color : source_color = vec3(0.78, 0.7, 0.72);
+uniform vec3 spot_color : source_color = vec3(1.0);
 
 varying vec3 local_pos;
 varying vec3 world_pos;
@@ -42,13 +43,15 @@ void fragment() {
 		float d = length(o + r - f);
 		float keep = step(0.55, hash3(c + 11.7));
 		float size = 0.16 + 0.1 * hash3(c + 5.9);
-		spot = max(spot, keep * (1.0 - smoothstep(size, size + 0.05, d)));
+		spot = max(spot, keep * (1.0 - smoothstep(size, size + 0.015, d)));
 	}
-	spot *= top * smoothstep(0.15, 0.35, dir.y) * custom.y * 0.6;
-	// Old caps: mottled, a little lighter toward the crown.
-	float mottle = 0.9 + 0.1 * sin(local_pos.x * 9.0 + sin(local_pos.z * 7.0) * 2.0) + 0.08 * dir.y;
+	spot *= top * step(0.25, dir.y) * step(0.01, custom.y);
+	// Barely mottled, a little lighter toward the crown, so the color stays clean and rich.
+	float mottle = 0.95 + 0.05 * sin(local_pos.x * 9.0 + sin(local_pos.z * 7.0) * 2.0) + 0.06 * dir.y;
 	vec3 cap = COLOR.rgb * mottle;
-	ALBEDO = mix(gill_color * mix(vec3(1.0), COLOR.rgb * 2.0, 0.3), mix(cap, spot_color * cap * 2.2, spot), top);
+	ALBEDO = mix(gill_color * mix(vec3(1.0), COLOR.rgb * 2.0, 0.3), mix(cap, spot_color, spot), top);
+	// Glossy on top (not the spots or the gills): ROUGHNESS is the gloss mask the toon light reads.
+	ROUGHNESS = 1.0 - top * (1.0 - spot) * 0.9;
 	AO = 1.0 - 0.55 * gloom_at(world_pos);
 	AO_LIGHT_AFFECT = 0.0;
 }

@@ -149,7 +149,7 @@ public partial class DeepForestView : Node3D, IModuleView
         foreach (var kind in new[] { PropKind.GiantCap, PropKind.BranchCap })
             foreach (var p in scenery.Of(kind))
                 caps.Add(Placed(p), C(p.Color), new Color(p.Seed, p.Glow, 0f, 0f));
-        // Toadstools: a pale little stem and a dark cap from the same meshes.
+        // Toadstools: a cream little stem and a vivid cap from the same meshes.
         foreach (var p in scenery.Of(PropKind.Toadstool))
         {
             var t = Placed(p);
@@ -157,7 +157,7 @@ public partial class DeepForestView : Node3D, IModuleView
             // Its stem is ToadstoolStem * Scale.Y tall: reaching down to its base where the ground drops away.
             float stem = DeepForestScenery.ToadstoolStem * p.Scale.Y;
             var stemBasis = t.Basis.Orthonormalized() * Basis.FromScale(new Godot.Vector3(0.055f * s, stem, 0.055f * s));
-            stems.Add(new Transform3D(stemBasis, t.Origin), new Color(0.62f, 0.58f, 0.56f));
+            stems.Add(new Transform3D(stemBasis, t.Origin), C(DeepForestScenery.StemCream));
             var capBasis = t.Basis.Orthonormalized() * Basis.FromScale(new Godot.Vector3(0.24f, 0.16f, 0.24f) * s);
             caps.Add(new Transform3D(capBasis, t.Origin + Godot.Vector3.Up * (stem - 0.03f * s)), C(p.Color), new Color(p.Seed, 0.8f, 0f, 0f));
         }
@@ -229,7 +229,7 @@ public partial class DeepForestView : Node3D, IModuleView
                 Name = $"GlowLight{n++}",
                 Position = V(l.Position),
                 LightColor = C(l.Color),
-                LightEnergy = 0.9f,
+                LightEnergy = 1.6f,
                 OmniRange = l.Range,
                 OmniAttenuation = 1.4f,
                 ShadowEnabled = false,
