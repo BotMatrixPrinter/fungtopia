@@ -1,17 +1,31 @@
-// Giant and small mushroom caps: instance color on top with cream spots, pale gills below.
-// INSTANCE_CUSTOM.x picks the spot pattern, INSTANCE_CUSTOM.y makes the cap glow softly;
-// night_glow (set by the view, brighter at night) scales that glow.
+// Giant and small mushroom caps: vivid instance color on top with pure white spots, pale gills
+// below. Toon-lit like the rest of the forest, plus a soft glossy band on the lit side of the top
+// and a light rim along the edge. INSTANCE_CUSTOM.x picks the spot pattern, INSTANCE_CUSTOM.y
+// makes the cap glow; glow_emission and night_glow (set by the view, brighter at night) scale it.
 shader_type spatial;
-render_mode specular_disabled;
 
-#include "res://modules/Forest/Godot/Shaders/toon.gdshaderinc"
-
-uniform vec3 gill_color : source_color = vec3(0.98, 0.88, 0.76);
-uniform vec3 spot_color : source_color = vec3(1.0, 0.97, 0.9);
+uniform vec3 gill_color : source_color = vec3(1.0, 0.93, 0.8);
+uniform vec3 spot_color : source_color = vec3(1.0);
+uniform float gloss = 0.32;
+uniform float rim = 0.42;
+uniform float glow_emission = 2.0;
 uniform float night_glow = 1.0;
 
 varying vec3 local_pos;
 varying vec2 custom;
+varying float cap_top;
+
+void light() {
+	float ndl = clamp(dot(NORMAL, LIGHT), 0.0, 1.0);
+	float lit = smoothstep(0.0, 0.14, ndl) * 0.72 + smoothstep(0.45, 0.62, ndl) * 0.28;
+	lit *= smoothstep(0.2, 0.6, ATTENUATION);
+	float edge = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 3.0);
+	DIFFUSE_LIGHT += LIGHT_COLOR * (lit + edge * rim * ATTENUATION) / PI;
+	// A soft toon specular band (white, not tinted by the cap) on the top's lit side.
+	float ndh = clamp(dot(NORMAL, normalize(LIGHT + VIEW)), 0.0, 1.0);
+	float band = smoothstep(0.88, 0.93, ndh) * lit * cap_top;
+	SPECULAR_LIGHT += LIGHT_COLOR * band * gloss * ATTENUATION;
+}
 
 float hash3(vec3 p) {
 	p = fract(p * 0.3183099 + 0.1);
@@ -43,8 +57,9 @@ void fragment() {
 		spot = max(spot, keep * (1.0 - smoothstep(size, size + 0.03, d)));
 	}
 	spot *= top * smoothstep(0.12, 0.3, dir.y);
+	cap_top = top;
 	vec3 cap = COLOR.rgb;
 	vec3 gills = gill_color * mix(vec3(1.0), cap, 0.18);
 	ALBEDO = mix(gills, mix(cap, spot_color, spot), top);
-	EMISSION = (cap * 0.8 * top + gills * 0.25 * (1.0 - top) + spot_color * spot * 0.5) * custom.y * night_glow;
+	EMISSION = (cap * 0.8 * top + gills * 0.25 * (1.0 - top) + spot_color * spot * 0.5) * custom.y * glow_emission * night_glow;
 }

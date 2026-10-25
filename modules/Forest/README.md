@@ -14,8 +14,8 @@ whether it is night, for the glowing mushrooms.
   giant mushrooms may stand and where it stands (`Mushrooms`), `ForestProps`, where props may
   stand, the west gap's overgrown trail and tiny dark mushrooms, `ForestScenery`, everything the view
   draws standing in the forest and how big (giant, medium and ring mushrooms, small decoration),
-  `ForestFooting`, how each of them is planted on the uneven ground (see **Planting** below), and
-  `ForestRandom`, the fixed hash the layout uses.
+  `ForestFooting`, how each of them is planted on the uneven ground (see **Planting** below),
+  `ForestPalette`, the mushrooms' colors and cap shading (see **Colors** below), and `ForestRandom`, the fixed hash the layout uses.
 - `Godot/` — `Main.tscn` with `ForestView`, which draws the forest from the Contract.
 - `Tests/` — `ForestTests.cs`: xUnit tests of the Contract (its forwarding values equal the Map's; `Obstacles` are exactly the Map's obstacles in the forest area; at least 80, radii up to 3 m, inside the square or on its wall, the same on every call, off paths, clearings, road gaps and the start, with no fixed count, so they hold once the Map adds solid props),
   of `ForestRing` (it matches the Map's obstacles and walkable ground; it opens at the west gap just
@@ -26,7 +26,7 @@ whether it is night, for the glowing mushrooms.
   and stems at 1500 sample positions over hills, the Deep Forest's rough ground and cliffs, have their base at or
   below the ground everywhere under the foot and at most 0.3 m below its lowest point, caps clear of the ground;
   big stems flare into the ground, sticking out of the stem where it meets the ground and never wider than their circle; all decoration is under 0.4 m tall and 0.6 m across; everything
-  taller inside the square stands within an obstacle) and of `ForestModule` with a fake `IMessageBus`.
+  taller inside the square stands within an obstacle) of `ForestPalette` (caps strongly saturated and bright, each more saturated than the color it replaced and no darker; reds pure cherry/tomato; red, orange/brown and purple caps, violet, pink and cyan glowing ones, dark but rich Deep Forest caps; pure white spots; light cream stems and gills; a gloss, a rim stronger than the toon light's, glowing caps twice as bright as before at night and no brighter by day; the view and cap shader use them) and of `ForestModule` with a fake `IMessageBus`.
 
 Test it with `./test.sh Forest` from the repository root.
 
@@ -56,15 +56,15 @@ headless): the forest square's floor from `Map.Ground.HeightAt` on a 1 m grid fr
 (the Map draws the ground around it on the same grid, so the seam matches; vertex-colored grass,
 moss, meadow clearings and dirt paths), a giant mushroom on every forest trunk
 (`ForestScenery.Giants`, the first `Map.Ground.ForestTrunkCount` of `Obstacles`; stem radius
-= the circle's radius, the stem mesh bulging to exactly that at its foot and narrower above; fat stems, big spotted caps in reds, browns and purples, about one in six
-glowing softly; plain caps, no eyes or faces: only creatures have eyes), the ring of dense giant
+= the circle's radius, the stem mesh bulging to exactly that at its foot and narrower above; fat clean light cream stems, big caps with pure white spots in vivid cherry and tomato reds, oranges, warm browns and purples, about one in six
+glowing violet, pink or cyan; plain caps, no eyes or faces: only creatures have eyes), the ring of dense giant
 mushrooms outside the square (`ForestRing.Mushrooms`: open in the Map's road gaps,
 `Areas.ForestGapSouth` and `ForestGapNorth`, `ForestGapHalfWidth` 5 m to each side, and in its
 west gap to the Deep Forest, `Areas.ForestGapWest` and `DeepForestPath`; off every road and
 walkable ground by `WalkableClearance` 1.5 m and clear of all `Map.Ground.Obstacles`; not beside
 the roads where the Map draws its own cliff mushrooms; a row of stems closes the narrow strip
 between the square and the Deep Forest, its first stems right at the west gap's edges; within
-`DarkReach` 16 m of the west gap their caps are dark Deep Forest purples and blues; they stand
+`DarkReach` 16 m of the west gap their caps are dark but rich Deep Forest purples, blues and dusky reds; they stand
 off all walkable ground), a medium mushroom on every Map prop of kind `MediumMushroom` in
 `Area.Forest` (`ForestScenery.MediumMushrooms`: exactly at the prop, turned by its `Rotation`, stem
 radius = `Radius`, `Height` tall to the top of its cap, which may overhang), small walkable
@@ -78,8 +78,9 @@ half-width, patchy dark soil under moss) winds from the gap between the trunks t
 path at (-80, 26). A few tiny dark mushrooms (`ForestProps.DarkMushrooms`, under 0.4 m) stand beside it at the
 gap's mouth. Small props
 and all mushrooms are MultiMesh instances (one draw per kind). Shaders in `Godot/Shaders/`: soft
-two-band toon light with ink outlines. The glowing caps shine 2.4 times as bright at night
-(`ForestModule.IsNight`, fading over about two seconds). The forest has no light, sky or
+two-band toon light with ink outlines; mushroom caps add a soft glossy specular band and a light rim
+(`mushroom_cap.gdshader`). The glowing caps shine 4.8 times as bright at night as by day
+(`ForestModule.IsNight`, fading over about two seconds; see **Colors**). The forest has no light, sky or
 environment of its own: DayNight's global sun and `WorldEnvironment` light it.
 
 Rule: anything drawn taller than 0.4 m (or wider than 0.6 m) inside the square is a mushroom on
@@ -88,6 +89,20 @@ decoration is scattered freely, and walkers cross it. Tiny mushrooms, ferns and 
 where `ForestProps.Open` allows: inside the square, off obstacles, paths, the trail and the Deep
 Forest path. Only ankle-high grass tufts grow on the trail and in the gap (the
 overgrowth); off the square they keep off the Map's walkable ground.
+
+## Colors
+
+Every mushroom the forest draws takes its colors from `ForestPalette` (Core), the "vivid" rule
+(Tony, 2026-10-25, the same for every mushroom in the game): caps clearly saturated and bright,
+so they pop against the greens and browns: three cherry/tomato reds (about (0.94, 0.06, 0.1)),
+three oranges and warm browns, two purples; glowing caps violet, pink and cyan; by the west gap
+dark but rich purples, blues and a dusky red. Spots pure white (1, 1, 1), stems a clean light cream
+((1, 0.97, 0.88) to (0.98, 0.93, 0.8), the root flare a shade darker), gills pale cream. The cap
+shader adds a soft white specular band on the lit side of the top (`CapGloss` 0.32) and a light
+rim along the edge (`CapRim` 0.42, the other forest shaders' rim is 0.18); glowing caps' emission
+is scaled by `GlowEmission` 2 times `DayGlow` 0.5 by day (as before, so they do not wash out in the
+sun) and times `NightGlow` 2.4 at night (twice as bright as before), fading over about two seconds. No
+mushroom has eyes or a face. Ground, ferns, grass, flowers and fireflies keep their own colors.
 
 ## Planting
 
@@ -105,5 +120,19 @@ foot's ground, which `Plant` puts at most halfway up the flare, so the flare sti
 all round where it meets the ground; above that it narrows smoothly to 0.55 of the radius, inside
 the stem, at least 0.4 of the radius above the high side (at most 0.8 of the stem).
 
-A `PreviewCamera` stands at `PlayerStart` at eye height (1.6 m) looking north up the path; it is
-current only until another module makes its own camera current.
+A `PreviewCamera` stands at `PlayerStart` at eye height (1.6 m) looking north up the path; without
+`FOREST_PREVIEW` it is current only until another module makes its own camera current, and nothing
+else changes. For screenshots, `FOREST_PREVIEW` picks and keeps it: `start` leaves it at the
+player's start looking north up the path; `close` puts it near the giant mushroom closest to the
+start, on the start's side, looking up at its cap. With either value the preview camera stays
+current, the screens over the world (the main scene's `CanvasLayer`s and `Control`s: start screen,
+HUD) are hidden, and the glowing caps jump to their day or night level without the fade.
+
+## Screenshots
+
+The forest is the main scene's start. From the repository root,
+`FOREST_PREVIEW=start DAYNIGHT_HOUR=12 ./screenshot.sh "" forest_day.png` and
+`FOREST_PREVIEW=start DAYNIGHT_HOUR=23 ./screenshot.sh "" forest_night.png` render the view up the
+path by day and at night; `FOREST_PREVIEW=close DAYNIGHT_HOUR=12 ./screenshot.sh "" forest_close_day.png`
+and `FOREST_PREVIEW=close DAYNIGHT_HOUR=23 ./screenshot.sh "" forest_close_night.png` the close-up of a
+giant mushroom (`modules/Forest/Godot/Main.tscn` alone has no sun or sky).

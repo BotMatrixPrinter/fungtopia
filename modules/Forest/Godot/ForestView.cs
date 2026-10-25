@@ -15,41 +15,38 @@ namespace Fungtopia.Forest.View;
 /// overgrown trail (<see cref="ForestProps"/>), and instanced small walkable decoration under
 /// 0.4 m (tiny mushrooms, ferns, flowers, grass) and fireflies. Mushrooms have plain spotted caps and no faces. The glowing caps glow brighter at night
 /// (<see cref="ForestModule.IsNight"/>). Sun, sky and environment are the DayNight module's. Also
-/// a preview camera at the player's start that any other current camera replaces.
+/// a preview camera at the player's start that any other current camera replaces. For screenshots,
+/// FOREST_PREVIEW=start or close keeps a preview camera current and hides the screens over the
+/// world (start screen, HUD); without it the view never touches them.
 /// </summary>
 public partial class ForestView : Node3D, IModuleView
 {
     private const string Shaders = "res://modules/Forest/Godot/Shaders/";
 
     /// <summary>How much brighter the glowing caps shine at night.</summary>
-    private const float NightGlow = 2.4f;
+    private const float NightGlow = ForestPalette.NightGlow;
 
     /// <summary>How fast (per second) the glow follows day and night.</summary>
     private const float GlowRate = 0.5f;
 
     private const float EyeHeight = 1.6f;
 
-    private static readonly Color[] CapColors =
-    {
-        new(0.88f, 0.24f, 0.22f), new(0.93f, 0.36f, 0.26f), new(0.8f, 0.18f, 0.24f),
-        new(0.62f, 0.4f, 0.24f), new(0.72f, 0.5f, 0.3f), new(0.55f, 0.33f, 0.22f),
-        new(0.6f, 0.36f, 0.72f), new(0.72f, 0.42f, 0.78f),
-    };
+    private static Color ToColor(System.Numerics.Vector3 c) => new(c.X, c.Y, c.Z);
 
-    private static readonly Color[] GlowColors =
-    {
-        new(0.62f, 0.45f, 0.95f), new(0.95f, 0.5f, 0.85f), new(0.4f, 0.8f, 0.9f),
-    };
+    private static Color[] ToColors(System.Numerics.Vector3[] colors) => Array.ConvertAll(colors, ToColor);
+
+    // The mushrooms' vivid colors, from ForestPalette.
+    private static readonly Color[] CapColors = ToColors(ForestPalette.Caps);
+
+    private static readonly Color[] GlowColors = ToColors(ForestPalette.GlowCaps);
 
     /// <summary>The Deep Forest's dark caps: deep purples, blues and dusky reds.</summary>
-    private static readonly Color[] DarkCapColors =
-    {
-        new(0.32f, 0.2f, 0.42f), new(0.24f, 0.22f, 0.4f), new(0.42f, 0.18f, 0.28f), new(0.2f, 0.28f, 0.36f),
-    };
+    private static readonly Color[] DarkCapColors = ToColors(ForestPalette.DarkCaps);
 
     private ForestModule? _forest;
     private ShaderMaterial? _capMaterial;
-    private float _glow = 1f;
+    private float _glow = ForestPalette.DayGlow;
+    private Camera3D? _preview;
 
     public void Bind(IModule module) => _forest = (ForestModule)module;
 
@@ -67,12 +64,17 @@ public partial class ForestView : Node3D, IModuleView
 
     public override void _Process(double delta)
     {
+        if (_preview != null)
+            KeepPreview();
         if (_capMaterial == null)
             return;
-        float target = _forest != null && _forest.IsNight ? NightGlow : 1f;
+        float target = _forest != null && _forest.IsNight ? NightGlow : ForestPalette.DayGlow;
         if (_glow == target)
             return;
-        float step = GlowRate * (NightGlow - 1f) * (float)delta;
+        // Screenshots show the glow at once, without the fade.
+        if (_preview != null)
+            _glow = target;
+        float step = GlowRate * (NightGlow - ForestPalette.DayGlow) * (float)delta;
         _glow = _glow < target ? MathF.Min(_glow + step, target) : MathF.Max(_glow - step, target);
         _capMaterial.SetShaderParameter("night_glow", _glow);
     }
@@ -211,7 +213,7 @@ public partial class ForestView : Node3D, IModuleView
             int id = m.Id;
             var planted = ForestFooting.Plant(m);
             var foot = new Vector3(m.X, planted.BaseY, m.Z);
-            var stemColor = new Color(0.97f, 0.91f, 0.8f).Lerp(new Color(0.93f, 0.82f, 0.7f), Rand(id, 2));
+            var stemColor = ToColor(ForestPalette.StemLight).Lerp(ToColor(ForestPalette.StemShade), Rand(id, 2));
             stems.Add(Placed(foot, m.Yaw, new Vector3(m.StemRadius, planted.StemHeight, m.StemRadius)), stemColor);
             if (planted.SkirtHeight > 0f)
                 skirts.Add(Placed(foot, m.Yaw, new Vector3(m.StemRadius, planted.SkirtHeight, m.StemRadius)), stemColor.Darkened(0.04f));
@@ -256,6 +258,12 @@ public partial class ForestView : Node3D, IModuleView
         AddChild(stems.Build("MushroomStems", ForestMeshes.Stem(), stemMaterial));
         AddChild(skirts.Build("MushroomSkirts", ForestMeshes.Skirt(), stemMaterial));
         _capMaterial = Material("mushroom_cap.gdshader", outline: true);
+        _capMaterial.SetShaderParameter("spot_color", ToColor(ForestPalette.Spot));
+        _capMaterial.SetShaderParameter("gill_color", ToColor(ForestPalette.Gills));
+        _capMaterial.SetShaderParameter("gloss", ForestPalette.CapGloss);
+        _capMaterial.SetShaderParameter("rim", ForestPalette.CapRim);
+        _capMaterial.SetShaderParameter("glow_emission", ForestPalette.GlowEmission);
+        _capMaterial.SetShaderParameter("night_glow", _glow);
         AddChild(caps.Build("MushroomCaps", ForestMeshes.Cap(), _capMaterial));
     }
 
@@ -325,6 +333,20 @@ public partial class ForestView : Node3D, IModuleView
         AddChild(node);
     }
 
+    /// <summary>Screenshots only: the preview camera stays current and the screens and labels over the world are hidden.</summary>
+    private void KeepPreview()
+    {
+        if (!_preview!.Current)
+            _preview.MakeCurrent();
+        foreach (var node in GetParent().GetChildren())
+        {
+            if (node is CanvasLayer layer && layer.Visible)
+                layer.Visible = false;
+            else if (node is Control control && control.Visible)
+                control.Visible = false;
+        }
+    }
+
     private void BuildPreviewCamera()
     {
         // Looks north up the path from the player's start at eye height. Any camera another
@@ -334,5 +356,25 @@ public partial class ForestView : Node3D, IModuleView
         var camera = new Camera3D { Name = "PreviewCamera", Fov = 70f, Far = 400f };
         AddChild(camera);
         camera.LookAtFromPosition(eye, Ground(4f, 50f) + Vector3.Up * 3f, Vector3.Up);
+        switch (OS.GetEnvironment("FOREST_PREVIEW").ToLowerInvariant())
+        {
+            case "start":
+                break;
+            case "close":
+                // Close to the giant mushroom nearest the start, from the start's side, looking up at its cap.
+                var near = ForestScenery.Giants[0];
+                foreach (var m in ForestScenery.Giants)
+                    if (MathF.Pow(m.X - start.X, 2) + MathF.Pow(m.Z - start.Z, 2) < MathF.Pow(near.X - start.X, 2) + MathF.Pow(near.Z - start.Z, 2))
+                        near = m;
+                var away = new Vector3(start.X - near.X, 0f, start.Z - near.Z).Normalized();
+                var at = Ground(near.X, near.Z);
+                var from = at + away * (near.CapRadius * 2.6f);
+                camera.LookAtFromPosition(Ground(from.X, from.Z) + Vector3.Up * EyeHeight, at + Vector3.Up * near.Height * 0.75f, Vector3.Up);
+                break;
+            default:
+                return;
+        }
+        _preview = camera;
+        camera.MakeCurrent();
     }
 }

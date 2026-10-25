@@ -745,4 +745,190 @@ public class ForestTests
         Assert.Throws<InvalidOperationException>(() => new ForestModule().Tick(new TickContext(0, 1.0 / 60)));
         Assert.Throws<ArgumentNullException>(() => new ForestModule().Start(null!));
     }
+
+    // Vivid mushrooms (Tony, 2026-10-25)
+
+    /// <summary>Hue in degrees (0..360), saturation and value (0..1) of an RGB color.</summary>
+    private static (float Hue, float Sat, float Val) Hsv(Vector3 c)
+    {
+        float max = MathF.Max(c.X, MathF.Max(c.Y, c.Z)), min = MathF.Min(c.X, MathF.Min(c.Y, c.Z));
+        float d = max - min;
+        float hue = d <= 0f ? 0f
+            : max == c.X ? 60f * (((c.Y - c.Z) / d + 6f) % 6f)
+            : max == c.Y ? 60f * ((c.Z - c.X) / d + 2f)
+            : 60f * ((c.X - c.Y) / d + 4f);
+        return (hue, max <= 0f ? 0f : d / max, max);
+    }
+
+    private static void AssertInRgb(Vector3 c)
+    {
+        Assert.InRange(c.X, 0f, 1f);
+        Assert.InRange(c.Y, 0f, 1f);
+        Assert.InRange(c.Z, 0f, 1f);
+    }
+
+    /// <summary>The palette before the vivid pass: ordinary, glowing and dark caps, and the stem creams.</summary>
+    private static readonly Vector3[] OldCaps =
+    {
+        new(0.88f, 0.24f, 0.22f), new(0.93f, 0.36f, 0.26f), new(0.8f, 0.18f, 0.24f),
+        new(0.62f, 0.4f, 0.24f), new(0.72f, 0.5f, 0.3f), new(0.55f, 0.33f, 0.22f),
+        new(0.6f, 0.36f, 0.72f), new(0.72f, 0.42f, 0.78f),
+    };
+
+    private static readonly Vector3[] OldGlowCaps = { new(0.62f, 0.45f, 0.95f), new(0.95f, 0.5f, 0.85f), new(0.4f, 0.8f, 0.9f) };
+
+    private static readonly Vector3[] OldDarkCaps =
+    {
+        new(0.32f, 0.2f, 0.42f), new(0.24f, 0.22f, 0.4f), new(0.42f, 0.18f, 0.28f), new(0.2f, 0.28f, 0.36f),
+    };
+
+    [Fact]
+    public void CapsAreClearlySaturatedAndBright()
+    {
+        // Every ordinary cap is strongly saturated (never pastel, dull pink or washed-out white) and
+        // bright, and still has room below white so daylight does not flatten it.
+        foreach (var c in ForestPalette.Caps)
+        {
+            AssertInRgb(c);
+            var (_, sat, val) = Hsv(c);
+            Assert.InRange(sat, 0.78f, 1f);
+            Assert.InRange(val, 0.75f, 1f);
+            Assert.True(MathF.Min(c.X, MathF.Min(c.Y, c.Z)) <= 0.2f, $"cap {c} has too much white in it");
+        }
+        foreach (var c in ForestPalette.GlowCaps)
+        {
+            AssertInRgb(c);
+            var (_, sat, val) = Hsv(c);
+            Assert.InRange(sat, 0.65f, 1f);
+            Assert.InRange(val, 0.95f, 1f);
+        }
+        // The Deep Forest's caps stay dark but rich, not muddy grey.
+        foreach (var c in ForestPalette.DarkCaps)
+        {
+            AssertInRgb(c);
+            var (_, sat, val) = Hsv(c);
+            Assert.InRange(sat, 0.65f, 1f);
+            Assert.InRange(val, 0.5f, 0.65f);
+        }
+    }
+
+    [Fact]
+    public void CapsAreMoreVividThanBefore()
+    {
+        // Each cap, color by color, is more saturated than the one it replaces and no darker.
+        void Compare(Vector3[] now, Vector3[] before)
+        {
+            Assert.Equal(before.Length, now.Length);
+            for (int i = 0; i < now.Length; i++)
+            {
+                var (_, satNow, valNow) = Hsv(now[i]);
+                var (_, satBefore, valBefore) = Hsv(before[i]);
+                Assert.True(satNow >= satBefore + 0.15f, $"cap {i} {now[i]} is not clearly more saturated than {before[i]}");
+                Assert.True(valNow >= valBefore - 0.001f, $"cap {i} {now[i]} is darker than {before[i]}");
+            }
+        }
+        Compare(ForestPalette.Caps, OldCaps);
+        Compare(ForestPalette.GlowCaps, OldGlowCaps);
+        Compare(ForestPalette.DarkCaps, OldDarkCaps);
+    }
+
+    [Fact]
+    public void RedCapsArePureCherryOrTomatoRed()
+    {
+        // Reds (hue within 15 degrees of red): pure and bright, green and blue nearly gone, not brownish or pink.
+        int reds = 0;
+        foreach (var c in ForestPalette.Caps)
+        {
+            var (hue, sat, val) = Hsv(c);
+            if (hue > 15f && hue < 340f)
+                continue;
+            reds++;
+            Assert.True(hue <= 12f || hue >= 350f, $"red cap {c} drifts toward orange or pink (hue {hue})");
+            Assert.True(sat >= 0.88f && val >= 0.85f, $"red cap {c} is not a pure bright red");
+            Assert.True(c.Y <= 0.22f && c.Z <= 0.2f, $"red cap {c} is brownish or pinkish");
+        }
+        Assert.Equal(3, reds);
+    }
+
+    [Fact]
+    public void CapsKeepEveryHueFamily()
+    {
+        // Still reds, oranges/browns and purples, so the forest keeps its mix; glowing caps violet, pink, cyan.
+        static int Count(Vector3[] colors, float from, float to)
+        {
+            int n = 0;
+            foreach (var c in colors)
+            {
+                float hue = Hsv(c).Hue;
+                if (from <= to ? hue >= from && hue < to : hue >= from || hue < to)
+                    n++;
+            }
+            return n;
+        }
+        Assert.Equal(3, Count(ForestPalette.Caps, 340f, 15f));
+        Assert.Equal(3, Count(ForestPalette.Caps, 15f, 45f));
+        Assert.Equal(2, Count(ForestPalette.Caps, 260f, 310f));
+        Assert.Equal(1, Count(ForestPalette.GlowCaps, 250f, 290f));
+        Assert.Equal(1, Count(ForestPalette.GlowCaps, 290f, 340f));
+        Assert.Equal(1, Count(ForestPalette.GlowCaps, 170f, 210f));
+    }
+
+    [Fact]
+    public void SpotsArePureWhiteAndStemsCleanLightCream()
+    {
+        Assert.Equal(new Vector3(1f, 1f, 1f), ForestPalette.Spot);
+        foreach (var c in new[] { ForestPalette.StemLight, ForestPalette.StemShade, ForestPalette.Gills })
+        {
+            AssertInRgb(c);
+            var (hue, sat, val) = Hsv(c);
+            // Light, warm (yellowish) and only faintly tinted: cream, not beige or tan.
+            Assert.InRange(val, 0.97f, 1f);
+            Assert.InRange(sat, 0.05f, 0.2f);
+            Assert.InRange(hue, 30f, 55f);
+            Assert.True(c.Y >= 0.9f, $"{c} is too dark for clean light cream");
+        }
+    }
+
+    [Fact]
+    public void CapsHaveAGlossAndARimAndGlowAboutTwiceAsBright()
+    {
+        // A soft gloss (present, but not a hard white blob) and a rim light stronger than the toon light's 0.18.
+        Assert.InRange(ForestPalette.CapGloss, 0.15f, 0.5f);
+        Assert.InRange(ForestPalette.CapRim, 0.3f, 0.6f);
+        // At night the emission is about twice what it was (2.4 before: scale 1, night 2.4); by day
+        // no more than before (1), so glowing caps do not wash out to white in the sun.
+        Assert.InRange(ForestPalette.GlowEmission * ForestPalette.NightGlow, 2f * 2.4f * 0.9f, 2f * 2.4f * 1.1f);
+        Assert.InRange(ForestPalette.GlowEmission * ForestPalette.DayGlow, 0.5f, 1f);
+        Assert.True(ForestPalette.NightGlow > ForestPalette.DayGlow * 2f, "glowing caps should clearly glow brighter at night");
+    }
+
+    /// <summary>The repository's root (where hub.json is), found from the test's output folder.</summary>
+    private static string RepoRoot()
+    {
+        var dir = new System.IO.DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !System.IO.File.Exists(System.IO.Path.Combine(dir.FullName, "hub.json")))
+            dir = dir.Parent;
+        Assert.NotNull(dir);
+        return dir!.FullName;
+    }
+
+    [Fact]
+    public void ViewAndCapShaderDrawTheVividPalette()
+    {
+        // The view takes every mushroom color and the cap shading from ForestPalette, and the cap
+        // shader has the gloss band, the rim and the glow scale it sets.
+        string forest = System.IO.Path.Combine(RepoRoot(), "modules", "Forest", "Godot");
+        string view = System.IO.File.ReadAllText(System.IO.Path.Combine(forest, "ForestView.cs"));
+        foreach (string use in new[]
+        {
+            "ForestPalette.Caps", "ForestPalette.GlowCaps", "ForestPalette.DarkCaps", "ForestPalette.StemLight",
+            "ForestPalette.StemShade", "ForestPalette.Spot", "ForestPalette.Gills", "ForestPalette.CapGloss",
+            "ForestPalette.CapRim", "ForestPalette.GlowEmission", "ForestPalette.DayGlow", "ForestPalette.NightGlow",
+        })
+            Assert.Contains(use, view);
+        string cap = System.IO.File.ReadAllText(System.IO.Path.Combine(forest, "Shaders", "mushroom_cap.gdshader"));
+        foreach (string part in new[] { "uniform float gloss", "uniform float rim", "uniform float glow_emission", "SPECULAR_LIGHT", "glow_emission * night_glow" })
+            Assert.Contains(part, cap);
+        Assert.DoesNotContain("specular_disabled", cap);
+    }
 }
