@@ -1,4 +1,4 @@
-# Shorts (Bottom, starter): chunky sky-blue shorts with a rolled hem.
+# Shorts (Bottom, starter): chunky sky-blue shorts, a short band round the lower triangle with a rolled hem.
 # Run from the repository root (writes shorts.glb next to this script):
 #   blender -b --factory-startup --python modules/Wardrobe/Models/Clothes/shorts.py
 # Shapes and rig sizes: ../kit.py.
@@ -14,12 +14,8 @@ reset()
 blue = material("Cloth", (0.45, 0.68, 0.95))
 hem = material("Hem", (0.35, 0.55, 0.85))
 body = Part("Body")
-hips(body, blue)
-body.torus(hem, (0, 0, 0.4), on_chest(90, 0.4).x + 0.016, 0.018, scale=(1, CHEST_R[1] / CHEST_R[0]))
+cloth(body, blue, 0.2, BAND_TOP, out=BOTTOM_OUT)
+ring(body, blue, BAND_TOP - 0.004, 0.014, out=BOTTOM_OUT)
+ring(body, hem, 0.205, 0.02, out=BOTTOM_OUT)
 body.build()
-for name in ("LegL", "LegR"):
-    leg = Part(name)
-    leg_tube(leg, blue, HIP_Z + 0.04, 0.2, 0.088, flare=0.012)
-    leg.torus(hem, (leg.pivot.x, 0, 0.2), 0.1, 0.018, segments=24)
-    leg.build()
 export(__file__)

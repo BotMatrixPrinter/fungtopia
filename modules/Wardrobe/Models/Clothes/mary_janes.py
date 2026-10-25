@@ -1,4 +1,4 @@
-# Mary-Janes (Shoes, starter): round shiny cherry-red shoes with a strap and a button, over white frilly socks.
+# Mary-Janes (Shoes, starter): round shiny cherry-red shoes over the round feet, with a strap, a button and a white frilly sock cuff.
 # Run from the repository root (writes mary_janes.glb next to this script):
 #   blender -b --factory-startup --python modules/Wardrobe/Models/Clothes/mary_janes.py
 # Shapes and rig sizes: ../kit.py.
@@ -18,11 +18,12 @@ button = material("Button", (1.0, 0.85, 0.4))
 for name in ("LegL", "LegR"):
     leg = Part(name)
     x = leg.pivot.x
-    leg.cone(sock, (x, 0, 0.08), 0.07, 0.07, 0.1, segments=20)
-    leg.torus(sock, (x, 0, 0.18), 0.075, 0.016, segments=20)
-    shoe(leg, red, sole, size=(0.095, 0.13, 0.068))
-    leg.torus(red, (x, 0.02, 0.1), 0.075, 0.012, rotation=Matrix.Rotation(math.radians(90), 4, "Y"), arc=0.5)
+    c = shoe(leg, red, sole, size=(0.098, 0.13, 0.062))
+    # The sock's frill round the shoe's opening, and the strap across the top.
+    leg.torus(sock, c + Vector((0, -0.035, 0.046)), 0.055, 0.012, segments=24, scale=(1.1, 0.9))
+    leg.torus(red, c + Vector((0, 0.03, 0.0)), 0.098, 0.011, rotation=Matrix.Rotation(math.radians(90), 4, "Y"), arc=0.5,
+              scale=(0.62, 1.01))
     side = 1 if x > 0 else -1
-    leg.sphere(button, (x + side * 0.08, 0.02, 0.085), (0.012, 0.016, 0.016), segments=10, rings=5)
+    leg.sphere(button, c + Vector((side * 0.096, 0.03, 0.0)), (0.008, 0.014, 0.014), segments=10, rings=5)
     leg.build()
 export(__file__)

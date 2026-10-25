@@ -1,4 +1,4 @@
-# Rain Boots (Shoes, starter): shiny yellow rain boots up to the knee with a white sole and a red rim.
+# Rain Boots (Shoes, starter): shiny round yellow rain boots over the round feet, with a white sole and a red rim.
 # Run from the repository root (writes rain_boots.glb next to this script):
 #   blender -b --factory-startup --python modules/Wardrobe/Models/Clothes/rain_boots.py
 # Shapes and rig sizes: ../kit.py.
@@ -16,9 +16,11 @@ sole = material("Sole", (1.0, 0.97, 0.9))
 rim = material("Rim", (0.92, 0.3, 0.32))
 for name in ("LegL", "LegR"):
     leg = Part(name)
-    x = leg.pivot.x
-    shoe(leg, yellow, sole, size=(0.1, 0.14, 0.08))
-    leg.cone(yellow, (x, -0.005, 0.05), 0.088, 0.09, 0.2, segments=24)
-    leg.torus(rim, (x, -0.005, 0.25), 0.092, 0.02, segments=24)
+    size = (0.105, 0.14, 0.066)
+    c = shoe(leg, yellow, sole, size=size)
+    # The red rim round the boot's top, where it meets the body.
+    dz = 0.035
+    k = math.sqrt(1 - (dz / size[2]) ** 2)
+    leg.torus(rim, c + Vector((0, 0, dz)), size[0] * k + 0.006, 0.014, segments=32, scale=(1, size[1] / size[0]))
     leg.build()
 export(__file__)

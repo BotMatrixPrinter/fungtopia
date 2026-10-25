@@ -1,6 +1,6 @@
-# Striped Tee (Top, starter): a soft cream tee with chunky coral stripes and puffy sleeves.
+# Striped Tee (Top, starter): a soft cream tee over the triangle with chunky coral stripes and a coral collar.
 # Run from the repository root (writes striped_tee.glb next to this script):
-#   blender -b --factory-startup --python modules/Wardrobe/Models/striped_tee.py
+#   blender -b --factory-startup --python modules/Wardrobe/Models/Clothes/striped_tee.py
 # Shapes and rig sizes: ../kit.py.
 import math
 import os
@@ -14,10 +14,11 @@ reset()
 cream = material("Cloth", (1.0, 0.95, 0.86))
 stripe = material("Stripe", (0.95, 0.42, 0.42))
 body = Part("Body")
-shirt(body, cream, sleeve_mat=stripe)
-for z in (0.38, 0.47, 0.56, 0.65):
-    r = on_chest(90, z).x + 0.02
-    body.torus(stripe, (0, 0, z), r, 0.018, scale=(1, CHEST_R[1] / CHEST_R[0]))
-collar(body, stripe)
+cloth(body, cream, TOP_HEM)
+ring(body, cream, TOP_HEM + 0.01, 0.014)
+# Flat chunky stripes, and the collar round the top.
+for z in (0.31, 0.39, 0.47):
+    cloth(body, stripe, z - 0.022, z + 0.022, out=TOP_OUT + 0.004)
+cloth(body, stripe, 0.535, 0.575, out=TOP_OUT + 0.004)
 body.build()
 export(__file__)

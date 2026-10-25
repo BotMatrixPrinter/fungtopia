@@ -296,8 +296,8 @@ public static class Attach
 
     public static readonly Vector3 HeadPivot = new(0f, 0.72f, 0f);
     public static readonly Vector3 BodyPivot = new(0f, 0.3f, 0f);
-    public static readonly Vector3 LegLPivot = new(-0.11f, 0.32f, 0f);
-    public static readonly Vector3 LegRPivot = new(0.11f, 0.32f, 0f);
+    public static readonly Vector3 LegLPivot = new(-0.125f, 0.32f, 0f);
+    public static readonly Vector3 LegRPivot = new(0.125f, 0.32f, 0f);
 }
 
 /// <summary>

@@ -1,4 +1,4 @@
-# Mushroom Backpack (Back, shop): a backpack shaped like a mushroom, a cream stem bag under a big red spotted cap.
+# Mushroom Backpack (Back, shop): a backpack shaped like a mushroom on the triangle's back, a cream stem bag under a big red spotted cap, with straps over the top.
 # Run from the repository root (writes mushroom_backpack.glb next to this script):
 #   blender -b --factory-startup --python modules/Wardrobe/Models/Clothes/mushroom_backpack.py
 # Shapes and rig sizes: ../kit.py.
@@ -13,21 +13,24 @@ from kit import *  # noqa: E402,F401,F403
 reset()
 stem = material("Stem", (1.0, 0.92, 0.8))
 red = material("Cap", (0.92, 0.25, 0.27))
-spot = material("Spots", (1.0, 0.97, 0.92))
+spot_mat = material("Spots", (1.0, 0.97, 0.92))
 strap = material("Strap", (0.6, 0.35, 0.2))
 body = Part("Body")
-c = Vector((0, -0.3, 0.44))
-body.sphere(stem, c, (0.14, 0.09, 0.15), segments=24, rings=12)
-cap = c + Vector((0, -0.01, 0.12))
-body.sphere(red, cap, (0.22, 0.16, 0.16), cut=(cap, (0, 0, -1)), segments=32, rings=16)
-for a, e in ((0, 40), (60, 30), (-60, 30), (120, 35), (-120, 35), (180, 45), (0, 75)):
+z = 0.32
+rot = body_frame(180, z)
+c, n = body_point(180, z, TOP_OUT + 0.01 + 0.08)
+body.sphere(stem, c, (0.12, 0.13, 0.08), rotation=rot, segments=24, rings=12)
+cap = c + Vector((0, 0, 0.1))
+body.sphere(red, cap, (0.21, 0.13, 0.13), cut=(cap, (0, 0, -1)), segments=32, rings=16)
+body.sphere(stem, cap + Vector((0, 0, 0.002)), (0.2, 0.12, 0.02), keep=(cap + Vector((0, 0, 0.003)), (0, 0, 1)), segments=32, rings=8)
+for a, e in ((0, 40), (60, 30), (-60, 30), (120, 35), (-120, 35), (0, 75), (90, 60), (-90, 60)):
     t, el = math.radians(a + 180), math.radians(e)
-    n = Vector((math.sin(t) * math.cos(el) * 0.22, math.cos(t) * math.cos(el) * 0.16, math.sin(el) * 0.16))
-    normal = Vector((n.x / 0.22 ** 2, n.y / 0.16 ** 2, n.z / 0.16 ** 2)).normalized()
-    body.sphere(spot, cap + n, (0.035, 0.035, 0.012), rotation=normal.to_track_quat("Z", "Y").to_matrix().to_4x4(),
+    d = Vector((math.sin(t) * math.cos(el) * 0.21, math.cos(t) * math.cos(el) * 0.13, math.sin(el) * 0.13))
+    normal = Vector((d.x / 0.21 ** 2, d.y / 0.13 ** 2, d.z / 0.13 ** 2)).normalized()
+    body.sphere(spot_mat, cap + d, (0.032, 0.032, 0.01), rotation=normal.to_track_quat("Z", "Y").to_matrix().to_4x4(),
                 segments=12, rings=6)
 for side in (-1, 1):
-    body.torus(strap, (side * 0.12, -0.02, 0.5), 0.23, 0.022, rotation=Matrix.Rotation(math.radians(90), 4, "Y"),
-               arc=0.55, scale=(1.1, 1.05))
+    on_body(body, strap, [(180 + side * 30, 0.46), (side * 110, 0.56), (side * 40, 0.52), (side * 60, 0.36),
+                          (side * 110, 0.3), (180 + side * 40, 0.26)], 0.016, out=TOP_OUT + 0.006)
 body.build()
 export(__file__)

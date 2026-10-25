@@ -160,6 +160,355 @@ public class CatalogTests
     }
 }
 
+/// <summary>
+/// The clothes and hair styles fit the Player's simple-shapes rig (modules/Player/Models/boy.glb
+/// and girl.glb, read back): a round head floating over a smooth cone body, round hands floating
+/// beside it, little round feet under it, no arms or legs. Godot's frame: Y up, -Z the front.
+/// </summary>
+public class ModelFitTests
+{
+    private static readonly string[] Parts = { Attach.Head, Attach.Body, Attach.LegL, Attach.LegR };
+
+    private static string RepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !File.Exists(Path.Combine(dir.FullName, "project.godot")))
+            dir = dir.Parent;
+        Assert.NotNull(dir);
+        return dir!.FullName;
+    }
+
+    private static Glb Model(string resPath) => new(Path.Combine(RepoRoot(), resPath.Substring("res://".Length)));
+
+    private static readonly Glb s_rig = new(Path.Combine(RepoRoot(), "modules", "Player", "Models", "boy.glb"));
+
+    /// <summary>The body cone's skin: its radius at each height (rounding included), bottom and top.</summary>
+    private static class Cone
+    {
+        public static readonly (float Y, float R)[] Rings = s_rig.Vertices("Body", "Skin")
+            .GroupBy(v => MathF.Round(v.Y, 4)).Select(g => (g.Key, g.Max(Radius))).OrderBy(r => r.Key).ToArray();
+        public static readonly float Bottom = Rings[0].Y;
+        public static readonly float Top = Rings[^1].Y;
+        public static readonly float HeadBottom = s_rig.VerticesUnder("Head").Min(v => v.Y);
+
+        public static float R(float y)
+        {
+            if (y <= Bottom)
+                return Rings[0].R;
+            for (int i = 1; i < Rings.Length; i++)
+                if (y <= Rings[i].Y)
+                {
+                    var (y0, r0) = Rings[i - 1];
+                    var (y1, r1) = Rings[i];
+                    return r0 + (r1 - r0) * (y - y0) / (y1 - y0);
+                }
+            return 0f;
+        }
+
+        /// <summary>How far the point is from the body's outline (side, rim and top) in its half-plane through the axis.</summary>
+        public static float Distance(Vector3 v)
+        {
+            var p = new Vector2(Radius(v), v.Y);
+            float best = float.MaxValue;
+            for (int i = 0; i < Rings.Length; i++)
+            {
+                var a = new Vector2(Rings[i].R, Rings[i].Y);
+                var b = i + 1 < Rings.Length ? new Vector2(Rings[i + 1].R, Rings[i + 1].Y) : new Vector2(0f, Top);
+                var ab = b - a;
+                float t = ab.LengthSquared() < 1e-12f ? 0f : Math.Clamp(Vector2.Dot(p - a, ab) / ab.LengthSquared(), 0f, 1f);
+                best = MathF.Min(best, Vector2.Distance(p, a + ab * t));
+            }
+            return best;
+        }
+
+        /// <summary>How far the point is out from the body's side (negative: inside the body).</summary>
+        public static float Gap(Vector3 v) => v.Y < Bottom || v.Y > Top ? float.PositiveInfinity : Radius(v) - R(v.Y);
+    }
+
+    private static float Radius(Vector3 v) => MathF.Sqrt(v.X * v.X + v.Z * v.Z);
+
+    private static IEnumerable<ClothingItem> On(params Slot[] slots) => Catalog.Items.ToArray().Where(i => slots.Contains(i.Slot));
+
+    /// <summary>Whether vertices close round the body (within <paramref name="near"/> of its side) cover every heading between the heights.</summary>
+    private static bool AllRound(List<Vector3> v, float y0, float y1, float near = 0.04f)
+    {
+        var headings = new HashSet<int>();
+        foreach (var p in v)
+            if (p.Y >= y0 && p.Y <= y1 && Radius(p) - Cone.R(p.Y) < near)
+                headings.Add((int)MathF.Floor((MathF.Atan2(p.X, -p.Z) + MathF.PI) / (2 * MathF.PI) * 24) % 24);
+        return headings.Count == 24;
+    }
+
+    [Fact]
+    public void TheRigStillHasTheConeBodyThePartsAndThePivotsAttachNames()
+    {
+        Assert.InRange(Cone.Bottom, 0.1f, 0.16f);
+        Assert.InRange(Cone.Top, 0.58f, 0.64f);
+        Assert.True(Cone.R(Cone.Bottom + 0.05f) > 2.5f * Cone.R(Cone.Top - 0.1f), "a cone, wide at the bottom");
+        foreach (var file in new[] { "boy.glb", "girl.glb" })
+        {
+            var rig = new Glb(Path.Combine(RepoRoot(), "modules", "Player", "Models", file));
+            Assert.True(Vector3.Distance(Attach.HeadPivot, rig.Origin(Attach.Head)) < 0.001f, file);
+            Assert.True(Vector3.Distance(Attach.BodyPivot, rig.Origin(Attach.Body)) < 0.001f, file);
+            Assert.True(Vector3.Distance(Attach.LegLPivot, rig.Origin(Attach.LegL)) < 0.001f, file);
+            Assert.True(Vector3.Distance(Attach.LegRPivot, rig.Origin(Attach.LegR)) < 0.001f, file);
+        }
+    }
+
+    [Fact]
+    public void EveryModelIsMadeOfRigPartsWithTheirOriginsAtThePartsPivots()
+    {
+        var pivots = new Dictionary<string, Vector3>
+        {
+            [Attach.Head] = Attach.HeadPivot, [Attach.Body] = Attach.BodyPivot,
+            [Attach.LegL] = Attach.LegLPivot, [Attach.LegR] = Attach.LegRPivot,
+        };
+        string[] Expected(ClothingItem item) => item.Slot switch
+        {
+            Slot.Top or Slot.Bottom or Slot.Back => new[] { Attach.Body },
+            Slot.Shoes => new[] { Attach.LegL, Attach.LegR },
+            Slot.Head => new[] { Attach.Head },
+            _ => item.Id == Catalog.SpiderSilkScarf ? new[] { Attach.Body } : new[] { Attach.Head },
+        };
+        var models = Catalog.Items.ToArray().Select(i => (i.ModelPath, Expected(i)))
+            .Concat(Looks.HairStyles.ToArray().Select(h => (h.ModelPath, new[] { Attach.Head })));
+        foreach (var (path, parts) in models)
+        {
+            var glb = Model(path);
+            Assert.Equal(parts.OrderBy(p => p, StringComparer.Ordinal),
+                glb.Nodes.Select(n => n.Name).OrderBy(p => p, StringComparer.Ordinal));
+            foreach (var part in parts)
+            {
+                Assert.True(Vector3.Distance(pivots[part], glb.Origin(part)) < 0.001f, $"{path}: {part}");
+                Assert.True(glb.Vertices(part).Count > 50, $"{path}: {part} is empty");
+            }
+        }
+    }
+
+    [Fact]
+    public void NothingOnTheBodyPokesThroughItReachesTheHeadOrTheHandsOrFloatsLoose()
+    {
+        var hands = new[] { "HandL", "HandR" }.Select(h =>
+        {
+            var c = s_rig.Origin(h);
+            return (Center: c, Radius: s_rig.Vertices(h).Max(v => Vector3.Distance(v, c)));
+        }).ToList();
+        foreach (var item in Catalog.Items)
+        {
+            var glb = Model(item.ModelPath);
+            if (!glb.Has(Attach.Body))
+                continue;
+            var v = glb.Vertices(Attach.Body);
+            var inside = v.Where(p => Cone.Gap(p) < -0.002f).ToList();
+            Assert.True(inside.Count == 0, $"{item.Id} pokes into the body at {(inside.Count > 0 ? inside[0] : default)}");
+            Assert.True(v.Max(p => p.Y) < Cone.HeadBottom - 0.03f, $"{item.Id} reaches up to the head");
+            foreach (var (center, radius) in hands)
+                Assert.True(v.Min(p => Vector3.Distance(p, center)) > radius + 0.02f, $"{item.Id} reaches the floating hands");
+            // It lies on the body: its inside touches the side.
+            Assert.True(v.Min(Cone.Gap) < 0.025f, $"{item.Id} floats off the body");
+        }
+    }
+
+    [Fact]
+    public void TopsAndDressesCoverTheTriangleWithoutSleeves()
+    {
+        float h = Cone.Top - Cone.Bottom;
+        foreach (var item in On(Slot.Top))
+        {
+            var v = Model(item.ModelPath).Vertices(Attach.Body);
+            Assert.True(v.Max(p => p.Y) >= Cone.Top, $"{item.Id} leaves the top of the triangle bare");
+            Assert.True(AllRound(v, Cone.Bottom + h * 0.45f, Cone.Bottom + h * 0.7f), $"{item.Id} does not go all round");
+            // No sleeves (no arms): nothing sticks out sideways from the cone.
+            Assert.True(v.All(p => Cone.Distance(p) < 0.09f), $"{item.Id} sticks out from the body (sleeves?)");
+            if (item.Dress)
+            {
+                Assert.True(v.Min(p => p.Y) <= Cone.Bottom, $"{item.Id}: a dress goes down to the bottom edge");
+                Assert.True(AllRound(v, Cone.Bottom + 0.01f, Cone.Bottom + h * 0.15f), $"{item.Id} does not go all round at the bottom");
+            }
+            else
+            {
+                // Down into the lower band, under every bottom's top edge, so no skin shows between them.
+                float hem = v.Min(p => p.Y);
+                Assert.True(hem > Cone.Bottom + h * 0.1f, $"{item.Id} is as long as a dress");
+                foreach (var bottom in On(Slot.Bottom))
+                    Assert.True(Model(bottom.ModelPath).Vertices(Attach.Body).Max(p => p.Y) > hem + 0.02f, $"{item.Id} over {bottom.Id}");
+            }
+        }
+    }
+
+    [Fact]
+    public void BottomsAreTheLowerBandOfTheTriangleAndShortsAreShorter()
+    {
+        float h = Cone.Top - Cone.Bottom;
+        foreach (var item in On(Slot.Bottom))
+        {
+            var v = Model(item.ModelPath).Vertices(Attach.Body);
+            float top = v.Max(p => p.Y), low = v.Min(p => p.Y);
+            Assert.InRange(top, Cone.Bottom + h * 0.2f, Cone.Bottom + h * 0.4f);
+            Assert.True(AllRound(v, top - 0.06f, top - 0.02f, 0.05f), $"{item.Id} does not go all round");
+            Assert.True(v.All(p => Cone.Distance(p) < 0.1f), $"{item.Id} sticks out from the body (trouser legs?)");
+            if (item.Id == "shorts")
+                Assert.True(low > Cone.Bottom + 0.04f, "shorts are shorter: they end above the bottom edge");
+            else
+                Assert.True(low <= Cone.Bottom, $"{item.Id} goes down to the bottom edge");
+        }
+    }
+
+    [Fact]
+    public void ShoesFitTheRoundFeetUnderTheBody()
+    {
+        foreach (var item in On(Slot.Shoes))
+        {
+            var glb = Model(item.ModelPath);
+            foreach (var leg in new[] { Attach.LegL, Attach.LegR })
+            {
+                var v = glb.Vertices(leg);
+                var foot = s_rig.Vertices("DefaultShoes" + leg);
+                Vector3 low = v.Aggregate(Vector3.Min), high = v.Aggregate(Vector3.Max);
+                Vector3 footLow = foot.Aggregate(Vector3.Min), footHigh = foot.Aggregate(Vector3.Max);
+                Assert.InRange(low.Y, -0.01f, 0.01f);
+                Assert.True(high.Y < Cone.Bottom, $"{item.Id} reaches into the body");
+                Assert.True(high.Y >= footHigh.Y - 0.005f, $"{item.Id} is lower than the foot");
+                // Over the foot: as wide and long as it (a little more), and not much more.
+                Assert.True(low.X <= footLow.X + 0.002f && high.X >= footHigh.X - 0.002f, $"{item.Id}: {leg} across");
+                Assert.True(low.Z <= footLow.Z + 0.002f && high.Z >= footHigh.Z - 0.002f, $"{item.Id}: {leg} along");
+                Assert.True(high.X - low.X < (footHigh.X - footLow.X) + 0.06f, $"{item.Id}: {leg} too wide");
+                Assert.True(high.Z - low.Z < (footHigh.Z - footLow.Z) + 0.08f, $"{item.Id}: {leg} too long");
+            }
+        }
+    }
+
+    [Fact]
+    public void HatsGlassesClipsAndHairSitOnTheHeadAboveTheBody()
+    {
+        var head = s_rig.Vertices(Attach.Head, "Skin");
+        var center = (head.Aggregate(Vector3.Min) + head.Aggregate(Vector3.Max)) / 2;
+        var models = Catalog.Items.ToArray().Select(i => i.ModelPath).Concat(Looks.HairStyles.ToArray().Select(h => h.ModelPath));
+        foreach (var path in models)
+        {
+            var glb = Model(path);
+            if (!glb.Has(Attach.Head))
+                continue;
+            var v = glb.Vertices(Attach.Head);
+            Assert.True(v.Min(p => p.Y) > Cone.Top + 0.03f, $"{path} hangs down onto the body");
+            Assert.True(v.Max(p => Vector3.Distance(p, center)) < 0.85f, $"{path} floats away from the head");
+            Assert.True(v.Min(p => Vector3.Distance(p, center)) < 0.45f, $"{path} does not touch the head");
+        }
+    }
+
+    [Fact]
+    public void BackpacksSitOnTheTrianglesBackAndTheScarfRoundItsTop()
+    {
+        foreach (var item in On(Slot.Back))
+        {
+            var v = Model(item.ModelPath).Vertices(Attach.Body);
+            // The bag behind the body (Godot's +Z), most of it below the top, straps over the top.
+            var bag = v.Where(p => p.Z > Cone.R(p.Y) + 0.03f).ToList();
+            Assert.True(bag.Count > v.Count / 3, $"{item.Id}: the bag is not on the back");
+            Assert.True(bag.Average(p => p.Y) > Cone.Bottom + 0.08f && bag.Average(p => p.Y) < Cone.Top - 0.1f, $"{item.Id}: the bag is not on the back");
+            Assert.True(bag.Max(p => p.Z) < Cone.R(Cone.Bottom) + 0.25f, $"{item.Id} sticks out far behind");
+            Assert.Contains(v, p => p.Z < -0.05f && Cone.Gap(p) < 0.05f);
+            Assert.Contains(v, p => p.Y > Cone.Top - 0.1f);
+        }
+        var scarf = Model(Catalog.Items[Catalog.IndexOf(Catalog.SpiderSilkScarf)].ModelPath).Vertices(Attach.Body);
+        Assert.True(AllRound(scarf, Cone.Top - 0.15f, Cone.Top - 0.03f, 0.1f), "the scarf goes round the top");
+        Assert.True(scarf.Min(p => p.Y) > Cone.Bottom + (Cone.Top - Cone.Bottom) * 0.35f, "the scarf's tails hang down the front a little");
+    }
+
+    /// <summary>
+    /// A .glb read back: each node's name, parent, mesh and world transform (glTF's frame, Godot's),
+    /// and its mesh's vertices by material.
+    /// </summary>
+    private sealed class Glb
+    {
+        public readonly List<(string Name, int Parent, int Mesh, Matrix4x4 World)> Nodes = new();
+        private readonly Dictionary<string, int> _index = new();
+        private readonly System.Text.Json.JsonElement _json;
+        private readonly byte[] _bin;
+
+        public Glb(string file)
+        {
+            Assert.True(File.Exists(file), file);
+            var bytes = File.ReadAllBytes(file);
+            int jsonLength = BitConverter.ToInt32(bytes, 12);
+            _json = System.Text.Json.JsonDocument.Parse(new ReadOnlyMemory<byte>(bytes, 20, jsonLength)).RootElement;
+            int binStart = 20 + jsonLength;
+            _bin = bytes[(binStart + 8)..(binStart + 8 + BitConverter.ToInt32(bytes, binStart))];
+            var nodes = _json.GetProperty("nodes");
+            var parents = Enumerable.Repeat(-1, nodes.GetArrayLength()).ToArray();
+            for (int i = 0; i < parents.Length; i++)
+                if (nodes[i].TryGetProperty("children", out var children))
+                    foreach (var child in children.EnumerateArray())
+                        parents[child.GetInt32()] = i;
+            var world = new Matrix4x4?[parents.Length];
+            Matrix4x4 World(int i) => world[i] ??= Local(nodes[i]) * (parents[i] < 0 ? Matrix4x4.Identity : World(parents[i]));
+            for (int i = 0; i < parents.Length; i++)
+            {
+                string name = nodes[i].GetProperty("name").GetString()!;
+                _index[name] = i;
+                Nodes.Add((name, parents[i], nodes[i].TryGetProperty("mesh", out var mesh) ? mesh.GetInt32() : -1, World(i)));
+            }
+        }
+
+        private static Matrix4x4 Local(System.Text.Json.JsonElement node)
+        {
+            float[] Floats(string key, params float[] fallback) =>
+                node.TryGetProperty(key, out var v) ? v.EnumerateArray().Select(x => x.GetSingle()).ToArray() : fallback;
+            var t = Floats("translation", 0, 0, 0);
+            var r = Floats("rotation", 0, 0, 0, 1);
+            var s = Floats("scale", 1, 1, 1);
+            return Matrix4x4.CreateScale(s[0], s[1], s[2]) * Matrix4x4.CreateFromQuaternion(new Quaternion(r[0], r[1], r[2], r[3])) *
+                Matrix4x4.CreateTranslation(t[0], t[1], t[2]);
+        }
+
+        public bool Has(string name) => _index.ContainsKey(name);
+
+        public Vector3 Origin(string name)
+        {
+            Assert.True(Has(name), $"no node {name}");
+            return Nodes[_index[name]].World.Translation;
+        }
+
+        /// <summary>The world positions of the node's own mesh's vertices (only those in <paramref name="material"/> when given).</summary>
+        public List<Vector3> Vertices(string name, string? material = null)
+        {
+            Assert.True(Has(name), $"no node {name}");
+            var result = new List<Vector3>();
+            var node = Nodes[_index[name]];
+            if (node.Mesh < 0)
+                return result;
+            foreach (var primitive in _json.GetProperty("meshes")[node.Mesh].GetProperty("primitives").EnumerateArray())
+            {
+                string mat = _json.GetProperty("materials")[primitive.GetProperty("material").GetInt32()].GetProperty("name").GetString()!;
+                if (material != null && mat != material)
+                    continue;
+                var accessor = _json.GetProperty("accessors")[primitive.GetProperty("attributes").GetProperty("POSITION").GetInt32()];
+                var view = _json.GetProperty("bufferViews")[accessor.GetProperty("bufferView").GetInt32()];
+                int start = (view.TryGetProperty("byteOffset", out var vo) ? vo.GetInt32() : 0) +
+                    (accessor.TryGetProperty("byteOffset", out var ao) ? ao.GetInt32() : 0);
+                int stride = view.TryGetProperty("byteStride", out var st) ? st.GetInt32() : 12;
+                for (int i = 0; i < accessor.GetProperty("count").GetInt32(); i++)
+                {
+                    int at = start + i * stride;
+                    var local = new Vector3(BitConverter.ToSingle(_bin, at), BitConverter.ToSingle(_bin, at + 4), BitConverter.ToSingle(_bin, at + 8));
+                    result.Add(Vector3.Transform(local, node.World));
+                }
+            }
+            return result;
+        }
+
+        /// <summary>The vertices of the node and every node under it.</summary>
+        public List<Vector3> VerticesUnder(string name)
+        {
+            var result = Vertices(name);
+            for (int i = 0; i < Nodes.Count; i++)
+                if (Nodes[i].Parent == _index[name])
+                    result.AddRange(VerticesUnder(Nodes[i].Name));
+            return result;
+        }
+    }
+}
+
 public class WardrobeModuleTests
 {
     /// <summary>

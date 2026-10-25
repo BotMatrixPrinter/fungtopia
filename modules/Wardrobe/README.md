@@ -20,7 +20,10 @@ Some clothes are rewards. Adding a piece of clothing is one `Catalog` entry plus
   model and its script exist) and `WardrobeModuleTests` (`WardrobeModule` with a fake `IMessageBus`
   that also plays the wallet; saving and restoring round trips, bad save data keeps the defaults,
   the prompt device, the menu steps: a held direction moves the focus one item per 0.2 s, a short
-  flick exactly one) and `WardrobePromptsTests` (each device's hints show its own icons only).
+  flick exactly one), `WardrobePromptsTests` (each device's hints show its own icons only) and
+  `ModelFitTests` (the models read back against the Player's rig: their parts and pivots, nothing
+  inside the body or reaching the head or hands, tops and dresses cover the cone without sleeves,
+  bottoms are its lower band, shoes fit the feet, head pieces sit on the head, backpacks on the back).
 
 Test it with `./test.sh Wardrobe` from the repository root.
 
@@ -163,18 +166,39 @@ Run a script from the repository root, e.g. `blender -b --factory-startup --pyth
 modules/Wardrobe/Models/Clothes/striped_tee.py`, or all of them with
 `for f in modules/Wardrobe/Models/*/*.py; do [ "$(basename "$f")" = kit.py ] || blender -b --factory-startup --python "$f"; done`.
 
-Sized for the Player's chibi rig (`modules/Player/Models/characters.py`). Each .glb holds one
-object per rig part it covers, named like the part and with its origin at that part's pivot, so
-the Player module parents it to the part with no offset and it moves with it: `Head` (pivot at the
-neck, 0.72 m: hats, glasses, hair), `Body` (hip, 0.3 m: tops, dresses, the hips of bottoms,
-backpacks, the scarf), `LegL` / `LegR` (hip joints at x ∓0.11, 0.32 m: trouser legs and shoes).
+Sized for the Player's simple-shapes rig (`modules/Player/Models/characters.py`): a round head
+floating over a smooth cone body (a triangle from the front: 0.3 m round at its bottom, 0.13 m up,
+narrowing to a rounded top at about 0.61 m), round hands floating beside it, little round feet
+under it, no arms, legs or neck. Each .glb holds one object per rig part it covers, named like the
+part and with its origin at that part's pivot, so the Player module parents it to the part with no
+offset and it moves with it: `Head` (pivot at the neck, 0.72 m: hats, glasses, the flower clip,
+hair), `Body` (hip, 0.3 m: everything on the cone), `LegL` / `LegR` (hip pivots at x ∓0.125,
+0.32 m: the shoes, over the round feet hanging from them).
+
+`kit.py` holds the rig's sizes and the cone's outline (`body_profile`, the same as characters.py
+draws) with helpers that follow it: `cloth` (a layer over the cone between two heights),
+`on_body` / `ring` (cords lying on it: hems, belts, straps), `spot`, `body_point` / `body_frame`
+(a point on it and its slant, for pockets and backpacks) and `shoe`. Everything on the body sits a
+little out from the cone (tops and dresses 1 cm, bottoms 2 cm over them), so nothing pokes through
+it, and stays clear of the head and the floating hands:
+
+- **Tops** cover the triangle from its top down into the lower band (`TOP_HEM`), under the bottom;
+  no sleeves (no arms). **Dresses** cover the whole triangle down to its bottom edge.
+- **Bottoms** are the lower band of the triangle up to `BAND_TOP` (0.27 m): jeans, overalls and the
+  flared skirt down to the bottom edge, the shorts shorter (they end at 0.2 m).
+- **Shoes** are round shoes over the round feet, under the body's bottom.
+- **Hats, glasses, the clip and hair** sit on the head as before (it did not move).
+- **Backpacks** sit on the triangle's back with straps over its top; the **scarf** wraps round its
+  top with its tails down the front.
+
 Materials carry plain colors; a hair style's material `Hair` takes the hair color. No eyes or faces
-on clothes.
+on clothes. `ModelFitTests` reads the .glb files and the Player's rig back and checks all this.
 
 ## Screenshots
 
 `./screenshot.sh modules/Wardrobe/Godot/Preview.tscn` shows the wardrobe screen (Top tab) beside a
-dressed mannequin (the Player's rig with the hair, skin and items applied), turned by `PreviewYaw`
+dressed mannequin (the Player's rig with the hair, skin and items applied; its own outfit, bows and
+arrow hidden), turned by `PreviewYaw`
 from a simulated mouse drag; `WARDROBE_PREVIEW` picks `look` (the Look tab), `shop` (Abby's shop
 after buying the Flower Clip, trying on the Triangle Party Dress it fails to afford) or `items`
 (four outfits side by side); `WARDROBE_DEVICE` (`keyboard`, `xbox`, `playstation`, `nintendo`,

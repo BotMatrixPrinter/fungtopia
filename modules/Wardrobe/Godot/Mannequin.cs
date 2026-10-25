@@ -4,12 +4,13 @@ using Godot;
 namespace Fungtopia.Wardrobe.View;
 
 /// <summary>
-/// For previews only: the Player module's chibi rig (its boy.glb, read as a file) dressed from an
-/// <see cref="AppearanceState"/>: skin and eye colors, the hair style in its color, and each worn
-/// item's objects parented to the rig part of the same name with no offset
-/// (<see cref="Attach"/>). The rig's own hair, bow tie and back bow are hidden and its shirt and
-/// trousers are drawn as skin, so the clothes show. The game's character is drawn by the Player
-/// module; this shows how the pieces fit it.
+/// For previews only: the Player module's simple-shapes rig (its boy.glb, read as a file: a round
+/// head over a cone body, floating hands, round feet) dressed from an <see cref="AppearanceState"/>:
+/// skin and eye colors, the hair style in its color, and each worn item's objects parented to the
+/// rig part of the same name with no offset (<see cref="Attach"/>). The rig's own outfit objects
+/// (its hair, shirt and bow tie, trousers), its bows, its nocked arrow and its strap are hidden, so the body is
+/// bare skin under the clothes; its round shoes show while no shoes are worn. The game's character
+/// is drawn by the Player module; this shows how the pieces fit it.
 /// </summary>
 public partial class Mannequin : Node3D
 {
@@ -31,12 +32,9 @@ public partial class Mannequin : Node3D
         if (_rig == null)
             return;
         AddChild(_rig);
-        Hide(_rig, "Hair");
-        Hide(_rig, "Ribbon");
-        Hide(_rig, "Spots");
+        foreach (var name in new[] { "Hair", "DefaultTop", "DefaultBottom", "DefaultHead", "BackBow", "HandBow", "NockArrow" })
+            Show(name, false);
         Hide(_rig, "Wood");
-        if (_rig.FindChild("BackBow", true, false) is Node3D bow)
-            bow.Visible = false;
     }
 
     public void Apply(in AppearanceState look)
@@ -47,8 +45,7 @@ public partial class Mannequin : Node3D
             node.QueueFree();
         _worn.Clear();
         var skin = WardrobeStyle.ToColor(Looks.SkinTones[look.Skin]);
-        foreach (var name in new[] { "Skin", "Cloth", "Legs" })
-            ToonGlb.Tint(_rig, name, skin);
+        ToonGlb.Tint(_rig, "Skin", skin);
         ToonGlb.Tint(_rig, "Eye", WardrobeStyle.ToColor(Looks.EyeColors[look.EyeColor]));
         Put(Looks.HairStyles[look.HairStyle].ModelPath, WardrobeStyle.ToColor(Looks.HairColors[look.HairColor]));
         bool shoes = false;
@@ -58,9 +55,14 @@ public partial class Mannequin : Node3D
                 Put(item.ModelPath, null);
                 shoes |= slot == Slot.Shoes;
             }
-        ToonGlb.Tint(_rig, "Shoe", new Color(0.42f, 0.24f, 0.18f));
-        if (shoes)
-            Hide(_rig, "Shoe");
+        Show("DefaultShoesLegL", !shoes);
+        Show("DefaultShoesLegR", !shoes);
+    }
+
+    private void Show(string node, bool visible)
+    {
+        if (_rig?.FindChild(node, true, false) is Node3D piece)
+            piece.Visible = visible;
     }
 
     private void Put(string path, Color? hair)
