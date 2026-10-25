@@ -291,16 +291,11 @@ def dog():
     bpy.ops.wm.read_factory_settings(use_empty=True)
     mats = {name: material(name, color) for name, color in COLORS.items()}
 
-    # Body: a fluffy round body of soft clumps, a cream chest, small mushrooms on the back and
-    # a blue collar with a golden tag at the neck.
+    # Body: one smooth round body (no clumps: they looked like lumps), a cream chest, small
+    # mushrooms on the back and a blue collar with a golden tag at the neck.
     bc = Vector((0, -0.02, 0.36))
     body = Part("Body", bc)
     body.sphere(mats["DogFur"], bc, (0.21, 0.3, 0.2), segments=36, rings=18)
-    for i in range(10):
-        a = i * 2.39996
-        y = -0.24 + 0.48 * (i / 9)
-        p = bc + Vector((math.cos(a) * 0.15, y, 0.04 + math.sin(a) * 0.12))
-        body.sphere(mats["DogFur"], p, (0.09, 0.09, 0.08), segments=16, rings=8)
     body.sphere(mats["DogLight"], bc + Vector((0, 0.18, -0.02)), (0.15, 0.13, 0.15), segments=24, rings=12)
     for dx, dy, size, lean in ((0.06, 0.06, 0.14, -14), (-0.08, -0.07, 0.115, 16), (0.03, -0.2, 0.09, -8)):
         tilt = Matrix.Rotation(math.radians(lean), 4, "Y") @ Matrix.Rotation(math.radians(dy * -60), 4, "X")
@@ -313,15 +308,13 @@ def dog():
 
     legs(mats, "DogFur", "DogLight", 0.3, 0.16, -0.18, 0.11, 0.07)
 
-    # Head: round with big eyes, a cream muzzle with a black nose, a tongue, and pointy ears.
+    # Head: smooth and round with big eyes, a cream muzzle with a black nose, a tongue, and pointy ears.
     neck = Vector((0, 0.2, 0.48))
     head = Part("Head", neck)
     hr = 0.25
     hc = Vector((0, 0.32, 0.68))
-    head.sphere(mats["DogFur"], hc, (hr * 1.05, hr * 0.95, hr * 0.95), segments=40, rings=24)
-    # Fluffy cheeks.
-    for side in (-1, 1):
-        head.sphere(mats["DogFur"], hc + Vector((side * 0.17, 0.04, -0.09)), (0.1, 0.09, 0.09), segments=16, rings=8)
+    # One smooth round head, a little wide for chubby cheeks (no separate cheek spheres: lumps).
+    head.sphere(mats["DogFur"], hc, (hr * 1.1, hr * 0.95, hr * 0.95), segments=40, rings=24)
     muzzle = hc + Vector((0, hr * 0.8, -0.08))
     head.sphere(mats["DogLight"], muzzle, (0.11, 0.08, 0.075), segments=24, rings=12)
     head.sphere(mats["DogNose"], muzzle + Vector((0, 0.075, 0.035)), (0.035, 0.022, 0.025), segments=16, rings=8)

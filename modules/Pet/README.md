@@ -14,7 +14,8 @@ and sits by the player while they are defeated. Owned pets that are not active s
   `Shaders/` (toon surface, ink outline).
 - `Models/` — `pets.py`, the Blender script that builds and exports `cat.glb`, `dog.glb` and
   `crow.glb` next to it.
-- `Tests/` — `PetModuleTests.cs`: xUnit tests of `PetModule` with a fake `IMessageBus`.
+- `Tests/` — `PetModuleTests.cs`: xUnit tests of `PetModule` with a fake `IMessageBus`, and of
+  `dog.glb` (one smooth body and head without lumps, all its parts kept).
 
 Test it with `./test.sh Pet` from the repository root.
 
@@ -115,8 +116,8 @@ hit, dangles its feet in the air, and folds its wings once landed.
 writes `cat.glb`, `dog.glb` and `crow.glb`; commit them with the script. The Mushroom Cat: a round orange
 body with soft stripes and a cream belly, a big round head with huge eyes with sparkles, a pink
 nose, a little "w" mouth, rosy cheeks, whiskers, two red spotted mushroom caps on short stems
-for ears, and a long curving tail with a cream tip. The Mushroom Dog: a fluffy brown body made of
-soft clumps with a cream chest, a round head with fluffy cheeks, big eyes, a cream muzzle with
+for ears, and a long curving tail with a cream tip. The Mushroom Dog: one smooth round brown body
+(no lumps) with a cream chest, a smooth round head a little wide at the cheeks, big eyes, a cream muzzle with
 a black nose and a little tongue, pointy ears, three small red spotted mushrooms growing on its
 back, a blue collar with a golden tag, and a curled fluffy tail. Separate objects with pivots
 where they move: `Body`, `Head` (neck), `LegFL`/`LegFR`/`LegBL`/`LegBR` (shoulder or hip),

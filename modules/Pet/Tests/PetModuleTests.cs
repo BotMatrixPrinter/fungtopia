@@ -1,5 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text.Json;
 using System.Numerics;
 using Fungtopia.Map;
 using Fungtopia.Monsters;
@@ -1129,5 +1132,115 @@ public class PetModuleTests
         Assert.False(other.Owns(PetKind.Crow));
         Assert.Equal(PetKind.Cat, other.Kind);
         Assert.Empty(log);
+    }
+
+    // ---- dog.glb (the model the view loads): one smooth body and head, no lumps ----
+
+    /// <summary>Reads a GLB's JSON and, per node, the positions of each of its primitives by material name.</summary>
+    private static Dictionary<string, (Vector3 Pivot, Dictionary<string, List<Vector3>> Parts)> ReadGlb(string path)
+    {
+        var bytes = File.ReadAllBytes(path);
+        int jsonLength = BitConverter.ToInt32(bytes, 12);
+        using var doc = JsonDocument.Parse(new ReadOnlyMemory<byte>(bytes, 20, jsonLength));
+        var root = doc.RootElement;
+        int binStart = 20 + jsonLength + 8;
+        var materials = root.GetProperty("materials").EnumerateArray().Select(m => m.GetProperty("name").GetString()!).ToArray();
+        var accessors = root.GetProperty("accessors");
+        var views = root.GetProperty("bufferViews");
+        var meshes = root.GetProperty("meshes");
+        var nodes = new Dictionary<string, (Vector3, Dictionary<string, List<Vector3>>)>();
+        foreach (var node in root.GetProperty("nodes").EnumerateArray())
+        {
+            if (!node.TryGetProperty("mesh", out var meshIndex)) continue;
+            var t = node.TryGetProperty("translation", out var tr)
+                ? new Vector3(tr[0].GetSingle(), tr[1].GetSingle(), tr[2].GetSingle()) : Vector3.Zero;
+            var parts = new Dictionary<string, List<Vector3>>();
+            foreach (var prim in meshes[meshIndex.GetInt32()].GetProperty("primitives").EnumerateArray())
+            {
+                var acc = accessors[prim.GetProperty("attributes").GetProperty("POSITION").GetInt32()];
+                var view = views[acc.GetProperty("bufferView").GetInt32()];
+                int offset = binStart + (view.TryGetProperty("byteOffset", out var vo) ? vo.GetInt32() : 0)
+                    + (acc.TryGetProperty("byteOffset", out var ao) ? ao.GetInt32() : 0);
+                int stride = view.TryGetProperty("byteStride", out var bs) ? bs.GetInt32() : 12;
+                var name = materials[prim.GetProperty("material").GetInt32()];
+                if (!parts.TryGetValue(name, out var list)) parts[name] = list = new List<Vector3>();
+                for (int i = 0; i < acc.GetProperty("count").GetInt32(); i++)
+                {
+                    int o = offset + i * stride;
+                    list.Add(new Vector3(BitConverter.ToSingle(bytes, o), BitConverter.ToSingle(bytes, o + 4),
+                        BitConverter.ToSingle(bytes, o + 8)));
+                }
+            }
+            nodes[node.GetProperty("name").GetString()!] = (t, parts);
+        }
+        return nodes;
+    }
+
+    private static string DogGlb()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !File.Exists(Path.Combine(dir.FullName, "modules", "Pet", "Models", "dog.glb")))
+            dir = dir.Parent;
+        Assert.NotNull(dir);
+        return Path.Combine(dir!.FullName, "modules", "Pet", "Models", "dog.glb");
+    }
+
+    /// <summary>How far p is off the ellipsoid surface: 0 on it, below 0 inside, above 0 outside.</summary>
+    private static float OffEllipsoid(Vector3 p, Vector3 center, Vector3 radii)
+    {
+        var q = (p - center) / radii;
+        return q.Length() - 1;
+    }
+
+    [Fact]
+    public void DogBodyFurIsOneSmoothEllipsoidWithoutClumps()
+    {
+        var dog = ReadGlb(DogGlb());
+        var fur = dog["Body"].Parts["DogFur"];
+        // Fit the ellipsoid to the fur's bounding box: with clumps sticking out, most of the fur
+        // would then lie off it (the clumps' own vertices, and the body's inside the box).
+        var min = fur.Aggregate(Vector3.Min);
+        var max = fur.Aggregate(Vector3.Max);
+        var center = (min + max) / 2;
+        var radii = (max - min) / 2;
+        Assert.All(fur, p => Assert.InRange(OffEllipsoid(p, center, radii), -0.01f, 0.01f));
+        // A full round body (about 0.42 x 0.4 x 0.6 m, glTF Y up), centered on the Body pivot.
+        Assert.InRange(radii.X, 0.18f, 0.24f);
+        Assert.InRange(radii.Y, 0.17f, 0.23f);
+        Assert.InRange(radii.Z, 0.27f, 0.33f);
+        Assert.InRange(center.Length(), 0f, 0.01f);
+    }
+
+    [Fact]
+    public void DogHeadFurIsOneSmoothHeadWithEarsAndNoCheekLumps()
+    {
+        var dog = ReadGlb(DogGlb());
+        var (pivot, parts) = dog["Head"];
+        // Head center (0, 0.68 up, 0.32 forward) in glTF (forward is -Z), relative to the neck pivot.
+        var center = new Vector3(0, 0.68f, -0.32f) - pivot;
+        var fur = parts["DogFur"];
+        // Below the ears' bases every fur vertex is on the one round head (cheek spheres stuck out
+        // at its lower sides); the ears are the only fur above it.
+        var face = fur.Where(p => p.Y - center.Y < 0.1f).ToList();
+        Assert.NotEmpty(face);
+        var min = face.Aggregate(Vector3.Min);
+        var max = face.Aggregate(Vector3.Max);
+        var radii = new Vector3((max.X - min.X) / 2, (max.Z - min.Z) / 2, (max.Z - min.Z) / 2);
+        Assert.All(face, p => Assert.InRange(OffEllipsoid(p, center, radii), -0.01f, 0.01f));
+        Assert.InRange(radii.X, 0.24f, 0.3f);
+        Assert.Contains(fur, p => p.Y - center.Y > 0.3f);
+    }
+
+    [Fact]
+    public void DogKeepsItsPartsAndDetails()
+    {
+        var dog = ReadGlb(DogGlb());
+        foreach (var node in new[] { "Body", "Head", "LegFL", "LegFR", "LegBL", "LegBR", "Tail" })
+            Assert.Contains("DogFur", dog[node].Parts.Keys);
+        // Cream chest, the little mushrooms on the back, the collar and its tag.
+        foreach (var mat in new[] { "DogLight", "Stem", "Cap", "Spots", "Collar", "Tag" })
+            Assert.Contains(mat, dog["Body"].Parts.Keys);
+        foreach (var mat in new[] { "DogLight", "DogNose", "Eye", "Tongue", "Blush", "DogEar" })
+            Assert.Contains(mat, dog["Head"].Parts.Keys);
     }
 }
