@@ -934,3 +934,203 @@ public class MonstersModuleTests
         Assert.Throws<InvalidOperationException>(() => new MonstersModule().Tick(new TickContext(0, Step)));
     }
 }
+
+/// <summary>
+/// The monsters' mushrooms are vivid (the game's rule for every mushroom): the exported models'
+/// cap colors are clearly saturated and bright, spots pure white, stems a clean light cream, every
+/// other color as it was; the view makes caps glossy with a rim and glowing caps twice as bright.
+/// </summary>
+public class MushroomLookTests
+{
+    private static readonly string[] Models = { "caterpillar", "ant", "tarantula", "ladybug" };
+
+    /// <summary>The colors of everything that is not a mushroom, as they were before the mushrooms went vivid.</summary>
+    private static readonly Dictionary<string, (float R, float G, float B)> Unchanged = new()
+    {
+        ["Eye"] = (0.07f, 0.04f, 0.06f),
+        ["EyeShine"] = (1f, 1f, 1f),
+        ["Blush"] = (1f, 0.45f, 0.48f),
+        ["Mouth"] = (0.4f, 0.12f, 0.14f),
+        ["Body"] = (0.55f, 0.82f, 0.32f),
+        ["BodyLight"] = (0.85f, 0.93f, 0.5f),
+        ["Feet"] = (0.36f, 0.58f, 0.22f),
+        ["BackDot"] = (1f, 0.96f, 0.9f),
+        ["Shell"] = (0.72f, 0.36f, 0.2f),
+        ["Stripe"] = (0.4f, 0.2f, 0.14f),
+        ["Leg"] = (0.42f, 0.22f, 0.15f),
+        ["Brow"] = (0.25f, 0.12f, 0.1f),
+        ["Fur"] = (0.4f, 0.27f, 0.4f),
+        ["FurLight"] = (0.58f, 0.42f, 0.56f),
+        ["FurDark"] = (0.24f, 0.16f, 0.26f),
+        ["Fang"] = (1f, 0.97f, 0.9f),
+        ["LadyShell"] = (0.9f, 0.16f, 0.14f),
+        ["LadySpot"] = (0.1f, 0.07f, 0.09f),
+        ["Face"] = (0.99f, 0.86f, 0.72f),
+    };
+
+    private static string ModelsDir()
+    {
+        var dir = new System.IO.DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !System.IO.File.Exists(System.IO.Path.Combine(dir.FullName, "project.godot")))
+            dir = dir.Parent;
+        Assert.NotNull(dir);
+        return System.IO.Path.Combine(dir!.FullName, "modules", "Monsters", "Models");
+    }
+
+    /// <summary>The base colors of a .glb's materials, by material name.</summary>
+    private static Dictionary<string, (float R, float G, float B)> MaterialsOf(string model)
+    {
+        var bytes = System.IO.File.ReadAllBytes(System.IO.Path.Combine(ModelsDir(), model + ".glb"));
+        int jsonLength = BitConverter.ToInt32(bytes, 12);
+        var json = System.Text.Json.JsonDocument.Parse(new ReadOnlyMemory<byte>(bytes, 20, jsonLength)).RootElement;
+        var result = new Dictionary<string, (float, float, float)>();
+        foreach (var m in json.GetProperty("materials").EnumerateArray())
+        {
+            // glTF leaves out a white baseColorFactor (its default).
+            string name = m.GetProperty("name").GetString()!;
+            if (m.TryGetProperty("pbrMetallicRoughness", out var pbr) && pbr.TryGetProperty("baseColorFactor", out var c))
+                result[name] = (c[0].GetSingle(), c[1].GetSingle(), c[2].GetSingle());
+            else
+                result[name] = (1f, 1f, 1f);
+        }
+        return result;
+    }
+
+    private static (float Hue, float Saturation, float Value) Hsv((float R, float G, float B) c)
+    {
+        float max = MathF.Max(c.R, MathF.Max(c.G, c.B)), min = MathF.Min(c.R, MathF.Min(c.G, c.B));
+        float d = max - min;
+        float hue = d == 0f ? 0f : max == c.R ? 60f * (((c.G - c.B) / d + 6f) % 6f) : max == c.G ? 60f * ((c.B - c.R) / d + 2f) : 60f * ((c.R - c.G) / d + 4f);
+        return (hue, max == 0f ? 0f : d / max, max);
+    }
+
+    [Fact]
+    public void EveryModelHasVividMushroomCaps()
+    {
+        foreach (var model in Models)
+        {
+            var mats = MaterialsOf(model);
+            Assert.True(mats.ContainsKey("Cap"), $"{model}: no red mushroom cap");
+            Assert.True(mats.ContainsKey("Spots") && mats.ContainsKey("Stem"), $"{model}: no spots or stem");
+            foreach (var (name, color) in mats)
+            {
+                if (!MonsterLook.IsCap(name))
+                    continue;
+                var (_, s, v) = Hsv(color);
+                // Before: saturation 0.37 (cream) to 0.78 (red); now every cap is clearly saturated and bright.
+                Assert.True(s >= 0.85f, $"{model}: cap {name} {color} saturation {s}");
+                Assert.True(v >= 0.95f, $"{model}: cap {name} {color} brightness {v}");
+            }
+        }
+    }
+
+    [Fact]
+    public void RedCapIsAPureCherryRed()
+    {
+        var (hue, s, v) = Hsv(MaterialsOf("caterpillar")["Cap"]);
+        Assert.True(hue <= 3f || hue >= 350f, $"hue {hue}: not brownish or pinkish");
+        Assert.True(s >= 0.9f && v >= 0.95f, $"{s} {v}");
+    }
+
+    [Fact]
+    public void LadybugCapsAreFourDistinctVividColors()
+    {
+        var mats = MaterialsOf("ladybug");
+        var caps = new List<string>();
+        foreach (var name in mats.Keys)
+            if (MonsterLook.IsCap(name))
+                caps.Add(name);
+        caps.Sort(StringComparer.Ordinal);
+        Assert.Equal(new[] { "Cap", "CapGold", "CapPink", "CapTan" }, caps);
+        var hues = new List<float>();
+        foreach (var cap in caps)
+            hues.Add(Hsv(mats[cap]).Hue);
+        // Red ~0, orange ~30, gold ~45, pink ~330: no two the same color.
+        for (int i = 0; i < hues.Count; i++)
+            for (int j = i + 1; j < hues.Count; j++)
+            {
+                float d = MathF.Abs(hues[i] - hues[j]);
+                Assert.True(MathF.Min(d, 360f - d) >= 10f, $"{caps[i]} and {caps[j]} look alike");
+            }
+    }
+
+    [Fact]
+    public void SpotsArePureWhiteAndStemsCleanLightCream()
+    {
+        foreach (var model in Models)
+        {
+            var mats = MaterialsOf(model);
+            Assert.Equal((1f, 1f, 1f), mats["Spots"]);
+            var stem = mats["Stem"];
+            var (hue, s, v) = Hsv(stem);
+            Assert.True(v >= 0.98f && s >= 0.1f && s <= 0.2f && hue >= 30f && hue <= 50f, $"{model}: stem {stem}");
+        }
+    }
+
+    [Fact]
+    public void EveryOtherColorStaysAsItWas()
+    {
+        int seen = 0;
+        foreach (var model in Models)
+            foreach (var (name, color) in MaterialsOf(model))
+            {
+                if (MonsterLook.IsMushroom(name))
+                    continue;
+                Assert.True(Unchanged.TryGetValue(name, out var was), $"{model}: unexpected material {name}");
+                Assert.True(MathF.Abs(color.R - was.R) < 1e-4f && MathF.Abs(color.G - was.G) < 1e-4f && MathF.Abs(color.B - was.B) < 1e-4f,
+                    $"{model}: {name} changed to {color}");
+                seen++;
+            }
+        Assert.True(seen >= Unchanged.Count);
+    }
+
+    [Fact]
+    public void CapsAreGlossyWithARimAndNothingElseIs()
+    {
+        foreach (var cap in new[] { "Cap", "CapTan", "CapPink", "CapGold" })
+        {
+            Assert.True(MonsterLook.IsMushroom(cap));
+            Assert.InRange(MonsterLook.Gloss(cap), 0.2f, 0.7f);
+            Assert.InRange(MonsterLook.Rim(cap), 0.15f, 0.6f);
+        }
+        Assert.True(MonsterLook.IsMushroom("Spots") && MonsterLook.IsMushroom("Stem"));
+        foreach (var other in Unchanged.Keys)
+        {
+            Assert.False(MonsterLook.IsMushroom(other), other);
+            Assert.Equal(0f, MonsterLook.Gloss(other));
+            Assert.Equal(0f, MonsterLook.Rim(other));
+        }
+    }
+
+    [Fact]
+    public void GlowingCapsGlowTwiceAsBrightAndOtherGlowsStay()
+    {
+        // The ladybug's caps glowed at 0.2 before.
+        foreach (var cap in new[] { "Cap", "CapTan", "CapPink", "CapGold" })
+            Assert.Equal(0.4f, MonsterLook.SelfLight(MonsterKind.Ladybug, cap), 4);
+        Assert.Equal(0f, MonsterLook.SelfLight(MonsterKind.Caterpillar, "Cap"));
+        Assert.Equal(0f, MonsterLook.SelfLight(MonsterKind.Tarantula, "Cap"));
+        Assert.Equal(0.32f, MonsterLook.SelfLight(MonsterKind.Ladybug, "LadyShell"), 4);
+        Assert.Equal(0.6f, MonsterLook.SelfLight(MonsterKind.Ant, "EyeShine"), 4);
+        Assert.Equal(0f, MonsterLook.SelfLight(MonsterKind.Ladybug, "Face"));
+        Assert.Equal(0f, MonsterLook.SelfLight(MonsterKind.Ladybug, "Stem"));
+        // Spots stay crisp white in shade, a faint light, far below a glowing cap's.
+        Assert.InRange(MonsterLook.SelfLight(MonsterKind.Ant, "Spots"), 0.1f, 0.3f);
+    }
+
+    [Fact]
+    public void ToonShaderDrawsTheGlossAndRim()
+    {
+        string shader = System.IO.File.ReadAllText(System.IO.Path.Combine(ModelsDir(), "..", "Godot", "Shaders", "toon.gdshader"));
+        Assert.Contains("uniform float gloss", shader);
+        Assert.Contains("uniform float rim_light", shader);
+        string light = shader[shader.IndexOf("void light()", StringComparison.Ordinal)..];
+        Assert.Contains("gloss", light);
+        Assert.Contains("rim_light", light);
+        Assert.Contains("SPECULAR_LIGHT", light);
+        string view = System.IO.File.ReadAllText(System.IO.Path.Combine(ModelsDir(), "..", "Godot", "MonsterModel.cs"));
+        Assert.Contains("MonsterLook.Gloss(name)", view);
+        Assert.Contains("MonsterLook.Rim(name)", view);
+        Assert.Contains("MonsterLook.SelfLight(kind, name)", view);
+    }
+}

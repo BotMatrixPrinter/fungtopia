@@ -32,13 +32,16 @@ COLORS = {
     "EyeShine": (1.0, 1.0, 1.0),
     "Blush": (1.0, 0.45, 0.48),
     "Mouth": (0.4, 0.12, 0.14),
-    "Cap": (0.9, 0.2, 0.2),
-    "Spots": (1.0, 0.96, 0.9),
-    "Stem": (0.98, 0.92, 0.8),
+    # Mushrooms, vivid (the game's rule for every mushroom): clearly saturated, bright caps, crisp
+    # pure white spots, clean light cream stems. The view adds a glossy highlight and a rim.
+    "Cap": (0.96, 0.06, 0.08),
+    "Spots": (1.0, 1.0, 1.0),
+    "Stem": (1.0, 0.95, 0.84),
     # The caterpillar.
     "Body": (0.55, 0.82, 0.32),
     "BodyLight": (0.85, 0.93, 0.5),
     "Feet": (0.36, 0.58, 0.22),
+    "BackDot": (1.0, 0.96, 0.9),
     # The ant.
     "Shell": (0.72, 0.36, 0.2),
     "Stripe": (0.4, 0.2, 0.14),
@@ -53,9 +56,9 @@ COLORS = {
     "LadyShell": (0.9, 0.16, 0.14),
     "LadySpot": (0.1, 0.07, 0.09),
     "Face": (0.99, 0.86, 0.72),
-    "CapTan": (0.86, 0.6, 0.32),
-    "CapPink": (0.95, 0.55, 0.7),
-    "CapCream": (0.98, 0.9, 0.62),
+    "CapTan": (0.96, 0.48, 0.1),
+    "CapPink": (1.0, 0.14, 0.55),
+    "CapGold": (1.0, 0.8, 0.12),
 }
 
 
@@ -237,7 +240,7 @@ def caterpillar():
         seg.sphere(mats["Body"], c, (r * 1.05, r, r * 0.95), segments=28, rings=14)
         # A pale belly band and a little dot on the back.
         seg.sphere(mats["BodyLight"], c + Vector((0, 0, -r * 0.35)), (r * 0.9, r * 0.82, r * 0.62), segments=24, rings=10)
-        seg.sphere(mats["Spots"], c + Vector((0, 0, r * 0.93)), (r * 0.2, r * 0.2, r * 0.07), segments=12, rings=6)
+        seg.sphere(mats["BackDot"], c + Vector((0, 0, r * 0.93)), (r * 0.2, r * 0.2, r * 0.07), segments=12, rings=6)
         for side in (-1, 1):
             seg.sphere(mats["Feet"], (side * r * 0.75, y, 0.06), (0.07, 0.08, 0.06), segments=12, rings=6)
         seg.build()
@@ -419,12 +422,12 @@ def ladybug():
                 continue
             rot = n.to_track_quat("Z", "Y").to_matrix().to_4x4()
             shell.sphere(mats["LadySpot"], p, (0.085, 0.085, 0.03), rotation=rot, segments=16, rings=6)
-    little = ((0.25, -1.4, 0.14, 0.12, "CapTan"), (0.6, 0.1, 0.1, 0.09, "CapPink"), (0.62, 3.0, 0.1, 0.09, "CapCream"),
-              (0.75, -2.3, 0.09, 0.08, "Cap"), (0.72, -0.9, 0.09, 0.08, "CapCream"), (0.95, 1.7, 0.08, 0.07, "CapTan"),
-              (0.95, -1.95, 0.08, 0.07, "CapPink"), (0.15, 1.6, 0.11, 0.1, "CapCream"),
+    little = ((0.25, -1.4, 0.14, 0.12, "CapTan"), (0.6, 0.1, 0.1, 0.09, "CapPink"), (0.62, 3.0, 0.1, 0.09, "CapGold"),
+              (0.75, -2.3, 0.09, 0.08, "Cap"), (0.72, -0.9, 0.09, 0.08, "CapGold"), (0.95, 1.7, 0.08, 0.07, "CapTan"),
+              (0.95, -1.95, 0.08, 0.07, "CapPink"), (0.15, 1.6, 0.11, 0.1, "CapGold"),
               (0.45, 2.2, 0.11, 0.1, "CapPink"), (0.5, -0.4, 0.12, 0.1, "CapTan"), (0.85, 0.75, 0.09, 0.08, "Cap"),
-              (0.8, 2.45, 0.09, 0.08, "CapTan"), (1.05, -1.2, 0.07, 0.07, "CapCream"), (1.0, -2.75, 0.07, 0.07, "CapPink"),
-              (0.4, -2.6, 0.12, 0.1, "CapCream"), (0.38, 0.55, 0.1, 0.09, "CapTan"))
+              (0.8, 2.45, 0.09, 0.08, "CapTan"), (1.05, -1.2, 0.07, 0.07, "CapGold"), (1.0, -2.75, 0.07, 0.07, "CapPink"),
+              (0.4, -2.6, 0.12, 0.1, "CapGold"), (0.38, 0.55, 0.1, 0.09, "CapTan"))
     for theta, phi, height, radius, cap in little:
         p, n = surface(sc, size, theta, phi)
         little_mushroom(shell, mats, p, n, height, radius, cap)

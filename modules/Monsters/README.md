@@ -9,10 +9,12 @@ when defeated, and come back 8 s later (the hard ones 15 s).
 - `Contract/` — `Fungtopia.Monsters.Contract` (namespace `Fungtopia.Monsters`), see below.
 - `Core/` — `Fungtopia.Monsters.Core`: `MonstersModule`, the module's one `IModule`, and
   `Monster` (one monster slot, read by the view).
+- `Core/MonsterLook.cs` — `MonsterLook`: how the view shades each model material (which are
+  mushroom parts, the caps' gloss and rim, what glows).
 - `Godot/` — `Main.tscn` with `MonstersView`, which draws every monster; `MonsterModel` (a
   model, toon materials, procedural animation, poison bubbles, defeat poof, health bar);
   `Preview.tscn` (the monsters side by side, for screenshots); `Shaders/` (toon surface with hit
-  flash and poison tint, ink outline).
+  flash, poison tint and the caps' glossy band and rim, ink outline).
 - `Models/` — `monsters.py`, the Blender script that builds and exports `caterpillar.glb`,
   `ant.glb`, `tarantula.glb` and `ladybug.glb` next to it.
 - `Tests/` — `MonstersModuleTests.cs`: xUnit tests of `MonstersModule` with a fake `IMessageBus`.
@@ -110,7 +112,7 @@ sinks and wiggles as it crouches and flies up in an arc (0.9 m high) as it leaps
 waddles with a rocking shell, tucks in its head and legs as it curls and rolls over and over as
 it charges; a head lunge on each bite, a white flash when hit, a green
 tint and rising bubbles while poisoned, a soft rim glow on the Deep Forest's monsters (and a
-gently glowing red shell and caps on the ladybug) so they read under the canopy and in the fog, a hop, squash and puff of spores on defeat, and a small
+gently glowing red shell and brightly glowing caps on the ladybug, `self_light` 0.4, twice what it was) so they read under the canopy and in the fog, a hop, squash and puff of spores on defeat, and a small
 health bar (turned to the camera) above a hurt monster.
 
 ## Models
@@ -125,8 +127,16 @@ mushrooms, a small thorax, a big striped abdomen and six bent legs. The Mushroom
 furry round purple body covered in soft tufts, big dark eyes with sparkles (and two little ones
 above), blush, a smile with two tiny fangs, three red spotted mushrooms on its back, and eight
 long hairy legs bent high at the knee. The Mushroom Ladybug: a round red shell with black spots
-and a seam, covered in little mushrooms (tan, pink, cream, red caps), a peachy round face with big
-eyes, blush, a smile and two antennae, and six stubby legs. Separate objects with pivots where
+and a seam, covered in little mushrooms (orange, hot pink, golden and red caps), a peachy round face with big
+eyes, blush, a smile and two antennae, and six stubby legs. 
+The mushrooms are vivid, the game's rule for every mushroom: caps a clearly saturated, bright
+color (`Cap` a pure cherry red (0.96, 0.06, 0.08); the ladybug's `CapTan` orange (0.96, 0.48,
+0.1), `CapPink` hot pink (1, 0.14, 0.55), `CapGold` golden yellow (1, 0.8, 0.12)), `Spots` pure
+white, `Stem` a clean light cream (1, 0.95, 0.84). In the game every cap also gets a small glossy
+highlight band and a light rim along its lit edge (`MonsterLook.CapGloss`, `CapRim`, drawn by the
+toon shader's `gloss` and `rim_light`), and the spots a faint self-light (`SpotLight`) so they
+stay crisp white in shade. Every other color (bodies, faces, eyes, the caterpillar's
+pale `BackDot`s) is as it was. Separate objects with pivots where
 they move (`Head`, `Seg1`..`Seg4`; `Head`, `Thorax`, `Abdomen`, `LegL1`..`LegR3`; `Body`,
 `LegL1`..`LegR4`; `Shell`, `Head`, `LegL1`..`LegR3`). Feet at
 the origin, facing -Z in Godot.

@@ -158,7 +158,8 @@ public partial class MonsterModel : Node3D
     /// <summary>
     /// The toon material for a glTF material: its color, an ink outline unless it is a small detail.
     /// The Deep Forest's monsters get a soft rim glow, and the ladybug's red shell and the little
-    /// mushroom caps on it glow a little, so they read in the gloom and the fog.
+    /// mushroom caps on it glow, so they read in the gloom and the fog; mushroom caps are glossy
+    /// (see <see cref="MonsterLook"/>).
     /// </summary>
     private static ShaderMaterial ToonMaterial(Material? source, MonsterKind kind)
     {
@@ -173,12 +174,10 @@ public partial class MonsterModel : Node3D
         var material = new ShaderMaterial { Shader = s_toon };
         // glTF stores linear colors; the shader's albedo is an sRGB color like Blender's swatch.
         material.SetShaderParameter("albedo", color.SrgbToLinear());
-        if (name == "EyeShine")
-            material.SetShaderParameter("self_light", 0.6f);
-        else if (kind == MonsterKind.Ladybug && name == "LadyShell")
-            material.SetShaderParameter("self_light", 0.32f);
-        else if (kind == MonsterKind.Ladybug && name.StartsWith("Cap", StringComparison.Ordinal))
-            material.SetShaderParameter("self_light", 0.2f);
+        material.SetShaderParameter("self_light", MonsterLook.SelfLight(kind, name));
+        // Vivid mushroom caps: a small glossy highlight and a light rim along the edge.
+        material.SetShaderParameter("gloss", MonsterLook.Gloss(name));
+        material.SetShaderParameter("rim_light", MonsterLook.Rim(name));
         if (hard)
             material.SetShaderParameter("rim_glow", kind == MonsterKind.Ladybug ? 0.7f : 0.55f);
         if (!NoOutline.Contains(name))
