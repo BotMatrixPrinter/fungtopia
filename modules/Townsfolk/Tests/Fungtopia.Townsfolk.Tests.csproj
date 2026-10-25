@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Core/Fungtopia.Townsfolk.Core.csproj" />
+    <ProjectReference Include="../Contract/Fungtopia.Townsfolk.Contract.csproj" />
+    <ProjectReference Include="../../../shell/Contract/Fungtopia.Shell.Contract.csproj" />
+    <ProjectReference Include="../../Map/Contract/Fungtopia.Map.Contract.csproj" />
+    <ProjectReference Include="../../DayNight/Contract/Fungtopia.DayNight.Contract.csproj" />
+    <ProjectReference Include="../../Player/Contract/Fungtopia.Player.Contract.csproj" />
+  </ItemGroup>
+</Project>

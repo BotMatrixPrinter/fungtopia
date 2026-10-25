@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://modules/Townsfolk/Godot/TownsfolkView.cs" id="1_townsfolk"]
+
+[node name="TownsfolkView" type="Node3D"]
+script = ExtResource("1_townsfolk")

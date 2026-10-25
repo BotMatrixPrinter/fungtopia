@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Fungtopia.Townsfolk</RootNamespace>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../shell/Contract/Fungtopia.Shell.Contract.csproj" />
+    <ProjectReference Include="../Contract/Fungtopia.Townsfolk.Contract.csproj" />
+    <ProjectReference Include="../../Map/Contract/Fungtopia.Map.Contract.csproj" />
+    <ProjectReference Include="../../DayNight/Contract/Fungtopia.DayNight.Contract.csproj" />
+    <ProjectReference Include="../../Player/Contract/Fungtopia.Player.Contract.csproj" />
+  </ItemGroup>
+</Project>
