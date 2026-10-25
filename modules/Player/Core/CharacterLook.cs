@@ -16,13 +16,13 @@ public enum BuiltinPieces
     /// <summary>The built-in hair (node "Hair" on the head), replaced by any chosen hair style.</summary>
     Hair = 1,
 
-    /// <summary>The Girl's pink spotted triangle dress; the Boy's blue shirt with sleeves and red bow tie.</summary>
+    /// <summary>The Girl's pink spotted dress (it colors her triangle body); the Boy's blue shirt and red bow tie.</summary>
     Top = 2,
 
-    /// <summary>The Boy's trousers (the Girl has none: her dress covers her legs).</summary>
+    /// <summary>The Boy's trousers, a band round the bottom of his triangle body (the Girl has none: her dress covers it).</summary>
     Bottom = 4,
 
-    /// <summary>The round brown shoes.</summary>
+    /// <summary>The round brown shoes: the feet (the models have no legs).</summary>
     Shoes = 8,
 
     /// <summary>The Girl's ribbon bow on her head.</summary>
@@ -34,8 +34,8 @@ public enum BuiltinPieces
 /// game animates and the attach points worn models go on. A worn model's objects are named like
 /// the part they go on (<see cref="Attach"/>) with their origin at its pivot: <see cref="Head"/>
 /// (hair, hats, glasses), <see cref="Body"/> (tops, dresses, the hips of bottoms, backpacks,
-/// scarves), <see cref="LegL"/> and <see cref="LegR"/> (trouser legs, and the feet: shoes, at the
-/// legs' ends).
+/// scarves), <see cref="LegL"/> and <see cref="LegR"/> (the feet: shoes; the legs themselves are
+/// invisible pivots at the hips the feet hang from).
 /// </summary>
 public static class Rig
 {
@@ -48,7 +48,7 @@ public static class Rig
     public static bool IsAttachPoint(string name) =>
         name == Head || name == Body || name == LegL || name == LegR;
 
-    /// <summary>The name prefix of the nodes of one built-in piece (e.g. "DefaultTop", "DefaultTopArmL").</summary>
+    /// <summary>The name prefix of the nodes of one built-in piece (e.g. "DefaultTop", "DefaultShoesLegL").</summary>
     public static string NodePrefix(BuiltinPieces piece) => piece switch
     {
         BuiltinPieces.Hair => "Hair",

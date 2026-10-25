@@ -9,8 +9,8 @@ namespace Fungtopia.Player.View;
 /// One player character (girl.glb or boy.glb from modules/Player/Models, the modular rig), dressed
 /// by a <see cref="CharacterLook"/> (<see cref="Apply"/>: skin, eye and hair tints, the hair style
 /// and each worn item's model on the rig's parts, the built-in outfit where nothing is worn),
-/// drawn toon-shaded with ink outlines and animated procedurally: walk bob, leg and arm swing, jump stretch and landing
-/// squash, a white hit flash, and tipping over when defeated; and the archery pose
+/// drawn toon-shaded with ink outlines and animated procedurally: walk bob, the floating hands and the feet swinging,
+/// jump stretch and landing squash, a white hit flash, and tipping over when defeated; and the archery pose
 /// (<see cref="ArcheryPose"/>): the bow from the back over the right shoulder into the left hand
 /// at the hold point on the right, the right hand drawing the string with a nocked arrow to the
 /// right cheek, upper body and head toward the aim.
@@ -47,6 +47,12 @@ public partial class CharacterModel : Node3D
     private Node3D? _arrow;
     private MeshInstance3D? _stringTop, _stringBottom;
     private ShaderMaterial? _stringMaterial;
+
+    /// <summary>How far the body cone's bottom is below its pivot (the hips; characters.py's BODY_BOTTOM is 0.12 m): squash keeps it there.</summary>
+    private const float BodyBelowPivot = 0.17f;
+
+    /// <summary>How far the (invisible) arms turn out from their rest while standing and walking, radians.</summary>
+    private const float HandsOut = 0.12f;
 
     /// <summary>How far the slung bow sits out behind a worn backpack (parts' frame, +Z is behind).</summary>
     private static readonly Vector3 BackpackPush = new(0f, 0.02f, 0.13f);
@@ -340,13 +346,16 @@ public partial class CharacterModel : Node3D
         _stretch = Mathf.Lerp(_stretch, stretchTarget, Math.Min(1f, delta * 14f));
         _tipOver = Mathf.MoveToward(_tipOver, alive ? 0f : 1f, delta * (alive ? 3f : 2.5f));
 
+        // The model has no arms or legs: ArmL/ArmR and LegL/LegR are invisible pivots, so these swing
+        // the floating hands (at the arms' ends) and the feet (hanging from the hips) back and forth.
         float swing = MathF.Sin(_walkPhase) * 0.65f * _walkAmount;
         float bob = MathF.Abs(MathF.Sin(_walkPhase)) * 0.05f * _walkAmount;
         float breathe = MathF.Sin(_time * 2.4f) * 0.012f * (1f - _walkAmount);
         float airLegs = grounded ? 0f : 0.35f;
 
-        // Squash and stretch scale the body and head only (keeping their volume about the same);
-        // arms and legs are never scaled, the arms only ride up and down on the shoulders.
+        // Squash and stretch scale the body and head only (keeping their volume about the same), the
+        // body's bottom staying put; hands and feet are never scaled, the hands only ride up and down
+        // with the shoulders.
         float aim = ArcheryPose.Eased(archery.Weight);
         float s = _squash * _squash + 0.25f * ArcheryPose.FullDrawSquash(archery) * aim;
         float up = 1f - 0.28f * s + 0.12f * _stretch + breathe;
@@ -357,7 +366,8 @@ public partial class CharacterModel : Node3D
 
         _legL.Pose(new Vector3(swing + airLegs * 0.6f, 0f, 0f));
         _legR.Pose(new Vector3(-swing - airLegs * 0.4f, 0f, 0f));
-        float armsUp = grounded ? 0f : 0.9f;
+        // The hands float a little out and up from the arms' rest, beside the middle of the body.
+        float armsUp = grounded ? HandsOut : 0.9f;
         var walkBody = Basis.FromEuler(new Vector3(-0.08f * _walkAmount, MathF.Sin(_walkPhase) * 0.08f * _walkAmount, 0f));
         var walkHead = Basis.FromEuler(new Vector3(0.05f * _walkAmount - 0.06f * s, 0f, MathF.Sin(_walkPhase) * 0.05f * _walkAmount));
         var backRotation = new Vector3(-0.08f * _walkAmount, MathF.Sin(_walkPhase) * 0.08f * _walkAmount, 0f);
@@ -398,7 +408,8 @@ public partial class CharacterModel : Node3D
 
         // The body about the hips (slid a little toward the bow), the head on its neck.
         var pivot = G(ArcheryPose.BodyPivot);
-        var slide = toParts.Basis * G(frame.Hips - ArcheryPose.BodyPivot) * w;
+        var plant = new Vector3(0f, -(1f - squash.Y) * BodyBelowPivot, 0f);
+        var slide = toParts.Basis * (G(frame.Hips - ArcheryPose.BodyPivot) * w + plant);
         var body = walkBody.GetRotationQuaternion().Slerp(ToPartsRotation(G(frame.Body)), w);
         if (_body.Node != null)
             _body.Node.Transform = new Transform3D(new Basis(body) * Basis.FromScale(squash) * _body.Rest.Basis, _body.Rest.Origin + slide);

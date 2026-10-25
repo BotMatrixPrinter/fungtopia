@@ -18,7 +18,9 @@ after defeat until it is teleported (to the clinic the next morning).
   `boy.glb` next to it.
 - `Tests/` — `PlayerModuleTests.cs`: xUnit tests of `PlayerModule` (with a fake `IMessageBus`;
   also the save part's round trip and bad saved Json),
-  `ArcheryPose` and `CharacterLook` (also standing idle and turning while the wardrobe is open).
+  `ArcheryPose` and `CharacterLook` (also standing idle and turning while the wardrobe is open),
+  and of `girl.glb` and `boy.glb` read back (the rig's parts and pivots, the floating head over
+  the cone body, floating hands and feet, no arm or leg meshes).
 
 Test it with `./test.sh Player` from the repository root.
 
@@ -123,7 +125,7 @@ Each tick:
   ids are nothing. A catalog dress replaces the bottom.
 - `Builtin` (`Shows(piece)`): the old fixed outfits are the defaults, one `BuiltinPieces` per slot,
   each shown while nothing is worn there: `Top` (the Girl's pink spotted dress; the Boy's blue
-  shirt, sleeves and bow tie), `Bottom` (the Boy's trousers; hidden under a dress), `Shoes`,
+  shirt and bow tie), `Bottom` (the Boy's trousers; hidden under a dress), `Shoes`,
   `Head` (the Girl's ribbon bow), and `Hair` (until a hair style is chosen). The Girl's built-in
   dress does not hide a worn bottom (it shows under it).
 - Out-of-range look indices keep the built-in color or hair. `CharacterLook.Default(kind)`
@@ -160,9 +162,13 @@ character's own `Skin`, `Eye` and `Hair` materials, shows or hides the built-in 
 the hair style's and each worn item's .glb (cached bytes) the same way, parenting each of its
 objects to the rig part of the same name with no offset (`Fungtopia.Wardrobe.Attach`), so worn
 models move with every animation and the archery pose; while a `Back` item is worn the slung bow
-sits 0.13 m further out behind it. The animation: walk bob, leg and arm swing, body sway, arms up and
-legs tucked in the air, stretch rising and squash on landing, a blinking white flash while
-invulnerable, and tipping over on its back when defeated.
+sits 0.13 m further out behind it. The model has no arms or legs (their parts are invisible pivots), so
+nothing draws them: the animation swings the floating hands (at the invisible arms' ends, turned a
+little out, `HandsOut`) and the feet (hanging from the hips) back and forth with the walk bob and
+body sway; in the air the hands go up and the feet tuck in; the body (squashed and stretched about
+its bottom, which stays put) stretches rising and squashes on landing, the floating head riding a
+few cm above it; a blinking white flash while invulnerable, and tipping over on its back when
+defeated.
 
 **Archery** (the Bow module draws only the arrows in flight; the character holds and draws the
 bow). `ArcheryPose` (Core, pure functions, positions in the model frame: X right, Y up, -Z the
@@ -182,7 +188,8 @@ facing) says what `CharacterModel` draws; `ArcheryPose.Solve` gives the whole po
   `BowGeometry.FullDrawPull` behind the string's rest (`StringRest`) to an anchor beside the right
   cheek and chin; the string bends into a V and each limb (`HandBowLimbTop` / `Bottom`) bends back
   about the grip by up to `MaxLimbFlex` (0.1 rad) with the visible pull (`Frame.Pull`).
-- The arms are never scaled or stretched: they keep `ArmLength` (0.42 m) and only turn at the
+- The arms are invisible limits now (no arm meshes; only the floating hands at their ends show),
+  but the pose keeps them: they are never scaled or stretched: they keep `ArmLength` (0.42 m) and only turn at the
   shoulders (`ReachArm`), the hands at their ends. The left arm reaches forward and across, in
   front of the chest, to the grip on the right. For that the body turns to the right of the aim
   (near `SideOn`, less at the start of a draw, never more than `MaxTurn`, 1.5 rad: the chest
@@ -194,10 +201,10 @@ facing) says what `CharacterModel` draws; `ArcheryPose.Solve` gives the whole po
   (`Frame.Pull` ≤ `StringPull`; about 80% at a level full draw); an arm is never wrapped round.
   Both hands and both elbows (the middle of the arm: it never bends) stay in front of the torso's
   back plane (`InFrontOfBack`, `TorsoBack` 0.17 m behind its middle) and never behind the neck or
-  head. The legs keep walking and the feet keep the facing logic. The head rides on the neck,
+  head. The feet keep walking and keep the facing logic. The head rides on the neck,
   looks along the arrow, and tilts on it to stay about over the feet, a little away from the bow
   (`HeadMiddle`), clear of the bow and the string hand. A slight squash pulses as the draw reaches
-  full (body and head only; squash and stretch never scale arms or legs).
+  full (body and head only; squash and stretch never scale the hands or feet).
 - On release (`Draw` back to 0): the arrow is gone, the string snaps forward with a little
   overshoot and the limbs straighten, the body holds the drawn pose and the right hand swings back
   off the string, out to the right and up (`StringHandTarget`); after 0.6 s without drawing the bow swings back onto the
@@ -208,23 +215,27 @@ facing) says what `CharacterModel` draws; `ArcheryPose.Solve` gives the whole po
 ## Models
 
 `blender -b --factory-startup --python modules/Player/Models/characters.py` (from the
-repository root) writes `girl.glb` and `boy.glb`; commit both with the script. Both are the same
-modular rig: skin parts (material `Skin`: a small torso and hips the clothes cover, legs whose
-round ends are the feet, arms, hands, the head) with dark eyes (`Eye`), and the old outfit and
-hair as separate child objects of their part, at its pivot, for the game to hide: `Hair` (Head),
-`DefaultTop` (Body; the Boy's sleeves `DefaultTopArmL`/`R`), `DefaultBottom` (Body) and
-`DefaultBottomLegL`/`R` (the Boy's trousers), `DefaultShoesLegL`/`R`, `DefaultHead` (the Girl's
-ribbon). The Wardrobe's clothes are sized for it (its `kit.py`). Chibi kids from
-the drawing: a big round head with large dark oval eyes with sparkles, rosy cheeks, a small
-smile and hair; a simple rounded body; short arms with little round hands; stubby legs with round
-shoes; arms that hang to the hips (0.42 m, shoulder to hand); a wooden bow slung on the back with
+repository root) writes `girl.glb` and `boy.glb`; commit both with the script. Kids made of simple shapes, from
+Saria's drawings (2026-10-25), with floating hands and head like Animal Crossing: a big round head
+(at the neck pivot, 0.72 m, as before) with large dark oval eyes with sparkles, rosy cheeks, a
+small smile and hair, floating about 7 cm above a smooth cone body (a triangle from the front:
+0.3 m round at its bottom, 0.13 m up, narrowing to a rounded top at 0.61 m; no neck); two round
+hands floating beside the body, a little below its middle (at the ends of invisible 0.42 m arms);
+two little round shoes under it; no arms and no legs. Both are the same modular rig: skin parts
+(material `Skin`: the cone body, the hands, the head) with dark eyes (`Eye`), empty pivots
+`ArmL`/`ArmR` and `LegL`/`LegR`, and the old outfit and hair as separate child objects of their
+part, at its pivot, for the game to hide: `Hair` (Head), `DefaultTop` (Body), `DefaultBottom`
+(Body; the Boy's trousers), `DefaultShoesLegL`/`R` (the feet, on the legs' pivots, so they swing),
+`DefaultHead` (the Girl's ribbon). The Wardrobe's clothes were sized for the old rounded body and
+legs (its `kit.py`): they still attach, but look off until they are refit to the cone. A wooden
+bow slung on the back (its strap a band across the cone) with
 mushroom-red tips, and for shooting the same bow 1.3 times bigger, without its string (the game
 draws the string), its two limbs separate children for bending, and a nocked poison
 mushroom-tipped arrow (0.78 m). The Girl has a ribbon bow on her
-head, pigtail puffs and a pink triangle dress with white spots; the Boy a red bow tie, a
-rounded blue shirt and trousers. Separate objects with pivots where they move: `Body`, `Head`
+head, pigtail puffs and a pink dress with white spots coloring the cone; the Boy a red bow tie and
+two buttons on a blue shirt coloring the cone, and trousers as a band round its bottom. Separate objects with pivots where they move: `Body`, `Head`
 (neck), `LegL`/`LegR` (hip), `ArmL`/`ArmR` (shoulder), `HandL`/`HandR` (hand center; the
-game keeps them at the arms' ends), `BackBow`, `HandBow` (grip; it rests exactly where `BackBow`
+game keeps them at the invisible arms' ends), `BackBow`, `HandBow` (grip; it rests exactly where `BackBow`
 is, its own frame being the held bow's: tips up and down, arc bulging forward; children
 `HandBowLimbTop` / `HandBowLimbBottom` at the same pivot) and `NockArrow`
 (nock; at rest it hides upright inside the body, its own frame points forward). Feet at the
