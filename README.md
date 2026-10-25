@@ -19,6 +19,11 @@ module. The game design comes later; this repository holds the structure every j
 
 From a terminal: `./test.sh` runs all tests and a headless load of the game;
 `./screenshot.sh [scene] [out.png]` saves a 1920x1080 screenshot (Linux, needs `xvfb-run`).
+It renders with `--rendering-driver vulkan`, the Forward+ renderer players see (volumetric fog
+and all); without a GPU, Mesa's software Vulkan (lavapipe) does it, slowly: about ten minutes for
+the default 90 frames (`SCREENSHOT_FRAMES` changes that). Only if Vulkan fails to start does it
+render again with `opengl3` (the Compatibility renderer, without Forward+ features) and say so;
+its last line names the driver used.
 
 ## Layout
 
@@ -31,14 +36,14 @@ Fungtopia.sln          the solution Godot builds (lists only Fungtopia.csproj)
 global.json            .NET SDK 10.0.100 (rolls forward to newer feature bands), Godot.NET.Sdk 4.7.2
 nuget.config           nuget.org as the package source
 test.sh                ./test.sh, or ./test.sh <Name> for one module (see below)
-screenshot.sh          renders a scene to $SCREENSHOT_DIR (or ./screenshots/)
+screenshot.sh          renders a scene with Vulkan (Forward+) to $SCREENSHOT_DIR (or ./screenshots/)
 hub.json               the hub's test commands
 shell/
   Contract/            IModule, IModuleView, IMessageBus, IMessageHandler<T>, TickContext
   Host/                ModuleHost: discovery, fixed-timestep ticking, the runtime guard; MessageBus
   Godot/               Bootstrap scene: ticks the host every physics frame, loads module scenes
 tests/
-  Fungtopia.Shell.Tests/   xUnit tests of the bus, host, guard and discovery
+  Fungtopia.Shell.Tests/   xUnit tests of the bus, host, guard, discovery and screenshot.sh
 modules/
   <Name>/
     Contract/          Fungtopia.<Name>.Contract: the module's public structs and interfaces
