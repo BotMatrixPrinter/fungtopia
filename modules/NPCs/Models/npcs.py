@@ -5,28 +5,32 @@
 # or only some of them:
 #   blender -b --factory-startup --python modules/NPCs/Models/npcs.py -- pip
 #
-# Folk made of simple shapes, in the player characters' style (modules/Player/Models/characters.py,
-# from Saria's drawings, floating hands and head like Animal Crossing): a big round head floating
-# a few cm over a smooth cone body (a triangle from the front, no neck), two round hands floating
-# beside it, two little round feet under it, no arms or legs. The clothes color the cone.
+# Grown-ups made of simple shapes, in Saria's style (floating head and floating round hands, like
+# Animal Crossing; no visible arms or neck) but with normal proportions and real legs (Tony,
+# 2026-10-25: "1.8 meters average", "they do have legs in the drawings", "make them look more
+# normal"). For a 1.80 m character: rounded tube legs from the hips (0.90 m) down to rounded shoes,
+# a smooth tapered torso from 0.88 to 1.44 m (shoulders 0.40 m wide, waist 0.30, hips 0.34, 0.22
+# deep), round hands at the ends of invisible 0.66 m arms from the shoulders (1.40 m), and a round
+# head (0.30 m tall, 0.27 wide, centered at 1.64) floating 5 cm over the torso. Each one is that
+# rig scaled uniformly by their height / 1.80 (HEIGHTS). The outfits color the torso and legs.
 #   Dr. Jeremy: big dark eyes with sparkles, a white doctor's coat with lapels, buttons and a name
-#               badge open over a blue shirt and red tie, a stethoscope round the top of the cone.
+#               badge open over a blue shirt and red tie, a stethoscope round his shoulders,
+#               trousers.
 #   Millie:     cat ears, happy ^ ^ closed eyes, honey bunches, a pink bow, a mint spotted dress
 #               with a frilly hem, and a little curled cat tail.
 #   Lucy:       a flower in her bob, half-lidded unimpressed eyes, a shirt saying "Pet Store"
-#               with little hearts, a skirt as a band round the bottom.
-#   Abby:       big dark eyes, a happy smile, hair in a tall top bun, the cone a pink triangle
-#               dress with a white collar and hem.
+#               with little hearts, a blue skirt.
+#   Abby:       big dark eyes, a happy smile, hair in a tall top bun, a pink triangle dress with
+#               a white collar and hem.
 #   Pip:        the cook at the Mushroom Munchies food stall: big dark eyes, rosy freckled cheeks,
 #               a puffy white chef's hat shaped like a mushroom cap with red spots, a cream apron
-#               with a little muffin printed on it, a wooden spoon in the right hand; standing on
-#               a little wooden step stool (to reach over the counter).
+#               with a little muffin printed on it, a wooden spoon in the right hand.
 #
 # Meters, feet at the origin, facing Blender +Y (Godot's -Z, forward, after the glTF export).
 # Separate objects with pivots where they move, so the game can animate them: Body (hip), Head
-# (neck), LegL / LegR (hip; empty, the feet FootL / FootR hang from them), ArmL / ArmR (shoulder;
-# empty, invisible), HandL / HandR (hand center, at the invisible arms' ends). Materials carry
-# plain colors only; the game draws them toon-shaded with ink outlines.
+# (neck), LegL / LegR (hip; the legs, the shoes FootL / FootR hang from them), ArmL / ArmR
+# (shoulder; empty, invisible), HandL / HandR (hand center, at the invisible arms' ends). Materials
+# carry plain colors only; the game draws them toon-shaded with ink outlines.
 import math
 import os
 import sys
@@ -46,21 +50,28 @@ COLORS = {
     "Shoe": (0.42, 0.24, 0.18),
 }
 
-# The rig, as the player characters' (characters.py): the neck (the head's pivot), the hip (the
-# body's and legs' pivot), the shoulders and the invisible arms' length to the hands' centers.
-HIP_Z = 0.3
-NECK_Z = 0.72
-HEAD_R = 0.4
-HEAD_C = Vector((0, 0, NECK_Z + HEAD_R * 0.92))
-SHOULDER_X, SHOULDER_Z = 0.23, NECK_Z - 0.07
-ARM_LENGTH = 0.42
+# Each one's height (feet to the top of the head); the game's NPCsModule.Heights keeps in step.
+HEIGHTS = {"jeremy": 1.86, "millie": 1.72, "lucy": 1.78, "abby": 1.75, "pip": 1.70}
 
-# The body: a cone, a triangle from the front, from BODY_BOTTOM (radius BODY_R0) to BODY_TOP
-# (radius BODY_R1, rounded off), a few cm below the head (its bottom is at about 0.71 m).
-BODY_BOTTOM, BODY_TOP = 0.13, 0.61
-BODY_R0, BODY_R1 = 0.3, 0.05
-# Where a band round the bottom of the cone (Lucy's skirt, Pip's trousers) ends.
-BAND_TOP = 0.24
+# The rig of a 1.80 m character (build() scales it to each one's height): the hips (the body's
+# and legs' pivots), the shoulders, the invisible arms' length to the hands' centers, the neck
+# (the head's pivot) and the head.
+TALL = 1.80
+HIP_Z = 0.90
+LEG_X, LEG_R = 0.10, 0.065
+SHOULDER_X, SHOULDER_Z = 0.22, 1.40
+ARM_LENGTH = 0.66
+HAND_R = 0.055
+NECK_Z = 1.48
+HEAD_C = Vector((0, 0, 1.64))
+HEAD_W, HEAD_D, HEAD_H = 0.27, 0.28, 0.30
+TORSO_BOTTOM, TORSO_TOP = 0.88, 1.44
+
+# The faces and hair are drawn on a sketch head (a round head of radius SKETCH_R centered at
+# SKETCH_C over a neck at SKETCH_NECK) and then fitted to the real head (Head.build()).
+SKETCH_R = 0.4
+SKETCH_NECK = 0.72
+SKETCH_C = Vector((0, 0, SKETCH_NECK + SKETCH_R * 0.92))
 
 
 def material(name, color):
@@ -242,83 +253,206 @@ def _copy_into(source, target):
     bpy.data.meshes.remove(mesh)
 
 
-# The cone body.
+class Head(Part):
+    """The head, drawn on the sketch head (SKETCH_C, SKETCH_R, pivot at SKETCH_NECK) and fitted to
+    the real one when built: centered at HEAD_C, HEAD_W x HEAD_D x HEAD_H, pivot at the neck."""
 
-def rounded(corners, radii, steps=6):
-    """The polyline through corners, each corner cut round (a quadratic curve) radii[i] along its edges."""
-    points = [corners[0]]
-    for i in range(1, len(corners) - 1):
-        c, d = Vector(corners[i]), radii[i]
-        if d <= 0:
-            points.append(corners[i])
-            continue
-        a = c + (Vector(corners[i - 1]) - c).normalized() * d
-        b = c + (Vector(corners[i + 1]) - c).normalized() * d
-        for k in range(steps + 1):
-            t = k / steps
-            p = a * (1 - t) ** 2 + c * 2 * t * (1 - t) + b * t * t
-            points.append((p.x, p.y))
-    points.append(corners[-1])
-    return points
+    def __init__(self):
+        super().__init__("Head", (0, 0, SKETCH_NECK))
+
+    def build(self):
+        skin = (SKETCH_R * 2, SKETCH_R * 2 * 0.96, SKETCH_R * 2 * 0.94)
+        fit = (Matrix.Translation((0, 0, HEAD_C.z - NECK_Z))
+               @ Matrix.Diagonal((HEAD_W / skin[0], HEAD_D / skin[1], HEAD_H / skin[2], 1.0))
+               @ Matrix.Translation((0, 0, SKETCH_NECK - SKETCH_C.z)))
+        self.bm.transform(fit)
+        self.pivot = Vector((0, 0, NECK_Z))
+        return super().build()
 
 
-def body_radius(z):
-    """The body cone's radius at height z (its straight side, before the rounding)."""
-    return BODY_R0 + (BODY_R1 - BODY_R0) * (z - BODY_BOTTOM) / (BODY_TOP - BODY_BOTTOM)
+# The body: smooth shapes of elliptic cross-sections round the Z axis (the torso, skirts).
+
+def loft(part, mat, rings, cuts=(), segments=48):
+    """A smooth solid through rings (a, b, z) from bottom to top: ellipses of half width a (x) and
+    half depth b (y) at height z, a = 0 a point on the axis (the first and last must be). cuts =
+    (point, normal) planes, each removing the part on its normal's side (world coordinates)."""
+    def make(g):
+        loops = []
+        for a, b, z in rings:
+            if a < 1e-6:
+                loops.append([g.verts.new((0, 0, z))])
+            else:
+                loops.append([g.verts.new((a * math.cos(i / segments * 2 * math.pi),
+                                           b * math.sin(i / segments * 2 * math.pi), z)) for i in range(segments)])
+        for lo, hi in zip(loops, loops[1:]):
+            for i in range(segments):
+                j = (i + 1) % segments
+                if len(lo) == 1 and len(hi) > 1:
+                    g.faces.new((lo[0], hi[j], hi[i]))
+                elif len(hi) == 1 and len(lo) > 1:
+                    g.faces.new((lo[i], lo[j], hi[0]))
+                elif len(lo) > 1:
+                    g.faces.new((lo[i], lo[j], hi[j], hi[i]))
+        bmesh.ops.recalc_face_normals(g, faces=g.faces)
+        for point, normal in cuts:
+            bmesh.ops.bisect_plane(g, geom=g.verts[:] + g.edges[:] + g.faces[:],
+                                   plane_co=Vector(point), plane_no=Vector(normal), clear_outer=True)
+    part._add(make, mat, Matrix.Translation(-part.pivot))
 
 
-def body_profile(offset=0.0, z0=BODY_BOTTOM, z1=BODY_TOP):
-    """The outline of the body cone (offset out by offset, for things over it) from z0 to z1;
-    rounded at its true bottom rim and top, flat where it is cut off."""
-    bottom, top = z0 <= BODY_BOTTOM, z1 >= BODY_TOP
-    z0, z1 = (z0 - offset if bottom else z0), (z1 + offset if top else z1)
-    corners = [(0, z0), (body_radius(z0) + offset, z0), (body_radius(z1) + offset, z1), (0, z1)]
-    points = rounded(corners, [0, 0.06 if bottom else 0, 0.11 if top else 0, 0], steps=8)
-    # Rings every few cm up the straight side, for smooth shading (and the toon outline).
-    dense = [points[0]]
-    for p, q in zip(points, points[1:]):
-        n = max(1, int(math.dist(p, q) / 0.03))
-        dense += [(p[0] + (q[0] - p[0]) * k / n, p[1] + (q[1] - p[1]) * k / n) for k in range(1, n + 1)]
-    return dense
+def _cap(t, p=2.2):
+    """A superellipse quarter: the width left at t of the way into a rounded end."""
+    return (1 - min(1.0, t) ** p) ** (1 / p)
 
 
-SLOPE = (BODY_R0 - BODY_R1) / (BODY_TOP - BODY_BOTTOM)
+class Shape:
+    """A smooth rounded shape: keys (z, a, b) from bottom to top, a smooth curve through them, then
+    rounded ends bottom_round below the first and top_round above the last."""
+
+    def __init__(self, keys, bottom_round, top_round):
+        table = []
+        # The rounded bottom, from the axis up to the first key.
+        z, a, b = keys[0]
+        for k in range(8):
+            t = math.cos(k / 8 * math.pi / 2)
+            table.append((z - bottom_round * t, a * _cap(t), b * _cap(t)))
+        # A Catmull-Rom curve through the keys.
+        pts = [keys[0]] + list(keys) + [keys[-1]]
+        for i in range(1, len(pts) - 2):
+            p0, p1, p2, p3 = (Vector(p) for p in pts[i - 1:i + 3])
+            steps = max(2, int((p2.x - p1.x) / 0.01))
+            for k in range(steps):
+                t = k / steps
+                q = 0.5 * (2 * p1 + (p2 - p0) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t
+                           + (3 * p1 - p0 - 3 * p2 + p3) * t ** 3)
+                table.append(tuple(q))
+        table.append(tuple(keys[-1]))
+        z, a, b = keys[-1]
+        for k in range(1, 9):
+            t = math.sin(k / 8 * math.pi / 2)
+            table.append((z + top_round * t, a * _cap(t), b * _cap(t)))
+        self.table = table
+        self.z0, self.z1 = table[0][0], table[-1][0]
+
+    def ab(self, z):
+        """The half width and depth at height z."""
+        t = self.table
+        if z <= t[0][0]:
+            return t[0][1], t[0][2]
+        for (z0, a0, b0), (z1, a1, b1) in zip(t, t[1:]):
+            if z <= z1:
+                f = (z - z0) / max(z1 - z0, 1e-9)
+                return a0 + (a1 - a0) * f, b0 + (b1 - b0) * f
+        return t[-1][1], t[-1][2]
+
+    def rings(self, offset=0.0, z0=None, z1=None):
+        """The rings for loft(), offset out by offset (for things over it) from z0 to z1: rounded
+        at the shape's true ends, flat where it is cut off."""
+        whole_bottom = z0 is None or z0 <= self.z0
+        whole_top = z1 is None or z1 >= self.z1
+        out = []
+        if not whole_bottom:
+            a, b = self.ab(z0)
+            out += [(0, 0, z0), (a + offset, b + offset, z0)]
+        for z, a, b in self.table:
+            if (whole_bottom or z > z0) and (whole_top or z < z1):
+                if a < 1e-6:
+                    out.append((0, 0, z - offset if z == self.z0 else z + offset))
+                else:
+                    out.append((a + offset, b + offset, z))
+        if not whole_top:
+            a, b = self.ab(z1)
+            out += [(a + offset, b + offset, z1), (0, 0, z1)]
+        return out
+
+    def _at(self, angle, z):
+        t = math.radians(angle + 90)
+        a, b = self.ab(z)
+        return Vector((a * math.cos(t), b * math.sin(t), z))
+
+    def normal(self, angle, z):
+        """The outward normal angle degrees round from the front (+Y; positive toward -X, the left)."""
+        z = min(max(z, self.z0 + 0.004), self.z1 - 0.004)
+        along = self._at(angle + 1, z) - self._at(angle - 1, z)
+        up = self._at(angle, z + 0.003) - self._at(angle, z - 0.003)
+        return along.cross(up).normalized()
+
+    def point(self, angle, z, lift=0.0):
+        """The point on the side angle degrees round from the front at height z, lifted off it."""
+        return self._at(angle, z) + self.normal(angle, z) * lift
+
+    def front(self, x, z, lift=0.0):
+        """The point on the front at x (right +), height z, lifted off it (out along +Y)."""
+        a, b = self.ab(z)
+        a, b = a + lift, b + lift
+        return Vector((x, b * math.sqrt(max(0.0, 1 - (x / a) ** 2)), z))
+
+    def band(self, part, mat, z, minor, lift=0.0):
+        """A ring round the shape at height z."""
+        a, b = self.ab(z)
+        a, b = a + lift, b + lift
+
+        def make(g):
+            loops = []
+            for i in range(48):
+                t = i / 48 * 2 * math.pi
+                c = Vector((a * math.cos(t), b * math.sin(t), z))
+                out = Vector((math.cos(t) / a, math.sin(t) / b, 0)).normalized()
+                loops.append([g.verts.new(c + out * math.cos(k / 10 * 2 * math.pi) * minor
+                                          + Vector((0, 0, math.sin(k / 10 * 2 * math.pi) * minor))) for k in range(10)])
+            for i in range(48):
+                for k in range(10):
+                    g.faces.new((loops[i][k], loops[(i + 1) % 48][k], loops[(i + 1) % 48][(k + 1) % 10], loops[i][(k + 1) % 10]))
+            bmesh.ops.recalc_face_normals(g, faces=g.faces)
+        part._add(make, mat, Matrix.Translation(-part.pivot))
+
+    def patch(self, part, mat, angle, z, size, lift=0.006, roll=0.0, segments=16, rings=8, box=False):
+        """A flat shape lying on the side: size is (across, up, thickness) radii (a box: full
+        extents), roll turns it about the normal (degrees)."""
+        normal = self.normal(angle, z)
+        rot = normal.to_track_quat("Z", "Y").to_matrix().to_4x4() @ Matrix.Rotation(math.radians(roll), 4, "Z")
+        center = self.point(angle, z, lift)
+        if box:
+            part.box(mat, center, size, rotation=rot)
+        else:
+            part.sphere(mat, center, size, rotation=rot, segments=segments, rings=rings)
+
+    def text(self, part, mat, text, z, size, lift=0.006):
+        """Text written across the front at height z, hugging it."""
+        curve = bpy.data.curves.new("Text", type="FONT")
+        curve.body = text
+        curve.size = size
+        curve.extrude = 0.003
+        curve.align_x = "CENTER"
+        curve.align_y = "CENTER"
+        obj = bpy.data.objects.new("Text", curve)
+        bpy.context.scene.collection.objects.link(obj)
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        mesh = bpy.data.meshes.new_from_object(obj.evaluated_get(depsgraph))
+        bpy.data.objects.remove(obj)
+        bpy.data.curves.remove(curve)
+        geom = bmesh.new()
+        geom.from_mesh(mesh)
+        bpy.data.meshes.remove(mesh)
+        for v in geom.verts:
+            # Text space: x right, y up, z out of the page; on the front (seen from the front, +Y):
+            # right is -X, up +Z, out +Y.
+            v.co = self.front(-v.co.x, z + v.co.y, lift + v.co.z)
+        part.world_mesh(mat, geom)
 
 
-def cone_normal(angle):
-    """The cone's outward normal angle degrees round from the front (+Y; positive toward -X, the left)."""
-    t = math.radians(angle + 90)
-    return Vector((math.cos(t), math.sin(t), SLOPE)).normalized()
+# The torso: hips 0.34 m wide, a 0.30 m waist, 0.40 m shoulders, about 0.22 m deep, rounded off at
+# the hips (0.88 m) and over the shoulders (1.44 m).
+TORSO = Shape([(0.90, 0.170, 0.112), (0.97, 0.165, 0.106), (1.08, 0.150, 0.100), (1.18, 0.163, 0.108),
+               (1.27, 0.186, 0.112), (1.36, 0.200, 0.110)], 0.02, TORSO_TOP - 1.36)
 
 
-def on_cone(angle, z, lift=0.0):
-    """The point on the cone's side angle degrees round from the front at height z, lifted off it."""
-    t = math.radians(angle + 90)
-    r = body_radius(z)
-    return Vector((math.cos(t) * r, math.sin(t) * r, z)) + cone_normal(angle) * lift
-
-
-def front(x, z, lift=0.0):
-    """The point on the front of the cone at x (right +), height z, lifted off it (out along +Y)."""
-    r = body_radius(z) + lift
-    return Vector((x, math.sqrt(max(0.0, r * r - x * x)), z))
-
-
-def patch(part, mat, angle, z, size, lift=0.006, roll=0.0, segments=16, rings=8, box=False):
-    """A flat shape lying on the cone's side: size is (across, up the slope, thickness) radii (a box:
-    full extents), roll turns it about the normal (degrees)."""
-    normal = cone_normal(angle)
-    rot = normal.to_track_quat("Z", "Y").to_matrix().to_4x4() @ Matrix.Rotation(math.radians(roll), 4, "Z")
-    center = on_cone(angle, z, lift)
-    if box:
-        part.box(mat, center, size, rotation=rot)
-    else:
-        part.sphere(mat, center, size, rotation=rot, segments=segments, rings=rings)
-
-
-def band(part, mat, z, minor, lift=0.0):
-    """A ring round the cone at height z."""
-    part.torus(mat, (0, 0, z), body_radius(z) + lift, minor, segments=48)
+def skirt(top, hem, a_hem, b_hem):
+    """A skirt (or coat tails) from inside the torso at height top, past the hips, flaring out to
+    its hem (half width a_hem, half depth b_hem)."""
+    a0, b0 = TORSO.ab(top)
+    a1, b1 = TORSO.ab(0.92)
+    return Shape([(hem + 0.02, a_hem, b_hem), (0.92, a1 + 0.012, b1 + 0.012), (top, a0 - 0.006, b0 - 0.006)], 0.02, 0.0)
 
 
 def heart(part, mat, center, size, normal):
@@ -335,62 +469,42 @@ def heart(part, mat, center, size, normal):
                 rotation=rot @ Matrix.Rotation(math.radians(45), 4, "Y"), segments=4, rings=2)
 
 
-def cone_text(part, mat, text, z, size, lift=0.006):
-    """Text written across the front of the cone at height z, hugging it."""
-    curve = bpy.data.curves.new("Text", type="FONT")
-    curve.body = text
-    curve.size = size
-    curve.extrude = 0.004
-    curve.align_x = "CENTER"
-    curve.align_y = "CENTER"
-    obj = bpy.data.objects.new("Text", curve)
-    bpy.context.scene.collection.objects.link(obj)
-    depsgraph = bpy.context.evaluated_depsgraph_get()
-    mesh = bpy.data.meshes.new_from_object(obj.evaluated_get(depsgraph))
-    bpy.data.objects.remove(obj)
-    bpy.data.curves.remove(curve)
-    geom = bmesh.new()
-    geom.from_mesh(mesh)
-    bpy.data.meshes.remove(mesh)
-    for v in geom.verts:
-        # Text space: x right, y up, z out of the page; on the cone (seen from the front, +Y):
-        # right is -X, up +Z, out +Y.
-        v.co = front(-v.co.x, z + v.co.y, lift + v.co.z)
-    part.world_mesh(mat, geom)
-
-
-def rig(mats, feet="Shoe"):
-    """The invisible arms and legs: empty pivots at the shoulders and hips. The round hands float
-    beside the body at the arms' ends (a little below its middle), the little round feet hang from
-    the legs under it."""
+def rig(mats, legs="Skin"):
+    """The legs and invisible arms. The legs are rounded tubes (colored legs: skin, trousers...)
+    hanging from the hips down into rounded shoes (FootL / FootR, their children). The arms are
+    empty pivots at the shoulders; the round hands float at their ends, beside the thighs."""
     for side, name in ((-1, "LegL"), (1, "LegR")):
-        x = side * 0.125
-        leg = empty(name, (x, 0, HIP_Z + 0.02))
-        foot = Part("Foot" + name[-1], leg.location)
-        foot.sphere(mats[feet], (x, 0.085, 0.062), (0.095, 0.125, 0.064), segments=24, rings=12)
-        foot.build().parent = leg
+        hip = Vector((side * LEG_X, 0, HIP_Z))
+        leg = Part(name, hip)
+        leg.capsule(mats[legs], hip + Vector((0, 0, 0.0)), (hip.x, 0, 0.1), LEG_R, segments=20)
+        leg_obj = leg.build()
+        # The shoe: rounded, 0.12 m tall and 0.24 m long, flat underneath, its toe forward.
+        foot = Part("Foot" + name[-1], hip)
+        foot.sphere(mats["Shoe"], (hip.x + side * 0.004, 0.045, 0.05), (0.072, 0.12, 0.07), segments=24, rings=12,
+                    cut=((0, 0, 0), (0, 0, -1)))
+        foot.build().parent = leg_obj
         bpy.data.objects["Foot" + name[-1]].location = (0, 0, 0)
     for side, name in ((-1, "ArmL"), (1, "ArmR")):
         shoulder = Vector((side * SHOULDER_X, 0, SHOULDER_Z))
         empty(name, shoulder)
-        hand = shoulder + Vector((side * 0.13, 0.02, -0.22)).normalized() * ARM_LENGTH
+        hand = shoulder + Vector((side * 0.12, 0.02, -0.64)).normalized() * ARM_LENGTH
         hand_part = Part("Hand" + name[-1], hand)
-        hand_part.sphere(mats["Skin"], hand, (0.082, 0.078, 0.085), segments=24, rings=12)
+        hand_part.sphere(mats["Skin"], hand, (HAND_R, HAND_R * 0.95, HAND_R * 1.03), segments=24, rings=12)
         hand_part.build()
 
 
-# Heads (big and round, as the player characters').
+# Heads (round, the face drawn on the sketch head and fitted to the real one).
 
 def round_head(mats):
-    head = Part("Head", (0, 0, NECK_Z))
-    head.sphere(mats["Skin"], HEAD_C, (HEAD_R, HEAD_R * 0.96, HEAD_R * 0.94), segments=40, rings=24)
+    head = Head()
+    head.sphere(mats["Skin"], SKETCH_C, (SKETCH_R, SKETCH_R * 0.96, SKETCH_R * 0.94), segments=40, rings=24)
     return head
 
 
 def round_eyes(head, mats):
     """Big dark oval eyes with sparkles (like the player characters)."""
     for side in (-1, 1):
-        eye_c = HEAD_C + Vector((side * 0.15, HEAD_R * 0.86, -0.04))
+        eye_c = SKETCH_C + Vector((side * 0.15, SKETCH_R * 0.86, -0.04))
         tilt = Matrix.Rotation(math.radians(side * -20), 4, "Z")
         head.sphere(mats["Eye"], eye_c, (0.08, 0.06, 0.115), rotation=tilt, segments=24, rings=12)
         head.sphere(mats["EyeShine"], eye_c + Vector((-0.022, 0.05, 0.045)), (0.03, 0.02, 0.034), segments=12, rings=6)
@@ -400,7 +514,7 @@ def round_eyes(head, mats):
 def happy_eyes(head, mats):
     """Closed happy ^ ^ eyes: little arches."""
     for side in (-1, 1):
-        eye_c = HEAD_C + Vector((side * 0.15, HEAD_R * 0.9, -0.05))
+        eye_c = SKETCH_C + Vector((side * 0.15, SKETCH_R * 0.9, -0.05))
         head.torus(mats["Eye"], eye_c, 0.06, 0.016,
                    rotation=Matrix.Rotation(math.radians(90), 4, "X") @ Matrix.Rotation(math.radians(90), 4, "Z")
                    @ Matrix.Rotation(math.radians(side * 4), 4, "Z"), arc=0.42)
@@ -409,7 +523,7 @@ def happy_eyes(head, mats):
 def sleepy_eyes(head, mats):
     """Half-lidded unimpressed eyes: the top half of each eye is hidden under a flat lid."""
     for side in (-1, 1):
-        eye_c = HEAD_C + Vector((side * 0.15, HEAD_R * 0.86, -0.06))
+        eye_c = SKETCH_C + Vector((side * 0.15, SKETCH_R * 0.86, -0.06))
         head.sphere(mats["Eye"], eye_c, (0.075, 0.06, 0.1), segments=24, rings=12,
                     cut=(eye_c + Vector((0, 0, -0.005)), Vector((0, 0, 1))))
         head.sphere(mats["EyeShine"], eye_c + Vector((-0.02, 0.055, -0.03)), (0.02, 0.012, 0.02), segments=10, rings=5)
@@ -420,22 +534,22 @@ def sleepy_eyes(head, mats):
 
 def blush(head, mats):
     for side in (-1, 1):
-        head.sphere(mats["Blush"], HEAD_C + Vector((side * 0.25, HEAD_R * 0.74, -0.15)), (0.06, 0.025, 0.035),
+        head.sphere(mats["Blush"], SKETCH_C + Vector((side * 0.25, SKETCH_R * 0.74, -0.15)), (0.06, 0.025, 0.035),
                     rotation=Matrix.Rotation(math.radians(side * -38), 4, "Z"), segments=16, rings=8)
 
 
 def smile(head, mats, big=False):
-    head.torus(mats["Mouth"], HEAD_C + Vector((0, HEAD_R * 0.92, -0.17)), 0.045 if big else 0.035, 0.01,
+    head.torus(mats["Mouth"], SKETCH_C + Vector((0, SKETCH_R * 0.92, -0.17)), 0.045 if big else 0.035, 0.01,
                rotation=Matrix.Rotation(math.radians(90), 4, "X") @ Matrix.Rotation(math.radians(-90), 4, "Z"),
                arc=0.45 if big else 0.42)
 
 
 def hair_cap(head, mats, fringe=True, back=1.0):
-    head.sphere(mats["Hair"], HEAD_C + Vector((0, -0.02, 0.03)), (HEAD_R * 1.07, HEAD_R * 1.06 * back, HEAD_R * 1.04),
-                segments=40, rings=24, cut=(HEAD_C + Vector((0, 0.1, -0.1)), Vector((0, 0.85, -0.53))))
+    head.sphere(mats["Hair"], SKETCH_C + Vector((0, -0.02, 0.03)), (SKETCH_R * 1.07, SKETCH_R * 1.06 * back, SKETCH_R * 1.04),
+                segments=40, rings=24, cut=(SKETCH_C + Vector((0, 0.1, -0.1)), Vector((0, 0.85, -0.53))))
     if fringe:
         for x in (-0.22, -0.08, 0.08, 0.22):
-            head.sphere(mats["Hair"], HEAD_C + Vector((x, HEAD_R * 0.8 - abs(x) * 0.35, 0.24 - abs(x) * 0.3)),
+            head.sphere(mats["Hair"], SKETCH_C + Vector((x, SKETCH_R * 0.8 - abs(x) * 0.35, 0.24 - abs(x) * 0.3)),
                         (0.1, 0.07, 0.075), segments=16, rings=8)
 
 
@@ -443,7 +557,7 @@ def freckles(head, mats):
     """A few freckles across each rosy cheek and the nose."""
     for side in (-1, 1):
         for dx, dz in ((0.0, 0.0), (0.045, 0.02), (0.035, -0.03), (-0.04, 0.015)):
-            head.sphere(mats["Freckle"], HEAD_C + Vector((side * (0.22 + dx), HEAD_R * 0.8 - dx * 0.4, -0.11 + dz)),
+            head.sphere(mats["Freckle"], SKETCH_C + Vector((side * (0.22 + dx), SKETCH_R * 0.8 - dx * 0.4, -0.11 + dz)),
                         (0.011, 0.008, 0.011), segments=8, rings=4)
 
 
@@ -456,40 +570,46 @@ def jeremy(mats):
     smile(head, mats)
     hair_cap(head, mats, fringe=False)
     # A neat side parting: a swoop of hair over the forehead.
-    head.sphere(mats["Hair"], HEAD_C + Vector((-0.08, HEAD_R * 0.62, 0.27)), (0.26, 0.12, 0.09),
+    head.sphere(mats["Hair"], SKETCH_C + Vector((-0.08, SKETCH_R * 0.62, 0.27)), (0.26, 0.12, 0.09),
                 rotation=Matrix.Rotation(math.radians(-12), 4, "Y"), segments=20, rings=10)
     # Little ears.
     for side in (-1, 1):
-        head.sphere(mats["Skin"], HEAD_C + Vector((side * HEAD_R * 0.97, 0.02, -0.06)), (0.05, 0.04, 0.07),
+        head.sphere(mats["Skin"], SKETCH_C + Vector((side * SKETCH_R * 0.97, 0.02, -0.06)), (0.05, 0.04, 0.07),
                     segments=12, rings=6)
     head.build()
 
     body = Part("Body", (0, 0, HIP_Z))
-    # The white doctor's coat colors the cone, open at the top in a V over a blue shirt and red tie.
-    v_low, k = 0.4, 0.42
-    body.lathe(mats["Coat"], body_profile())
-    body.lathe(mats["Shirt"], body_profile(0.006, v_low, BODY_TOP),
-               cuts=(((0, 0, v_low), Vector((1, 0, -k))), ((0, 0, v_low), Vector((-1, 0, -k))),
-                     ((0, 0.02, 0), Vector((0, -1, 0)))))
-    patch(body, mats["Tie"], 0, 0.5, (0.022, 0.07, 0.01), lift=0.012, segments=12, rings=6)
-    patch(body, mats["Tie"], 0, 0.565, (0.026, 0.02, 0.012), lift=0.012, segments=12, rings=6)
-    # Lapels along the V, buttons down the front below it, a name badge on the chest.
+    # The white doctor's coat over the torso, its tails down to the knees, open at the top in a V
+    # over a blue shirt and red tie.
+    tails = skirt(1.0, 0.6, 0.205, 0.15)
+    loft(body, mats["Coat"], TORSO.rings())
+    loft(body, mats["Coat"], tails.rings())
+    v_low, k = 1.2, 0.42
+    loft(body, mats["Shirt"], TORSO.rings(0.004, v_low, None),
+         cuts=(((0, 0, v_low), Vector((1, 0, -k))), ((0, 0, v_low), Vector((-1, 0, -k))),
+               ((0, 0.02, 0), Vector((0, -1, 0)))))
+    TORSO.patch(body, mats["Tie"], 0, 1.3, (0.017, 0.055, 0.008), lift=0.009, segments=12, rings=6)
+    TORSO.patch(body, mats["Tie"], 0, 1.37, (0.02, 0.014, 0.009), lift=0.009, segments=12, rings=6)
+    # Lapels along the V, buttons down the front below it and the coat tails, a name badge on the chest.
     for side in (-1, 1):
-        x = 0.05
-        a = math.degrees(math.atan2(x, body_radius(0.48)))
-        patch(body, mats["Lapel"], -side * a, 0.48, (0.03, 0.09, 0.01), lift=0.011, roll=side * 22, segments=12, rings=6)
-    for z in (0.34, 0.26, 0.18):
-        patch(body, mats["Button"], 0, z, (0.018, 0.018, 0.008), lift=0.006, segments=12, rings=6)
-    patch(body, mats["Badge"], 34, 0.37, (0.08, 0.045, 0.012), lift=0.008, roll=-8, box=True)
-    patch(body, mats["BadgeStripe"], 34, 0.385, (0.082, 0.012, 0.014), lift=0.009, roll=-8, box=True)
-    # The stethoscope: a ring round the top of the cone, two tubes down the front, a shiny chest piece.
-    band(body, mats["Tube"], 0.53, 0.012, lift=0.012)
-    piece = on_cone(-16, 0.31, 0.02)
-    for a in (-38, 30):
-        body.capsule(mats["Tube"], on_cone(a, 0.53, 0.014), piece, 0.011, segments=8)
-    patch(body, mats["Metal"], -16, 0.31, (0.04, 0.04, 0.02), lift=0.022, segments=16, rings=8)
+        a = math.degrees(math.asin(0.04 / TORSO.ab(1.3)[0]))
+        TORSO.patch(body, mats["Lapel"], -side * a, 1.3, (0.02, 0.065, 0.008), lift=0.008, roll=side * 22, segments=12, rings=6)
+    for z in (1.13, 1.04, 0.95):
+        TORSO.patch(body, mats["Button"], 0, z, (0.012, 0.012, 0.006), lift=0.005, segments=12, rings=6)
+    for z in (0.84, 0.74):
+        tails.patch(body, mats["Button"], 0, z, (0.012, 0.012, 0.006), lift=0.005, segments=12, rings=6)
+    TORSO.patch(body, mats["Badge"], 36, 1.24, (0.06, 0.034, 0.008), lift=0.006, roll=-6, box=True)
+    TORSO.patch(body, mats["BadgeStripe"], 36, 1.252, (0.062, 0.009, 0.01), lift=0.007, roll=-6, box=True)
+    # The stethoscope: a ring round his shoulders, two tubes down the front, a shiny chest piece.
+    TORSO.band(body, mats["Tube"], 1.415, 0.009, lift=0.008)
+    piece = TORSO.point(-16, 1.17, 0.016)
+    for a in (-40, 32):
+        bend = TORSO.point(a * 0.6 - 6, 1.3, 0.018)
+        body.capsule(mats["Tube"], TORSO.point(a, 1.415, 0.01), bend, 0.008, segments=8)
+        body.capsule(mats["Tube"], bend, piece, 0.008, segments=8)
+    TORSO.patch(body, mats["Metal"], -16, 1.17, (0.03, 0.03, 0.014), lift=0.018, segments=16, rings=8)
     body.build()
-    rig(mats)
+    rig(mats, legs="Trousers")
 
 
 def millie(mats):
@@ -500,11 +620,11 @@ def millie(mats):
     hair_cap(head, mats)
     # Two puffy bunches at the sides.
     for side in (-1, 1):
-        head.sphere(mats["Hair"], HEAD_C + Vector((side * 0.38, -0.06, -0.18)), (0.12, 0.12, 0.17), segments=16, rings=8)
+        head.sphere(mats["Hair"], SKETCH_C + Vector((side * 0.38, -0.06, -0.18)), (0.12, 0.12, 0.17), segments=16, rings=8)
     # Cat ears: hair-colored triangles with pink insides.
     for side in (-1, 1):
         tip_dir = Matrix.Rotation(math.radians(side * -24), 4, "Y")
-        base = HEAD_C + Vector((side * 0.25, -0.02, HEAD_R * 0.7))
+        base = SKETCH_C + Vector((side * 0.25, -0.02, SKETCH_R * 0.7))
         m = Matrix.Translation(base) @ tip_dir
         head._add(lambda g: bmesh.ops.create_cone(g, cap_ends=True, segments=12, radius1=0.16, radius2=0.0,
                                                   depth=0.32), mats["Hair"], Matrix.Translation(-head.pivot) @ m
@@ -515,18 +635,23 @@ def millie(mats):
     head.build()
 
     body = Part("Body", (0, 0, HIP_Z))
-    # The mint dress colors the cone, with white spots, a frilly hem and a pink bow at the top.
-    body.lathe(mats["Dress"], body_profile())
-    band(body, mats["Frill"], BODY_BOTTOM + 0.03, 0.026, lift=0.004)
-    for a, z in ((20, 0.22), (-40, 0.2), (75, 0.25), (-95, 0.22), (140, 0.24), (-150, 0.25), (180, 0.2),
-                 (5, 0.37), (-70, 0.36), (110, 0.38), (-130, 0.4), (35, 0.47)):
-        patch(body, mats["Spots"], a, z, (0.035, 0.035, 0.01), lift=0.004, segments=16, rings=8)
-    ribbon_bow(body, mats["Bow"], on_cone(0, 0.54, 0.03), 0.07)
-    # A little cat tail, curling up from the back of the cone.
-    pts = [on_cone(180, 0.24, -0.02), on_cone(175, 0.24, 0.11), on_cone(165, 0.32, 0.19), on_cone(160, 0.44, 0.2),
-           on_cone(165, 0.5, 0.14)]
+    # The mint dress over the torso and a flared skirt, with white spots, a frilly hem and a pink
+    # bow at the top.
+    dress = skirt(1.0, 0.62, 0.27, 0.23)
+    loft(body, mats["Dress"], TORSO.rings())
+    loft(body, mats["Dress"], dress.rings())
+    dress.band(body, mats["Frill"], 0.645, 0.02, lift=0.004)
+    for a, z in ((20, 0.74), (-40, 0.72), (75, 0.78), (-95, 0.74), (140, 0.76), (-150, 0.79), (180, 0.72),
+                 (5, 0.86), (-70, 0.88), (110, 0.86), (-130, 0.9)):
+        dress.patch(body, mats["Spots"], a, z, (0.026, 0.026, 0.008), lift=0.004, segments=16, rings=8)
+    for a, z in ((10, 1.12), (-60, 1.18), (60, 1.22), (-25, 1.26), (120, 1.15), (-140, 1.2), (180, 1.27)):
+        TORSO.patch(body, mats["Spots"], a, z, (0.024, 0.024, 0.008), lift=0.004, segments=16, rings=8)
+    ribbon_bow(body, mats["Bow"], TORSO.point(0, 1.33, 0.02), 0.045)
+    # A little cat tail, curling up from the back of the skirt.
+    pts = [dress.point(180, 0.78, -0.02), dress.point(178, 0.78, 0.07), dress.point(172, 0.84, 0.14),
+           dress.point(166, 0.94, 0.16), dress.point(170, 1.0, 0.12)]
     for a, b in zip(pts, pts[1:]):
-        body.capsule(mats["Hair"], a, b, 0.038, segments=10)
+        body.capsule(mats["Hair"], a, b, 0.026, segments=10)
     body.build()
     rig(mats)
 
@@ -535,15 +660,15 @@ def lucy(mats):
     head = round_head(mats)
     sleepy_eyes(head, mats)
     # A small flat unimpressed mouth.
-    head.capsule(mats["Mouth"], HEAD_C + Vector((-0.04, HEAD_R * 0.93, -0.18)), HEAD_C + Vector((0.04, HEAD_R * 0.93, -0.18)),
+    head.capsule(mats["Mouth"], SKETCH_C + Vector((-0.04, SKETCH_R * 0.93, -0.18)), SKETCH_C + Vector((0.04, SKETCH_R * 0.93, -0.18)),
                  0.009, segments=8)
     hair_cap(head, mats, fringe=False)
     # A straight-cut fringe and a bob down to the chin.
-    head.sphere(mats["Hair"], HEAD_C + Vector((0, HEAD_R * 0.55, 0.22)), (0.34, 0.16, 0.11), segments=24, rings=12)
+    head.sphere(mats["Hair"], SKETCH_C + Vector((0, SKETCH_R * 0.55, 0.22)), (0.34, 0.16, 0.11), segments=24, rings=12)
     for side in (-1, 1):
-        head.sphere(mats["Hair"], HEAD_C + Vector((side * 0.33, -0.02, -0.14)), (0.13, 0.3, 0.22), segments=20, rings=10)
+        head.sphere(mats["Hair"], SKETCH_C + Vector((side * 0.33, -0.02, -0.14)), (0.13, 0.3, 0.22), segments=20, rings=10)
     # A flower in her hair: five petals round a yellow middle, above her right ear.
-    flower = HEAD_C + Vector((0.24, 0.27, 0.25))
+    flower = SKETCH_C + Vector((0.24, 0.27, 0.25))
     tilt = Matrix.Rotation(math.radians(30), 4, "Y") @ Matrix.Rotation(math.radians(-55), 4, "X")
     for k in range(5):
         a = k * 2 * math.pi / 5
@@ -555,14 +680,14 @@ def lucy(mats):
     head.build()
 
     body = Part("Body", (0, 0, HIP_Z))
-    # The pale pink shirt colors the cone above a skirt band round its bottom, "Pet Store" across
-    # the front with little hearts around.
-    body.lathe(mats["Shirt"], body_profile(0.0, BAND_TOP - 0.03, BODY_TOP))
-    body.lathe(mats["Skirt"], body_profile(0.01, BODY_BOTTOM - 0.006, BAND_TOP))
-    cone_text(body, mats["Print"], "Pet", 0.45, 0.07)
-    cone_text(body, mats["Print"], "Store", 0.375, 0.07)
-    for a, z, s in ((50, 0.3, 0.02), (-45, 0.31, 0.018), (0, 0.295, 0.016), (40, 0.5, 0.016), (-38, 0.51, 0.018)):
-        heart(body, mats["Heart"], on_cone(a, z, 0.006), s, cone_normal(a))
+    # The pale pink shirt over the torso above a blue skirt, "Pet Store" across the front with
+    # little hearts around.
+    loft(body, mats["Shirt"], TORSO.rings(0.0, 0.95, None))
+    loft(body, mats["Skirt"], skirt(1.0, 0.68, 0.22, 0.18).rings())
+    TORSO.text(body, mats["Print"], "Pet", 1.295, 0.058)
+    TORSO.text(body, mats["Print"], "Store", 1.222, 0.058)
+    for a, z, s in ((48, 1.17, 0.014), (-45, 1.18, 0.013), (0, 1.155, 0.012), (40, 1.35, 0.012), (-38, 1.355, 0.013)):
+        heart(body, mats["Heart"], TORSO.point(a, z, 0.005), s, TORSO.normal(a, z))
     body.build()
     rig(mats)
 
@@ -574,28 +699,31 @@ def abby(mats):
     smile(head, mats, big=True)
     hair_cap(head, mats)
     # A tall top bun: a round bun on a little hair stack, tied with a band.
-    top = HEAD_C + Vector((0, -0.03, HEAD_R * 0.98))
+    top = SKETCH_C + Vector((0, -0.03, SKETCH_R * 0.98))
     head.sphere(mats["Hair"], top, (0.14, 0.13, 0.1), segments=24, rings=12)
     head.sphere(mats["Band"], top + Vector((0, 0, 0.08)), (0.1, 0.095, 0.035), segments=20, rings=8)
     head.sphere(mats["Hair"], top + Vector((0, 0, 0.2)), (0.17, 0.16, 0.16), segments=28, rings=14)
     head.build()
 
     body = Part("Body", (0, 0, HIP_Z))
-    # The cone is her pink triangle dress, with a white collar at the top and a white hem.
-    body.lathe(mats["Dress"], body_profile())
-    band(body, mats["Collar"], 0.545, 0.022, lift=0.004)
+    # Her pink triangle dress: the torso and a skirt flaring wide, a white collar and a white hem.
+    dress = skirt(1.02, 0.56, 0.28, 0.23)
+    loft(body, mats["Dress"], TORSO.rings())
+    loft(body, mats["Dress"], dress.rings())
+    TORSO.band(body, mats["Collar"], 1.405, 0.014, lift=0.004)
     for side in (-1, 1):
-        patch(body, mats["Collar"], side * 22, 0.51, (0.045, 0.03, 0.01), lift=0.01, roll=-side * 30, segments=12, rings=6)
-    band(body, mats["Hem"], BODY_BOTTOM + 0.035, 0.022, lift=0.004)
+        TORSO.patch(body, mats["Collar"], side * 20, 1.375, (0.032, 0.02, 0.008), lift=0.008, roll=-side * 30,
+                    segments=12, rings=6)
+    dress.band(body, mats["Hem"], 0.59, 0.018, lift=0.004)
     body.build()
     rig(mats)
 
 
 def muffin_print(part, mats, z, size, lift=0.018):
-    """A little muffin printed on the front of the cone (the apron) at height z: a pleated pink
+    """A little muffin printed on the front of the torso (the apron) at height z: a pleated pink
     cup, a domed brown top with blue berries and a red cherry."""
     def on(x, dz, more=0.0):
-        return front(x, z + dz, lift + more)
+        return TORSO.front(x, z + dz, lift + more)
     # The cup: a trapezoid of flattened pleats, wider at the top.
     for k in range(5):
         t = (k - 2) / 2
@@ -609,9 +737,6 @@ def muffin_print(part, mats, z, size, lift=0.018):
                 segments=10, rings=5)
 
 
-STOOL_H = 0.45
-
-
 def pip(mats):
     head = round_head(mats)
     round_eyes(head, mats)
@@ -619,22 +744,22 @@ def pip(mats):
     freckles(head, mats)
     smile(head, mats, big=True)
     # Short ginger hair under the hat: the back of the head, a fringe and tufts over the ears.
-    head.sphere(mats["Hair"], HEAD_C + Vector((0, -0.04, 0.0)), (HEAD_R * 1.02, HEAD_R, HEAD_R * 0.96),
-                segments=40, rings=24, cut=(HEAD_C + Vector((0, 0.12, 0.0)), Vector((0, 1, 0))))
+    head.sphere(mats["Hair"], SKETCH_C + Vector((0, -0.04, 0.0)), (SKETCH_R * 1.02, SKETCH_R, SKETCH_R * 0.96),
+                segments=40, rings=24, cut=(SKETCH_C + Vector((0, 0.12, 0.0)), Vector((0, 1, 0))))
     for x in (-0.24, -0.12, 0.0, 0.12, 0.24):
-        head.sphere(mats["Hair"], HEAD_C + Vector((x, HEAD_R * 0.78 - abs(x) * 0.4, 0.22 - abs(x) * 0.2)),
+        head.sphere(mats["Hair"], SKETCH_C + Vector((x, SKETCH_R * 0.78 - abs(x) * 0.4, 0.22 - abs(x) * 0.2)),
                     (0.085, 0.06, 0.06), segments=14, rings=7)
     for side in (-1, 1):
-        head.sphere(mats["Hair"], HEAD_C + Vector((side * HEAD_R * 0.92, -0.04, 0.05)), (0.08, 0.17, 0.15),
+        head.sphere(mats["Hair"], SKETCH_C + Vector((side * SKETCH_R * 0.92, -0.04, 0.05)), (0.08, 0.17, 0.15),
                     segments=16, rings=8)
-        head.sphere(mats["Skin"], HEAD_C + Vector((side * HEAD_R * 0.97, 0.03, -0.08)), (0.05, 0.04, 0.07),
+        head.sphere(mats["Skin"], SKETCH_C + Vector((side * SKETCH_R * 0.97, 0.03, -0.08)), (0.05, 0.04, 0.07),
                     segments=12, rings=6)
     # The chef's hat: a white band round the top of the head under a puffy white mushroom cap,
     # puffed up like a toque, with a few red spots and cream gills beneath its rim.
-    band_z = HEAD_C.z + HEAD_R * 0.6
-    head.cone(mats["Hat"], (0, -0.01, band_z), HEAD_R * 0.86, HEAD_R * 0.92, 0.08, segments=40)
-    cap_c = Vector((0, -0.01, band_z + 0.06))
-    cap_r = (0.47, 0.45, 0.24)
+    band_z = SKETCH_C.z + SKETCH_R * 0.6
+    head.cone(mats["Hat"], (0, -0.01, band_z), SKETCH_R * 0.86, SKETCH_R * 0.92, 0.12, segments=40)
+    cap_c = Vector((0, -0.01, band_z + 0.1))
+    cap_r = (0.47, 0.45, 0.36)
     # The cap's rim curls under a little, puffy, with cream gills beneath.
     head.torus(mats["Hat"], cap_c + Vector((0, 0, 0.01)), 0.42, 0.045, segments=48)
     head.sphere(mats["Gills"], cap_c + Vector((0, 0, -0.005)), (0.43, 0.41, 0.03), segments=40, rings=8)
@@ -651,18 +776,22 @@ def pip(mats):
     head.build()
 
     body = Part("Body", (0, 0, HIP_Z))
-    # The coral shirt colors the cone above a trousers band round its bottom; the cream apron
-    # covers the middle of its front from the trousers up to the chest, tied round the cone with a bow at the back.
-    body.lathe(mats["Shirt"], body_profile(0.0, BAND_TOP - 0.03, BODY_TOP))
-    body.lathe(mats["Trousers"], body_profile(0.01, BODY_BOTTOM - 0.006, BAND_TOP))
-    body.lathe(mats["Apron"], body_profile(0.014, BODY_BOTTOM + 0.02, 0.5),
-               cuts=(((0, 0.04, 0), Vector((0, -1, 0))), ((0.15, 0, 0), Vector((1, 0, 0))), ((-0.15, 0, 0), Vector((-1, 0, 0)))))
-    band(body, mats["Apron"], 0.5, 0.014, lift=0.012)
-    band(body, mats["Apron"], 0.3, 0.016, lift=0.016)
-    ribbon_bow(body, mats["Apron"], on_cone(180, 0.3, 0.04), 0.05)
-    muffin_print(body, mats, 0.36, 0.15)
+    # The coral shirt over the torso, the trousers from the hips down the legs; the cream apron
+    # covers the front from the chest down to the knees, tied round the waist with a bow at the back.
+    loft(body, mats["Shirt"], TORSO.rings(0.0, 0.96, None))
+    loft(body, mats["Trousers"], TORSO.rings(0.004, None, 0.98))
+    loft(body, mats["Apron"], TORSO.rings(0.012, 0.93, 1.3),
+         cuts=(((0, 0.04, 0), Vector((0, -1, 0))), ((0.14, 0, 0), Vector((1, 0, 0))), ((-0.14, 0, 0), Vector((-1, 0, 0)))))
+    hips = TORSO.ab(0.92)[1]
+    body.box(mats["Apron"], (0, hips + 0.02, 0.765), (0.28, 0.014, 0.33))
+    TORSO.band(body, mats["Apron"], 1.0, 0.01, lift=0.016)
+    ribbon_bow(body, mats["Apron"], TORSO.point(180, 1.0, 0.03), 0.035)
+    for side in (-1, 1):
+        body.capsule(mats["Apron"], TORSO.front(side * 0.12, 1.29, 0.014), TORSO.point(-side * 55, 1.42, 0.008), 0.009,
+                     segments=8)
+    muffin_print(body, mats, 1.13, 0.1)
     body.build()
-    rig(mats)
+    rig(mats, legs="Trousers")
 
     # A wooden spoon in the right hand, pointing down (into the pot while stirring).
     h = bpy.data.objects["HandR"].location.copy()
@@ -672,21 +801,11 @@ def pip(mats):
     spoon.build().parent = bpy.data.objects["HandR"]
     bpy.data.objects["Spoon"].location = (0, 0, 0)
 
-    # Pip is short, so stands on a little step stool behind the counter: lift everything onto it.
-    for obj in bpy.data.objects:
-        if obj.parent is None:
-            obj.location.z += STOOL_H
-    stool = Part("Stool", (0, 0, 0))
-    stool.box(mats["Wood"], (0, 0, STOOL_H - 0.03), (0.5, 0.36, 0.06))
-    for x in (-0.2, 0.2):
-        stool.box(mats["WoodDark"], (x, 0, (STOOL_H - 0.06) / 2), (0.05, 0.3, STOOL_H - 0.06))
-    stool.box(mats["WoodDark"], (0, 0, STOOL_H * 0.35), (0.4, 0.04, 0.05))
-    stool.build()
-
 
 KINDS = {
     "jeremy": (jeremy, {
         "Hair": (0.35, 0.22, 0.14),
+        "Trousers": (0.3, 0.33, 0.42),
         "Coat": (0.97, 0.97, 0.95),
         "Lapel": (0.86, 0.88, 0.9),
         "Shirt": (0.55, 0.75, 0.95),
@@ -738,7 +857,6 @@ KINDS = {
         "Cherry": (0.9, 0.15, 0.2),
         "Trousers": (0.45, 0.35, 0.3),
         "Wood": (0.8, 0.58, 0.36),
-        "WoodDark": (0.55, 0.36, 0.22),
     }),
 }
 
@@ -749,6 +867,12 @@ def build(kind):
     mats = {name: material(name, color) for name, color in COLORS.items()}
     mats.update({name: material(name, color) for name, color in colors.items()})
     make(mats)
+    # The same rig scaled uniformly to their height (the shapes and the pivots alike).
+    s = HEIGHTS[kind] / TALL
+    for obj in bpy.data.objects:
+        obj.location *= s
+        if obj.type == "MESH":
+            obj.data.transform(Matrix.Scale(s, 4))
     out = os.path.join(HERE, f"{kind}.glb")
     bpy.ops.export_scene.gltf(filepath=out, export_format="GLB", export_apply=True,
                               export_yup=True, export_materials="EXPORT")
