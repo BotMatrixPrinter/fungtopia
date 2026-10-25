@@ -5,14 +5,14 @@
 # or only some of them:
 #   blender -b --factory-startup --python modules/Townsfolk/Models/townsfolk.py -- folk crow
 #
-# folk.glb is one base townsperson in the NPCs' style (modules/NPCs/Models/npcs.py, the same rig):
-# a big round head floating a few cm over a smooth cone body (a triangle from the front, no
-# neck), two round hands floating beside it, two little round feet under it, no arms or legs. It
-# carries every dress-up option as its own object, and the game shows one of each and tints them
-# per townsperson: the hair styles HairShort, HairBob, HairBuns, HairSpiky, HairLong and the
-# mushroom-cap hats HatDome, HatFlat, HatTall (children of Head), Trousers (a band round the
-# bottom of the cone, hidden for a dress) and Collar (children of Body). Tinted materials: Skin,
-# Hair, Outfit, Trim, Trousers, Hat, Shoe.
+# folk.glb is one base townsperson, a 1.80 m grown-up in Saria's simple-shapes style: a round head
+# (with the NPCs' cute face) floating 5 cm over a smooth tapered torso, round hands floating at the
+# ends of invisible arms, no neck, and real legs: rounded tubes, thighs on the hips and shins on
+# the knees, ending in rounded shoes. It carries every dress-up option as its own object, and the
+# game shows one of each and tints them per townsperson: the hair styles HairShort, HairBob,
+# HairBuns, HairSpiky, HairLong and the mushroom-cap hats HatDome, HatFlat, HatTall (children of
+# Head), Trousers (a band round the hips) or Skirt (a dress), and Collar (children of Body).
+# Tinted materials: Skin, Hair, Outfit, Trim, Trousers, Legs (trousers or bare legs), Hat, Shoe.
 #
 # cat.glb, dog.glb and crow.glb are simpler background Mushroom Cats, Dogs and Crows (tinted Fur,
 # FurLight, FurDark, Feather), butterfly.glb a little butterfly (tinted Wing). Only heads have eyes;
@@ -20,8 +20,8 @@
 #
 # Meters, feet at the origin, facing Blender +Y (Godot's -Z, forward, after the glTF export).
 # Separate objects with pivots where they move, so the game can animate them: Body (hip), Head
-# (neck), LegL / LegR (hip; empty, the feet FootL / FootR hang from them), ArmL / ArmR (shoulder;
-# empty, invisible), HandL / HandR (hand center). Pets: Body, Head (neck), LegFL / LegFR / LegBL /
+# (neck), LegL / LegR (hip; the thighs), ShinL / ShinR (knee; their children, the shoes FootL /
+# FootR hanging from them), ArmL / ArmR (shoulder; empty, invisible), HandL / HandR (hand center). Pets: Body, Head (neck), LegFL / LegFR / LegBL /
 # LegBR (shoulder or hip), Tail (root); the crow WingL / WingR (shoulder), LegL / LegR (hip), Tail.
 # The butterfly: Body, WingL / WingR (on the body's axis). Materials carry plain colors only; the
 # game draws them toon-shaded with ink outlines.
@@ -44,6 +44,7 @@ COLORS = {
     "Trousers": (0.35, 0.38, 0.55),
     "Hat": (0.9, 0.22, 0.22),
     "Shoe": (0.42, 0.24, 0.18),
+    "Legs": (0.35, 0.38, 0.55),
     "Fur": (1.0, 0.58, 0.25),
     "FurLight": (1.0, 0.93, 0.82),
     "FurDark": (0.6, 0.34, 0.18),
@@ -67,16 +68,24 @@ COLORS = {
     "WingSpot": (1.0, 0.97, 0.85),
 }
 
-# The rig, as the NPCs' (npcs.py).
-HIP_Z = 0.3
-NECK_Z = 0.72
+# The rig, for a 1.80 m grown-up (feet at 0, the top of the head at 1.80); the game's Core has the
+# same numbers (Core/Body.cs) and scales it uniformly to each townsperson's height.
+HIP_Z, HIP_X = 0.9, 0.1
+KNEE_Z = 0.48
+LEG_R = 0.065
+TORSO_BOTTOM, TORSO_TOP = 0.88, 1.44
+SKIRT_HEM = 0.66
+SHOULDER_X, SHOULDER_Z = 0.22, 1.4
+ARM_LENGTH = 0.66
+HAND_R = 0.055
+NECK_Z = 1.48
+HEAD_Z = 1.64
+HEAD_SIZE = (0.135, 0.13, 0.15)
+# The head is drawn at the NPCs' size (radius HEAD_R round HEAD_C, its pivot at DRAW_NECK_Z), then
+# shrunk to HEAD_SIZE (half its width, depth and height) round HEAD_Z.
+DRAW_NECK_Z = 0.72
 HEAD_R = 0.4
-HEAD_C = Vector((0, 0, NECK_Z + HEAD_R * 0.92))
-SHOULDER_X, SHOULDER_Z = 0.23, NECK_Z - 0.07
-ARM_LENGTH = 0.42
-BODY_BOTTOM, BODY_TOP = 0.13, 0.61
-BODY_R0, BODY_R1 = 0.3, 0.05
-BAND_TOP = 0.24
+HEAD_C = Vector((0, 0, DRAW_NECK_Z + HEAD_R * 0.92))
 
 
 def material(name, color):
@@ -248,91 +257,77 @@ def _copy_into(source, target):
     bpy.data.meshes.remove(mesh)
 
 
-# The cone body.
+# The torso, skirt and bands: smooth shapes of elliptic cross-section round the Z axis.
 
-def rounded(corners, radii, steps=6):
-    """The polyline through corners, each corner cut round (a quadratic curve) radii[i] along its edges."""
-    points = [corners[0]]
-    for i in range(1, len(corners) - 1):
-        c, d = Vector(corners[i]), radii[i]
-        if d <= 0:
-            points.append(corners[i])
-            continue
-        a = c + (Vector(corners[i - 1]) - c).normalized() * d
-        b = c + (Vector(corners[i + 1]) - c).normalized() * d
-        for k in range(steps + 1):
+def smooth_profile(points, steps=4):
+    """Catmull-Rom through points (tuples), steps new points per span, for smooth shading."""
+    out = []
+    for i in range(len(points) - 1):
+        p0, p1 = points[max(i - 1, 0)], points[i]
+        p2, p3 = points[i + 1], points[min(i + 2, len(points) - 1)]
+        for k in range(steps):
             t = k / steps
-            p = a * (1 - t) ** 2 + c * 2 * t * (1 - t) + b * t * t
-            points.append((p.x, p.y))
-    points.append(corners[-1])
-    return points
+            out.append(tuple(0.5 * (2 * b + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * t * t + (-a + 3 * b - 3 * c + d) * t ** 3)
+                             for a, b, c, d in zip(p0, p1, p2, p3)))
+    out.append(points[-1])
+    return out
 
 
-def body_radius(z):
-    """The body cone's radius at height z (its straight side, before the rounding)."""
-    return BODY_R0 + (BODY_R1 - BODY_R0) * (z - BODY_BOTTOM) / (BODY_TOP - BODY_BOTTOM)
+def oval_lathe(part, mat, profile, segments=40, bottom=True, top=True):
+    """A smooth shape round the Z axis: profile is its rings as (half width, half depth, z) from the
+    bottom up; bottom / top close its ends with a point on the axis (flat, just under / over the
+    first / last ring)."""
+    def make(g):
+        rings = []
+        if bottom:
+            rings.append([g.verts.new((0, 0, profile[0][2]))])
+        for w, d, z in profile:
+            rings.append([g.verts.new((w * math.cos(i / segments * 2 * math.pi),
+                                       d * math.sin(i / segments * 2 * math.pi), z)) for i in range(segments)])
+        if top:
+            rings.append([g.verts.new((0, 0, profile[-1][2]))])
+        for a, b in zip(rings, rings[1:]):
+            for i in range(segments):
+                j = (i + 1) % segments
+                if len(a) == 1:
+                    g.faces.new((a[0], b[j], b[i]))
+                elif len(b) == 1:
+                    g.faces.new((a[i], a[j], b[0]))
+                else:
+                    g.faces.new((a[i], a[j], b[j], b[i]))
+        bmesh.ops.recalc_face_normals(g, faces=g.faces)
+    part._add(make, mat, Matrix.Translation(-part.pivot))
 
 
-def body_profile(offset=0.0, z0=BODY_BOTTOM, z1=BODY_TOP):
-    """The outline of the body cone (offset out by offset, for things over it) from z0 to z1;
-    rounded at its true bottom rim and top, flat where it is cut off."""
-    bottom, top = z0 <= BODY_BOTTOM, z1 >= BODY_TOP
-    z0, z1 = (z0 - offset if bottom else z0), (z1 + offset if top else z1)
-    corners = [(0, z0), (body_radius(z0) + offset, z0), (body_radius(z1) + offset, z1), (0, z1)]
-    points = rounded(corners, [0, 0.06 if bottom else 0, 0.11 if top else 0, 0], steps=8)
-    # Rings every few cm up the straight side, for smooth shading (and the toon outline).
-    dense = [points[0]]
-    for p, q in zip(points, points[1:]):
-        n = max(1, int(math.dist(p, q) / 0.03))
-        dense += [(p[0] + (q[0] - p[0]) * k / n, p[1] + (q[1] - p[1]) * k / n) for k in range(1, n + 1)]
-    return dense
+# The torso's outline (half width, half depth, z): hips 0.34 m wide, a 0.30 m waist, 0.40 m shoulders, 0.22 m deep.
+TORSO = smooth_profile([
+    (0.0, 0.0, TORSO_BOTTOM), (0.11, 0.075, TORSO_BOTTOM + 0.004), (0.158, 0.103, TORSO_BOTTOM + 0.02),
+    (0.17, 0.11, 0.93), (0.163, 0.106, 0.99), (0.152, 0.1, 1.06), (0.15, 0.1, 1.1), (0.158, 0.104, 1.18),
+    (0.178, 0.11, 1.27), (0.195, 0.11, 1.34), (0.2, 0.108, 1.38), (0.192, 0.1, 1.41), (0.16, 0.085, 1.43),
+    (0.09, 0.05, TORSO_TOP - 0.003), (0.0, 0.0, TORSO_TOP),
+], steps=4)
 
 
-SLOPE = (BODY_R0 - BODY_R1) / (BODY_TOP - BODY_BOTTOM)
+def torso_at(z):
+    """The torso's (half width, half depth) at height z (between its rings)."""
+    for (w0, d0, z0), (w1, d1, z1) in zip(TORSO, TORSO[1:]):
+        if z0 <= z <= z1:
+            t = (z - z0) / max(z1 - z0, 1e-6)
+            return w0 + (w1 - w0) * t, d0 + (d1 - d0) * t
+    return 0.0, 0.0
 
 
-def cone_normal(angle):
-    """The cone's outward normal angle degrees round from the front (+Y; positive toward -X, the left)."""
-    t = math.radians(angle + 90)
-    return Vector((math.cos(t), math.sin(t), SLOPE)).normalized()
+def oval_band(part, mat, z, minor, w, d):
+    """A ring round the torso at height z, its middle on an oval of half width w and half depth d."""
+    part.torus(mat, (0, 0, z), w, minor, rotation=Matrix.Diagonal((1.0, d / w, 1.0, 1.0)), segments=48)
 
 
-def on_cone(angle, z, lift=0.0):
-    """The point on the cone's side angle degrees round from the front at height z, lifted off it."""
-    t = math.radians(angle + 90)
-    r = body_radius(z)
-    return Vector((math.cos(t) * r, math.sin(t) * r, z)) + cone_normal(angle) * lift
-
-
-def front(x, z, lift=0.0):
-    """The point on the front of the cone at x (right +), height z, lifted off it (out along +Y)."""
-    r = body_radius(z) + lift
-    return Vector((x, math.sqrt(max(0.0, r * r - x * x)), z))
-
-
-def patch(part, mat, angle, z, size, lift=0.006, roll=0.0, segments=16, rings=8, box=False):
-    """A flat shape lying on the cone's side: size is (across, up the slope, thickness) radii (a box:
-    full extents), roll turns it about the normal (degrees)."""
-    normal = cone_normal(angle)
-    rot = normal.to_track_quat("Z", "Y").to_matrix().to_4x4() @ Matrix.Rotation(math.radians(roll), 4, "Z")
-    center = on_cone(angle, z, lift)
-    if box:
-        part.box(mat, center, size, rotation=rot)
-    else:
-        part.sphere(mat, center, size, rotation=rot, segments=segments, rings=rings)
-
-
-def band(part, mat, z, minor, lift=0.0):
-    """A ring round the cone at height z."""
-    part.torus(mat, (0, 0, z), body_radius(z) + lift, minor, segments=48)
-
-
-
-def child(part, parent):
-    """Builds part as a child of parent (both pivots at the same point)."""
+def child(part, parent, parent_pivot=None):
+    """Builds part as a child of parent; parent_pivot: the parent's pivot in world coordinates
+    (needed when the parent is itself a child; else its location)."""
     obj = part.build()
     obj.parent = parent
-    obj.location = part.pivot - parent.location
+    obj.location = part.pivot - (parent.location if parent_pivot is None else Vector(parent_pivot))
     return obj
 
 
@@ -377,22 +372,44 @@ def mushroom_cap(part, mats, center, radii, spots, size, tilt=Matrix.Identity(4)
 
 def rig(mats):
     for side, name in ((-1, "LegL"), (1, "LegR")):
-        x = side * 0.125
-        leg = empty(name, (x, 0, HIP_Z + 0.02))
-        foot = Part("Foot" + name[-1], leg.location)
-        foot.sphere(mats["Shoe"], (x, 0.085, 0.062), (0.095, 0.125, 0.064), segments=24, rings=12)
-        child(foot, leg)
+        x = side * HIP_X
+        # Rounded tubes: the thigh on the hip pivot, the shin (with its shoe) on the knee pivot.
+        thigh = Part(name, (x, 0, HIP_Z))
+        thigh.capsule(mats["Legs"], (x, 0, HIP_Z), (x, 0, KNEE_Z), LEG_R, segments=20)
+        thigh_obj = thigh.build()
+        shin = Part("Shin" + name[-1], (x, 0, KNEE_Z))
+        shin.capsule(mats["Legs"], (x, 0, KNEE_Z), (x, 0, 0.1), LEG_R * 0.94, segments=20)
+        shin_obj = child(shin, thigh_obj)
+        foot = Part("Foot" + name[-1], (x, 0, KNEE_Z))
+        # A rounded shoe 0.12 m tall and 0.24 m long, its sole flat on the ground, the toe forward.
+        foot.sphere(mats["Shoe"], (x, 0.045, 0.06), (0.06, 0.12, 0.06), segments=24, rings=12,
+                    cut=((x, 0, 0.004), (0, 0, -1)))
+        child(foot, shin_obj, shin.pivot)
     for side, name in ((-1, "ArmL"), (1, "ArmR")):
         shoulder = Vector((side * SHOULDER_X, 0, SHOULDER_Z))
         empty(name, shoulder)
-        hand = shoulder + Vector((side * 0.13, 0.02, -0.22)).normalized() * ARM_LENGTH
+        hand = shoulder + Vector((side * 0.17, 0.03, -1.0)).normalized() * ARM_LENGTH
         hand_part = Part("Hand" + name[-1], hand)
-        hand_part.sphere(mats["Skin"], hand, (0.082, 0.078, 0.085), segments=24, rings=12)
+        hand_part.sphere(mats["Skin"], hand, (HAND_R, HAND_R * 0.95, HAND_R * 1.04), segments=24, rings=12)
         hand_part.build()
 
 
+def shrink_head(head_obj):
+    """The head is drawn at the NPCs' size round HEAD_C (the face, hair and hats as before); this
+    shrinks it (and its hair and hats) to a grown-up's head, 0.27 m wide and 0.30 m tall, centered
+    at HEAD_Z, and moves its pivot to the neck at NECK_Z."""
+    old_neck = Vector((0, 0, DRAW_NECK_Z))
+    new_c = Vector((0, 0, HEAD_Z))
+    size = Matrix.Diagonal((HEAD_SIZE[0] / HEAD_R, HEAD_SIZE[1] / (HEAD_R * 0.96), HEAD_SIZE[2] / (HEAD_R * 0.94), 1.0))
+    m = Matrix.Translation(new_c - Vector((0, 0, NECK_Z))) @ size @ Matrix.Translation(old_neck - HEAD_C)
+    for obj in [head_obj] + list(head_obj.children):
+        obj.data.transform(m)
+        obj.data.update()
+    head_obj.location = (0, 0, NECK_Z)
+
+
 def folk(mats):
-    head = Part("Head", (0, 0, NECK_Z))
+    head = Part("Head", (0, 0, DRAW_NECK_Z))
     head.sphere(mats["Skin"], HEAD_C, (HEAD_R, HEAD_R * 0.96, HEAD_R * 0.94), segments=40, rings=24)
     for side in (-1, 1):
         # Big dark oval eyes with sparkles.
@@ -473,17 +490,26 @@ def folk(mats):
     mushroom_cap(hat, mats, top + Vector((0, 0, 0.02)), (0.42, 0.4, 0.5), 6, 0.055, tilt=tip)
     child(hat, head_obj)
 
+    shrink_head(head_obj)
+
+    # The torso: Outfit, a Trim hem (or belt) round it at 1.0 m; children Trousers (a band round the hips, for
+    # trousers), Skirt (a flared skirt with a Trim hem, for a dress) and Collar (a ring at the top).
     body = Part("Body", (0, 0, HIP_Z))
-    body.lathe(mats["Outfit"], body_profile())
-    band(body, mats["Trim"], BODY_BOTTOM + 0.03, 0.022, lift=0.004)
+    oval_lathe(body, mats["Outfit"], TORSO, segments=48)
+    oval_band(body, mats["Trim"], 1.0, 0.014, *torso_at(1.0))
     body_obj = body.build()
     trousers = Part("Trousers", body.pivot)
-    trousers.lathe(mats["Trousers"], body_profile(0.01, BODY_BOTTOM - 0.006, BAND_TOP))
+    band_rings = [(w + 0.006, d + 0.006, z) for w, d, z in TORSO if z <= 1.0]
+    oval_lathe(trousers, mats["Trousers"], band_rings + [(torso_at(1.0)[0] + 0.006, torso_at(1.0)[1] + 0.006, 1.0)], segments=48)
     child(trousers, body_obj)
+    skirt = Part("Skirt", body.pivot)
+    skirt_rings = smooth_profile([(0.25, 0.2, SKIRT_HEM), (0.235, 0.18, 0.76), (0.2, 0.145, 0.88),
+                                  (0.165, 0.11, 0.98), (0.156, 0.104, 1.03)], steps=4)
+    oval_lathe(skirt, mats["Outfit"], skirt_rings, segments=48)
+    oval_band(skirt, mats["Trim"], SKIRT_HEM + 0.012, 0.016, 0.25, 0.2)
+    child(skirt, body_obj)
     collar = Part("Collar", body.pivot)
-    band(collar, mats["Trim"], 0.545, 0.024, lift=0.004)
-    for side in (-1, 1):
-        patch(collar, mats["Trim"], side * 22, 0.51, (0.045, 0.03, 0.01), lift=0.01, roll=-side * 30, segments=12, rings=6)
+    oval_band(collar, mats["Trim"], 1.41, 0.016, *torso_at(1.41))
     child(collar, body_obj)
     rig(mats)
 

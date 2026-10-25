@@ -127,7 +127,8 @@ public class TownsfolkModelsTests
     private static float Radius(Vector3 v) => MathF.Sqrt(v.X * v.X + v.Z * v.Z);
 
     [Theory]
-    [InlineData("folk", new[] { "Head", "Body", "Trousers", "Collar", "ArmL", "ArmR", "HandL", "HandR", "LegL", "LegR", "FootL", "FootR",
+    [InlineData("folk", new[] { "Head", "Body", "Trousers", "Skirt", "Collar", "ArmL", "ArmR", "HandL", "HandR", "LegL", "LegR",
+        "ShinL", "ShinR", "FootL", "FootR",
         "HairShort", "HairBob", "HairBuns", "HairSpiky", "HairLong", "HatDome", "HatFlat", "HatTall" })]
     [InlineData("cat", new[] { "Body", "Head", "LegFL", "LegFR", "LegBL", "LegBR", "Tail" })]
     [InlineData("dog", new[] { "Body", "Head", "LegFL", "LegFR", "LegBL", "LegBR", "Tail" })]
@@ -140,58 +141,107 @@ public class TownsfolkModelsTests
             Assert.True(glb.Has(part), $"{file}: {part}");
     }
 
+    private static Vector3 Size(List<Vector3> v) => v.Aggregate(Vector3.Max) - v.Aggregate(Vector3.Min);
+
     [Fact]
-    public void TheFolkHaveTheNpcsRig()
+    public void TheFolkHaveTheGrownUpRigOfTheCore()
     {
         var glb = new Glb("folk");
-        Assert.True(Vector3.Distance(new Vector3(0f, 0.72f, 0f), glb.Origin("Head")) < 0.001f);
-        Assert.True(Vector3.Distance(new Vector3(0f, 0.3f, 0f), glb.Origin("Body")) < 0.001f);
-        foreach (var (arm, hand, leg, foot, side) in new[] { ("ArmL", "HandL", "LegL", "FootL", -1f), ("ArmR", "HandR", "LegR", "FootR", 1f) })
+        Assert.True(Vector3.Distance(new Vector3(0f, Body.NeckY, 0f), glb.Origin("Head")) < 0.001f);
+        Assert.True(Vector3.Distance(new Vector3(0f, Body.HipY, 0f), glb.Origin("Body")) < 0.001f);
+        Assert.Equal(1.48f, Body.NeckY);
+        Assert.Equal(0.9f, Body.HipY);
+        foreach (var (arm, hand, leg, shin, foot, side) in new[] { ("ArmL", "HandL", "LegL", "ShinL", "FootL", -1f), ("ArmR", "HandR", "LegR", "ShinR", "FootR", 1f) })
         {
-            Assert.True(Vector3.Distance(new Vector3(side * 0.23f, 0.65f, 0f), glb.Origin(arm)) < 0.001f, arm);
-            Assert.Equal(0.42f, Vector3.Distance(glb.Origin(arm), glb.Origin(hand)), 2);
-            // No arms or legs are drawn: only empty pivots.
+            Assert.True(Vector3.Distance(new Vector3(side * 0.22f, 1.4f, 0f), glb.Origin(arm)) < 0.001f, arm);
+            Assert.True(Vector3.Distance(new Vector3(side * Body.ShoulderX, Body.ShoulderY, 0f), glb.Origin(arm)) < 0.001f, arm);
+            Assert.Equal(0.66f, Vector3.Distance(glb.Origin(arm), glb.Origin(hand)), 2);
+            Assert.Equal(Body.ArmLength, Vector3.Distance(glb.Origin(arm), glb.Origin(hand)), 2);
+            Assert.True(Vector3.Distance(new Vector3(side * 0.1f, 0.9f, 0f), glb.Origin(leg)) < 0.001f, leg);
+            Assert.True(Vector3.Distance(new Vector3(side * Body.HipX, Body.KneeY, 0f), glb.Origin(shin)) < 0.001f, shin);
+            // Invisible arms, but real legs: a thigh on the hip, a shin on the knee, a shoe on the shin.
             Assert.Equal(-1, glb.Node(arm).Mesh);
-            Assert.Equal(-1, glb.Node(leg).Mesh);
-            Assert.Equal(leg, glb.ParentOf(foot));
+            Assert.Equal(new[] { "Legs" }, glb.Materials(leg));
+            Assert.Equal(new[] { "Legs" }, glb.Materials(shin));
+            Assert.Equal(leg, glb.ParentOf(shin));
+            Assert.Equal(shin, glb.ParentOf(foot));
             Assert.Equal(new[] { "Shoe" }, glb.Materials(foot));
             Assert.Equal(new[] { "Skin" }, glb.Materials(hand));
-            Assert.True(glb.Vertices(foot).Min(v => v.Y) > -0.01f && glb.Vertices(foot).Max(v => v.Y) < 0.15f, foot);
         }
         Assert.Equal("Body", glb.ParentOf("Trousers"));
+        Assert.Equal("Body", glb.ParentOf("Skirt"));
         Assert.Equal("Body", glb.ParentOf("Collar"));
         Assert.Equal(new[] { "Trousers" }, glb.Materials("Trousers"));
+        Assert.Equal(new[] { "Outfit", "Trim" }, glb.Materials("Skirt").Distinct().OrderBy(m => m, StringComparer.Ordinal));
         Assert.Contains("Outfit", glb.Materials("Body"));
         Assert.Contains("Trim", glb.Materials("Body"));
     }
 
     [Fact]
-    public void TheFolkHeadFloatsOverATriangleBodyWithRoundHandsBesideIt()
+    public void TheFolkAre1_80TallWithNormalGrownUpProportions()
     {
         var glb = new Glb("folk");
+        // The head: round, 0.27 m wide and 0.30 m tall round 1.64 m, its top at about 1.80.
+        var head = glb.Vertices("Head", "Skin");
+        var headSize = Size(head);
+        Assert.InRange(headSize.X, 0.26f, 0.32f);
+        Assert.InRange(head.Max(v => v.Y) - head.Min(v => v.Y), 0.28f, 0.32f);
+        Assert.InRange((head.Max(v => v.Y) + head.Min(v => v.Y)) / 2f, 1.62f, 1.66f);
+        Assert.InRange(head.Max(v => v.Y), 1.77f, 1.81f);
+        // The torso: from 0.88 to 1.44 m, shoulders about 0.40 wide, waist 0.30, hips 0.34, 0.22 deep.
+        var torso = glb.Vertices("Body", "Outfit");
+        Assert.InRange(torso.Min(v => v.Y), 0.86f, 0.9f);
+        Assert.InRange(torso.Max(v => v.Y), 1.42f, 1.46f);
+        float Width(float y0, float y1) => torso.Where(v => v.Y >= y0 && v.Y <= y1).Max(v => MathF.Abs(v.X)) * 2f;
+        Assert.InRange(Width(1.3f, 1.42f), 0.37f, 0.43f);
+        Assert.InRange(Width(1.08f, 1.12f), 0.28f, 0.32f);
+        Assert.InRange(Width(0.9f, 0.96f), 0.32f, 0.36f);
+        Assert.InRange(torso.Max(v => MathF.Abs(v.Z)) * 2f, 0.2f, 0.24f);
+        // The head floats about 5 cm over the torso and its collar.
         float bodyTop = glb.VerticesUnder("Body").Max(v => v.Y);
         float headBottom = glb.Vertices("Head").Min(v => v.Y);
-        Assert.True(headBottom > bodyTop + 0.02f, $"head bottom {headBottom} over body top {bodyTop}");
-        Assert.True(headBottom - bodyTop < 0.15f);
-        // A cone: wide at the bottom, narrow at the top.
-        var body = glb.Vertices("Body", "Outfit");
-        float low = body.Where(v => v.Y < 0.2f).Max(Radius), high = body.Where(v => v.Y > 0.55f).Max(Radius);
-        Assert.True(low > 0.25f && high < 0.15f, $"{low} {high}");
-        // Big cute eyes on the front of the head.
+        Assert.InRange(headBottom - bodyTop, 0.02f, 0.08f);
+        Assert.InRange(headBottom - torso.Max(v => v.Y), 0.04f, 0.07f);
+        // The legs: rounded tubes about 0.065 m round, from the hips down to the shoes.
+        foreach (var (leg, shin, foot) in new[] { ("LegL", "ShinL", "FootL"), ("LegR", "ShinR", "FootR") })
+        {
+            var thigh = glb.Vertices(leg);
+            Assert.InRange(Size(thigh).X, 0.12f, 0.14f);
+            Assert.InRange(Size(thigh).Z, 0.12f, 0.14f);
+            Assert.InRange(thigh.Max(v => v.Y), 0.9f, 0.98f);
+            Assert.InRange(thigh.Min(v => v.Y), 0.4f, 0.48f);
+            var lower = glb.Vertices(shin);
+            Assert.InRange(Size(lower).X, 0.11f, 0.14f);
+            Assert.True(lower.Min(v => v.Y) < 0.1f && lower.Max(v => v.Y) > 0.5f, shin);
+            // A rounded shoe about 0.12 m tall and 0.24 m long, on the ground, its toe forward.
+            var shoe = glb.Vertices(foot);
+            Assert.InRange(shoe.Min(v => v.Y), -0.005f, 0.01f);
+            Assert.InRange(shoe.Max(v => v.Y), 0.11f, 0.13f);
+            Assert.InRange(Size(shoe).Z, 0.22f, 0.26f);
+            Assert.True(shoe.Average(v => v.Z) < -0.02f, foot);
+        }
+        // Big cute eyes with sparkles, rosy cheeks and a smile on the front of the head.
         var eyes = glb.Vertices("Head", "Eye");
-        Assert.NotEmpty(eyes);
-        Assert.True(eyes.All(v => v.Z < -0.2f));
-        Assert.True(eyes.Max(v => v.Y) - eyes.Min(v => v.Y) > 0.18f);
+        Assert.True(eyes.All(v => v.Z < -0.08f));
+        Assert.InRange(eyes.Max(v => v.Y) - eyes.Min(v => v.Y), 0.07f, 0.12f);
+        Assert.True(eyes.Average(v => v.Y) < 1.64f && eyes.Average(v => v.Y) > 1.56f);
+        foreach (var detail in new[] { "EyeShine", "Blush", "Mouth" })
+            Assert.Contains(detail, glb.Materials("Head"));
+        // Round hands about 0.055 m round, floating at the ends of the arms, clear of the torso, skirt and legs.
+        var near = glb.VerticesUnder("Body").Concat(glb.Vertices("LegL")).Concat(glb.Vertices("LegR")).ToList();
         foreach (var hand in new[] { "HandL", "HandR" })
         {
-            var v = glb.Vertices(hand);
-            var size = v.Aggregate(Vector3.Max) - v.Aggregate(Vector3.Min);
-            Assert.True(size.X > 0.14f && size.X < 0.2f && MathF.Abs(size.X - size.Y) < 0.03f, hand);
-            // Floating beside the body, not touching it.
+            var size = Size(glb.Vertices(hand));
+            Assert.InRange(size.X, 0.1f, 0.12f);
+            Assert.True(MathF.Abs(size.X - size.Y) < 0.01f, hand);
             var c = glb.Origin(hand);
-            float coneR = 0.3f + (0.05f - 0.3f) * (c.Y - 0.13f) / (0.61f - 0.13f);
-            Assert.True(Radius(c) - 0.09f > coneR, hand);
+            Assert.InRange(c.Y, 0.7f, 0.8f);
+            Assert.True(near.Min(v => Vector3.Distance(v, c)) > 0.07f, hand);
         }
+        // A skirt flares down to about 0.66 m.
+        var skirt = glb.Vertices("Skirt");
+        Assert.InRange(skirt.Min(v => v.Y), 0.62f, 0.7f);
+        Assert.True(skirt.Where(v => v.Y < 0.72f).Max(v => MathF.Abs(v.X)) > Width(0.9f, 0.96f) / 2f + 0.04f);
     }
 
     [Fact]
@@ -204,6 +254,8 @@ public class TownsfolkModelsTests
         {
             Assert.Equal("Head", glb.ParentOf(hair));
             Assert.Equal(new[] { "Hair" }, glb.Materials(hair));
+            // Hair fits the small grown-up head.
+            Assert.True(Size(glb.Vertices(hair)).X < 0.4f, hair);
         }
         foreach (var hat in Hats)
         {
@@ -211,7 +263,8 @@ public class TownsfolkModelsTests
             Assert.Equal(new[] { "Gills", "Hat", "HatSpots" }, glb.Materials(hat).Distinct().OrderBy(m => m, StringComparer.Ordinal));
             var v = glb.Vertices(hat);
             Assert.True(v.Min(p => p.Y) > eyesTop, hat);
-            Assert.True(v.Max(p => p.Y) > headTop + 0.05f, hat);
+            Assert.True(v.Max(p => p.Y) > headTop + 0.02f, hat);
+            Assert.True(Size(v).X < 0.5f, hat);
         }
     }
 

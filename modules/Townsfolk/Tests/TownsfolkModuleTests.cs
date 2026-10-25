@@ -115,7 +115,129 @@ public class TownsfolkModuleTests
         Assert.Contains(looks, l => l.Trousers);
         Assert.Contains(looks, l => !l.Trousers);
         Assert.Equal(25, looks.Select(l => (l.Skin, l.Hair, l.HairColor, l.Outfit, l.Hat, l.HatColor)).Distinct().Count());
-        Assert.All(looks, l => Assert.InRange(l.Scale, 0.9f, 1.2f));
+    }
+
+    [Fact]
+    public void FolkAreSeededHeightsBetween1_65And1_95AboutAnAverage1_80()
+    {
+        var a = new TownsfolkModule().Folk.ToArray();
+        var heights = a.Select(f => f.Look.Height).ToList();
+        Assert.All(heights, h => Assert.InRange(h, Looks.MinHeight, Looks.MaxHeight));
+        Assert.Equal(1.65f, Looks.MinHeight);
+        Assert.Equal(1.95f, Looks.MaxHeight);
+        Assert.InRange(heights.Average(), 1.76f, 1.84f);
+        // Slightly varied: short and tall ones among them, hardly two the same.
+        Assert.True(heights.Max() - heights.Min() > 0.2f);
+        Assert.True(heights.Count(h => h < 1.75f) >= 3 && heights.Count(h => h > 1.85f) >= 3);
+        Assert.True(heights.Distinct().Count() >= 20);
+        // The same rig, scaled uniformly by height / 1.80.
+        Assert.All(a, f => Assert.Equal(f.Look.Height / 1.8f, f.Look.Scale, 5));
+        var mixed = Looks.Mix(new Random(7));
+        Assert.Equal(mixed, Looks.Mix(new Random(7)));
+    }
+
+    [Fact]
+    public void WalkingTakesRealStridesWithThePlantedFootStill()
+    {
+        foreach (float height in new[] { 1.65f, 1.8f, 1.95f })
+        {
+            float scale = height / Body.Height, speed = 1.2f, dt = 1f / 60f;
+            float cycle = 0f, x = 0f;
+            float maxHip = 0f, maxKnee = 0f, maxSwingClear = 0f;
+            float plantedFrom = float.NaN, worstSlide = 0f;
+            for (int k = 0; k < 600; k++)
+            {
+                cycle += Body.CycleRate(speed, scale) * dt;
+                x += speed * dt;
+                var g = Body.Legs(cycle, speed);
+                var l = Body.Foot(g.HipL, g.KneeL, g.Drop);
+                var r = Body.Foot(g.HipR, g.KneeR, g.Drop);
+                // The lower foot is always on the ground, neither in it nor over it.
+                Assert.InRange(MathF.Min(l.Height, r.Height), -0.001f, 0.001f);
+                Assert.True(l.Height > -0.001f && r.Height > -0.001f);
+                maxHip = MathF.Max(maxHip, MathF.Abs(g.HipL));
+                maxKnee = MathF.Max(maxKnee, -g.KneeL);
+                maxSwingClear = MathF.Max(maxSwingClear, l.Height * scale);
+                // Planted (the first half of its cycle), the left foot stays where it was put down.
+                float u = cycle - MathF.Floor(cycle);
+                float footX = x + l.Forward * scale;
+                if (u > 0.04f && u < 0.46f)
+                {
+                    if (float.IsNaN(plantedFrom))
+                        plantedFrom = footX;
+                    worstSlide = MathF.Max(worstSlide, MathF.Abs(footX - plantedFrom));
+                    Assert.Equal(0f, g.KneeL);
+                }
+                else
+                    plantedFrom = float.NaN;
+            }
+            Assert.True(maxHip > 0.25f && maxHip < 0.5f, $"hip swing {maxHip}");
+            Assert.True(maxKnee > 0.6f, $"knee bend {maxKnee}");
+            Assert.True(maxSwingClear > 0.04f, $"swinging foot lifted {maxSwingClear}");
+            Assert.True(worstSlide < 0.03f, $"{height} m: planted foot slid {worstSlide}");
+            // A grown-up's step: about 0.6 m at 1.2 m/s, longer for the taller.
+            float step = speed / (2f * Body.CycleRate(speed, scale));
+            Assert.InRange(step, 0.55f * scale, 0.65f * scale);
+        }
+        // Standing: straight legs together, the body not lowered.
+        var still = Body.Legs(0.3f, 0f);
+        Assert.Equal(0f, still.HipL, 4);
+        Assert.Equal(0f, still.HipR, 4);
+        Assert.Equal(0f, still.KneeL, 4);
+        Assert.Equal(0f, still.Drop, 4);
+    }
+
+    [Fact]
+    public void SittingBendsTheHipsAndKneesToFitTheBenches()
+    {
+        foreach (float height in new[] { 1.65f, 1.72f, 1.8f, 1.88f, 1.95f })
+        {
+            float scale = height / Body.Height;
+            var sit = Body.Sit(scale);
+            // The hips come down onto the seat: the thighs' tubes rest on its top.
+            float hipHeight = sit.Lift + Body.HipY * scale;
+            Assert.Equal(Body.SeatHeight + Body.LegRadius * scale, hipHeight, 3);
+            // The feet stand on the ground.
+            var foot = Body.Foot(sit.Hip, sit.Knee, 0f);
+            Assert.Equal(0f, sit.Lift + foot.Height * scale, 2);
+            // Thighs forward (about level) and the shins about upright: bent about square at hips and knees.
+            Assert.InRange(sit.Hip, 1.1f, 1.6f);
+            Assert.InRange(-sit.Knee, 1.1f, 1.7f);
+            Assert.InRange(sit.Hip + sit.Knee, -0.1f, 0.6f);
+            // The knees over the seat's front (0.13 m in front of the seat spot), the back short of the
+            // backrest (0.33 m behind it), the shins clear of the seat's front edge.
+            float knee = Body.Thigh * MathF.Sin(sit.Hip) * scale - sit.Back;
+            Assert.True(knee - Body.LegRadius * scale > 0.13f, $"{height} m: knees at {knee}");
+            Assert.True(sit.Back + 0.11f * scale < 0.31f, $"{height} m: back at {sit.Back}");
+        }
+    }
+
+    [Fact]
+    public void ChattersLookEachOtherInTheEyesAtTheirOwnHeights()
+    {
+        float shortOne = 1.65f / Body.Height, tallOne = 1.95f / Body.Height;
+        Assert.Equal(0f, Body.LookPitch(1f, 1f, 1.2f), 5);
+        float up = Body.LookPitch(shortOne, tallOne, 1.2f), down = Body.LookPitch(tallOne, shortOne, 1.2f);
+        Assert.True(up > 0.15f && up < 0.3f, $"looks up {up}");
+        Assert.Equal(-up, down, 5);
+        // The head's tip is the angle to the other's eyes.
+        Assert.Equal(MathF.Atan2(Body.HeadY * (tallOne - shortOne), 1.2f), up, 5);
+        // Pairs who meet stand at a talking distance, each at their own height: the chats really pair short and tall.
+        var rig = new Rig();
+        float biggest = 0f;
+        rig.Run(300f, () =>
+        {
+            var folk = rig.Town.Folk;
+            for (int i = 0; i < folk.Length; i++)
+                if (folk[i].State == FolkState.Chatting && folk[i].Partner >= 0)
+                {
+                    var other = folk[folk[i].Partner];
+                    float apart = Vector2.Distance(Flat(folk[i].Position), Flat(other.Position));
+                    Assert.InRange(apart, 0.8f, 1.8f);
+                    biggest = MathF.Max(biggest, MathF.Abs(other.Look.Height - folk[i].Look.Height));
+                }
+        });
+        Assert.True(biggest > 0.05f, $"height gap {biggest}");
     }
 
     [Fact]
