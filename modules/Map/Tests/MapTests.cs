@@ -1006,6 +1006,121 @@ public class MapTests
         }
     }
 
+    // Mushroom colors ("vivid", Tony 2026-10-25)
+
+    /// <summary>The cap colors MapView drew before they were made vivid.</summary>
+    private static readonly Vector3[] OldCapColors =
+    {
+        new(0.88f, 0.24f, 0.22f), new(0.93f, 0.36f, 0.26f), new(0.62f, 0.4f, 0.24f),
+        new(0.72f, 0.5f, 0.3f), new(0.6f, 0.36f, 0.72f), new(0.72f, 0.42f, 0.78f),
+    };
+
+    private static readonly Vector3[] OldLampColors =
+    {
+        new(1.0f, 0.82f, 0.4f), new(1.0f, 0.6f, 0.7f), new(0.55f, 0.85f, 0.95f),
+    };
+
+    /// <summary>Hue in degrees (0..360), saturation and value (0..1) of an sRGB color.</summary>
+    private static (float Hue, float Saturation, float Value) Hsv(Vector3 c)
+    {
+        float max = MathF.Max(c.X, MathF.Max(c.Y, c.Z)), min = MathF.Min(c.X, MathF.Min(c.Y, c.Z));
+        float d = max - min;
+        float hue = d == 0f ? 0f
+            : max == c.X ? 60f * ((c.Y - c.Z) / d)
+            : max == c.Y ? 60f * ((c.Z - c.X) / d + 2f)
+            : 60f * ((c.X - c.Y) / d + 4f);
+        return ((hue + 360f) % 360f, max == 0f ? 0f : d / max, max);
+    }
+
+    private static float HueDistance(float a, float b) => MathF.Min(MathF.Abs(a - b), 360f - MathF.Abs(a - b));
+
+    [Fact]
+    public void MushroomCapsAreSaturatedAndBrightAndRicherThanBefore()
+    {
+        Assert.Equal(OldCapColors.Length, MushroomPalette.CapColors.Length);
+        Assert.Equal(OldLampColors.Length, MushroomPalette.LampColors.Length);
+        void Check(Vector3 color, Vector3 old)
+        {
+            var (hue, saturation, value) = Hsv(color);
+            var (oldHue, oldSaturation, oldValue) = Hsv(old);
+            Assert.InRange(saturation, 0.8f, 1f);
+            Assert.InRange(value, 0.85f, 1f);
+            Assert.True(saturation >= oldSaturation + 0.15f, $"{color} is not clearly more saturated than {old}");
+            Assert.True(value >= oldValue - 0.001f, $"{color} is darker than {old}");
+            // The same family of color as before (a red stays red, a purple purple).
+            Assert.True(HueDistance(hue, oldHue) <= 30f, $"{color} changed hue from {old}");
+        }
+        for (int i = 0; i < OldCapColors.Length; i++)
+            Check(MushroomPalette.CapColors[i], OldCapColors[i]);
+        for (int i = 0; i < OldLampColors.Length; i++)
+            Check(MushroomPalette.LampColors[i], OldLampColors[i]);
+    }
+
+    [Fact]
+    public void RedCapsArePureCherryAndTomatoRed()
+    {
+        // The two red caps: a pure red hue (no brownish orange, no dull pink), nearly fully saturated.
+        for (int i = 0; i < 2; i++)
+        {
+            var (hue, saturation, value) = Hsv(MushroomPalette.CapColors[i]);
+            Assert.True(HueDistance(hue, 0f) <= 12f, $"red cap {i} has hue {hue}");
+            Assert.InRange(saturation, 0.88f, 1f);
+            Assert.InRange(value, 0.9f, 1f);
+        }
+    }
+
+    [Fact]
+    public void SpotsArePureWhiteAndStemsCleanLightCream()
+    {
+        Assert.Equal(Vector3.One, MushroomPalette.SpotColor);
+        foreach (var stem in new[] { MushroomPalette.StemLight, MushroomPalette.StemDark })
+        {
+            var (hue, saturation, value) = Hsv(stem);
+            Assert.InRange(value, 0.96f, 1f);
+            Assert.InRange(saturation, 0.08f, 0.22f);
+            Assert.InRange(hue, 35f, 55f);
+        }
+    }
+
+    [Fact]
+    public void GlowingMushroomsGlowTwiceAsBright()
+    {
+        // Before: glowing giant caps 1.1, lamps 1.4.
+        Assert.InRange(MushroomPalette.GiantGlow, 1.1f * 1.9f, 1.1f * 2.2f);
+        Assert.InRange(MushroomPalette.LampGlow, 1.4f * 1.9f, 1.4f * 2.2f);
+    }
+
+    /// <summary>A file of this module, found by walking up from the test's output folder.</summary>
+    private static string ModuleFile(string relative)
+    {
+        for (var dir = new System.IO.DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
+        {
+            string path = System.IO.Path.Combine(dir.FullName, "modules", "Map", relative);
+            if (System.IO.File.Exists(path))
+                return System.IO.File.ReadAllText(path);
+        }
+        throw new System.IO.FileNotFoundException(relative);
+    }
+
+    [Fact]
+    public void ViewDrawsMushroomsFromThePaletteWithGlossRimAndNoEyes()
+    {
+        string view = ModuleFile("Godot/MapView.cs");
+        foreach (string member in new[] { "CapColors", "LampColors", "StemLight", "StemDark", "SpotColor", "GiantGlow", "LampGlow" })
+            Assert.Contains("MushroomPalette." + member, view);
+        // No eyes or faces on mushrooms (the designer's rule).
+        Assert.DoesNotContain("Eye", view);
+        Assert.DoesNotContain("eye", view);
+        Assert.DoesNotContain("Eye()", ModuleFile("Godot/MapMeshes.cs"));
+        Assert.Throws<System.IO.FileNotFoundException>(() => ModuleFile("Godot/Shaders/eye.gdshader"));
+        // The caps' toon shading has a soft specular band and a rim light along the edge.
+        string cap = ModuleFile("Godot/Shaders/mushroom_cap.gdshader");
+        Assert.Contains("uniform float gloss", cap);
+        Assert.Contains("uniform float rim", cap);
+        Assert.Contains("SPECULAR_LIGHT +=", cap);
+        Assert.DoesNotContain("specular_disabled", cap);
+    }
+
     // Module
 
     [Fact]

@@ -19,18 +19,13 @@ public partial class MapView : Node3D, IModuleView
 {
     private const string Shaders = "res://modules/Map/Godot/Shaders/";
 
-    private static readonly Color[] CapColors =
-    {
-        new(0.88f, 0.24f, 0.22f), new(0.93f, 0.36f, 0.26f), new(0.62f, 0.4f, 0.24f),
-        new(0.72f, 0.5f, 0.3f), new(0.6f, 0.36f, 0.72f), new(0.72f, 0.42f, 0.78f),
-    };
+    private static readonly Color[] CapColors = Array.ConvertAll(MushroomPalette.CapColors, ToColor);
+    private static readonly Color[] LampColors = Array.ConvertAll(MushroomPalette.LampColors, ToColor);
 
-    private static readonly Color[] LampColors =
-    {
-        new(1.0f, 0.82f, 0.4f), new(1.0f, 0.6f, 0.7f), new(0.55f, 0.85f, 0.95f),
-    };
+    private static Color ToColor(System.Numerics.Vector3 c) => new(c.X, c.Y, c.Z);
 
     private MapModule? _map;
+    private Camera3D? _preview;
 
     public void Bind(IModule module) => _map = (MapModule)module;
 
@@ -41,6 +36,49 @@ public partial class MapView : Node3D, IModuleView
         BuildMushrooms();
         BuildRoots();
         BuildHome();
+        BuildPreviewCamera();
+    }
+
+    public override void _Process(double delta)
+    {
+        if (_preview == null)
+            return;
+        // Another module's camera (the player's) may have become current since: take it back.
+        if (!_preview.Current)
+            _preview.MakeCurrent();
+        // Screenshots only: hide the screens and labels drawn over the world (start screen, HUD, prompts).
+        foreach (var node in GetParent().GetChildren())
+        {
+            if (node is CanvasLayer layer && layer.Visible)
+                layer.Visible = false;
+            else if (node is Control control && control.Visible)
+                control.Visible = false;
+        }
+    }
+
+    /// <summary>For screenshots: MAP_PREVIEW=road or cliffs makes a preview camera current.</summary>
+    private void BuildPreviewCamera()
+    {
+        Vector3 from, target;
+        switch (OS.GetEnvironment("MAP_PREVIEW").ToLowerInvariant())
+        {
+            case "road":
+                // On the south road, looking along its glowing lamps toward Mushroom Town.
+                from = OnGround(0f, 114f) + Vector3.Up * 2f;
+                target = OnGround(1f, 132f) + Vector3.Up * 1f;
+                break;
+            case "cliffs":
+                // From the south road, west up at the giant mushrooms on the cliffs beside it.
+                from = OnGround(2f, 124f) + Vector3.Up * 1.8f;
+                target = OnGround(-30f, 128f) + Vector3.Up * 9f;
+                break;
+            default:
+                return;
+        }
+        _preview = new Camera3D { Name = "PreviewCamera", Fov = 70f, Far = 400f };
+        AddChild(_preview);
+        _preview.LookAtFromPosition(from, target, Vector3.Up);
+        _preview.MakeCurrent();
     }
 
     /// <summary>A fixed pseudo-random value in [0, 1) for (i, k): the same scene every run.</summary>
@@ -292,32 +330,19 @@ public partial class MapView : Node3D, IModuleView
     {
         var stems = new Instances();
         var caps = new Instances();
-        var eyes = new Instances();
         int seed = 0;
+        Color stemLight = ToColor(MushroomPalette.StemLight), stemDark = ToColor(MushroomPalette.StemDark);
 
-        void Mushroom(float x, float z, float stemRadius, float height, float capRadius, Color color, float glow, float look)
+        void Mushroom(float x, float z, float stemRadius, float height, float capRadius, Color color, float glow)
         {
             int id = seed++;
             float yaw = Rand(id, 1) * MathF.Tau;
             var foot = OnGround(x, z) + Vector3.Down * MathF.Min(0.4f, height * 0.08f);
-            var stemColor = new Color(0.97f, 0.91f, 0.8f).Lerp(new Color(0.93f, 0.82f, 0.7f), Rand(id, 2));
+            var stemColor = stemLight.Lerp(stemDark, Rand(id, 2));
             stems.Add(Placed(foot, yaw, new Vector3(stemRadius, height, stemRadius)), stemColor);
             float capHeight = capRadius * (0.5f + 0.3f * Rand(id, 6));
             caps.Add(Placed(foot + Vector3.Up * (height - capHeight * 0.18f), yaw, new Vector3(capRadius, capHeight, capRadius)),
                 color, new Color(Rand(id, 8), glow, 0f, 0f));
-            if (float.IsNaN(look))
-                return;
-            // Big round eyes on the stem, looking toward the walkable ground.
-            float eyeY = MathF.Min(height * 0.42f, 2.6f + stemRadius * 0.3f);
-            float eyeSize = 0.3f + 0.16f * stemRadius;
-            float spread = 0.62f * eyeSize / stemRadius + 0.1f;
-            for (int side = -1; side <= 1; side += 2)
-            {
-                float a = look + side * spread;
-                var outward = new Vector3(MathF.Cos(a), 0f, MathF.Sin(a));
-                var basis = new Basis(new Quaternion(Vector3.Up, outward)) * Basis.FromScale(new Vector3(eyeSize, eyeSize * 0.8f, eyeSize));
-                eyes.Add(new Transform3D(basis, foot + Vector3.Up * eyeY + outward * (stemRadius - 0.05f)), Colors.White);
-            }
         }
 
         // Giant mushrooms on the cliffs (not in the forest's ring, which the Forest module fills).
@@ -335,12 +360,8 @@ public partial class MapView : Node3D, IModuleView
             float beyond = -Areas.Depth(x, z);
             if (beyond < 3.5f + r || beyond > 45f || Rand(k, 13) < 0.25f)
                 continue;
-            const float e = 1f;
-            float look = beyond < 16f && Rand(k, 14) < 0.4f
-                ? MathF.Atan2(Areas.Depth(x, z + e) - Areas.Depth(x, z - e), Areas.Depth(x + e, z) - Areas.Depth(x - e, z))
-                : float.NaN;
             var color = CapColors[(int)(Rand(k, 15) * CapColors.Length)];
-            Mushroom(x, z, r, 6f + r * 2.6f + 5f * Rand(k, 16), r * (2.4f + 1.2f * Rand(k, 17)), color, Rand(k, 18) < 0.12f ? 1.1f : 0f, look);
+            Mushroom(x, z, r, 6f + r * 2.6f + 5f * Rand(k, 16), r * (2.4f + 1.2f * Rand(k, 17)), color, Rand(k, 18) < 0.12f ? MushroomPalette.GiantGlow : 0f);
         }
 
         // Little glowing mushroom lamps beside the roads: the Map's road props, solid, exactly where
@@ -350,12 +371,13 @@ public partial class MapView : Node3D, IModuleView
         {
             if (p.Area != Area.Road || p.Kind != PropKind.Lamp)
                 continue;
-            Mushroom(p.X, p.Z, 0.1f, p.Height, p.Radius, LampColors[lamp++ % LampColors.Length], 1.4f, float.NaN);
+            Mushroom(p.X, p.Z, 0.1f, p.Height, p.Radius, LampColors[lamp++ % LampColors.Length], MushroomPalette.LampGlow);
         }
 
         AddChild(stems.Build("MushroomStems", MapMeshes.Stem(), Material("toon_color.gdshader", outline: true)));
-        AddChild(caps.Build("MushroomCaps", MapMeshes.Cap(), Material("mushroom_cap.gdshader", outline: true)));
-        AddChild(eyes.Build("MushroomEyes", MapMeshes.Eye(), Material("eye.gdshader", outline: true), shadows: false));
+        var capMaterial = Material("mushroom_cap.gdshader", outline: true);
+        capMaterial.SetShaderParameter("spot_color", ToColor(MushroomPalette.SpotColor));
+        AddChild(caps.Build("MushroomCaps", MapMeshes.Cap(), capMaterial));
     }
 
     private void BuildRoots()

@@ -1,12 +1,14 @@
-// Giant and small mushroom caps: instance color on top with cream spots, pale gills below.
-// INSTANCE_CUSTOM.x picks the spot pattern, INSTANCE_CUSTOM.y makes the cap glow softly.
+// Giant and small mushroom caps: instance color on top with pure white spots, pale gills below.
+// INSTANCE_CUSTOM.x picks the spot pattern, INSTANCE_CUSTOM.y makes the cap glow.
+// The map's soft two-band toon lighting plus a small glossy specular band and a light rim
+// along the cap's edge, so the vivid caps pop without washing out.
 shader_type spatial;
-render_mode specular_disabled;
 
-#include "res://modules/Map/Godot/Shaders/toon.gdshaderinc"
-
-uniform vec3 gill_color : source_color = vec3(0.98, 0.88, 0.76);
-uniform vec3 spot_color : source_color = vec3(1.0, 0.97, 0.9);
+uniform vec3 gill_color : source_color = vec3(1.0, 0.95, 0.85);
+uniform vec3 spot_color : source_color = vec3(1.0);
+// Strength of the glossy highlight band and of the rim light along the edge.
+uniform float gloss = 0.32;
+uniform float rim = 0.3;
 
 varying vec3 local_pos;
 varying vec2 custom;
@@ -38,11 +40,25 @@ void fragment() {
 		float d = length(o + r - f);
 		float keep = step(0.4, hash3(c + 11.7));
 		float size = 0.22 + 0.12 * hash3(c + 5.9);
-		spot = max(spot, keep * (1.0 - smoothstep(size, size + 0.03, d)));
+		spot = max(spot, keep * (1.0 - smoothstep(size, size + 0.02, d)));
 	}
 	spot *= top * smoothstep(0.12, 0.3, dir.y);
 	vec3 cap = COLOR.rgb;
-	vec3 gills = gill_color * mix(vec3(1.0), cap, 0.18);
+	vec3 gills = gill_color * mix(vec3(1.0), cap, 0.12);
 	ALBEDO = mix(gills, mix(cap, spot_color, spot), top);
 	EMISSION = (cap * 0.8 * top + gills * 0.25 * (1.0 - top) + spot_color * spot * 0.5) * custom.y;
+}
+
+void light() {
+	float ndl = clamp(dot(NORMAL, LIGHT), 0.0, 1.0);
+	float shade = smoothstep(0.2, 0.6, ATTENUATION);
+	float lit = (smoothstep(0.0, 0.14, ndl) * 0.72 + smoothstep(0.45, 0.62, ndl) * 0.28) * shade;
+	// A light rim along the edge, strongest on the lit side.
+	float edge = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 3.0);
+	float rim_light = smoothstep(0.35, 0.65, edge) * rim * (0.35 + 0.65 * smoothstep(-0.2, 0.4, dot(NORMAL, LIGHT))) * ATTENUATION;
+	DIFFUSE_LIGHT += LIGHT_COLOR * (lit + rim_light) / PI;
+	// A soft glossy band where the light glints off the cap.
+	float glint = clamp(dot(NORMAL, normalize(LIGHT + VIEW)), 0.0, 1.0);
+	float band = smoothstep(0.86, 0.93, glint) * step(0.001, ndl) * shade;
+	SPECULAR_LIGHT += LIGHT_COLOR * band * gloss;
 }

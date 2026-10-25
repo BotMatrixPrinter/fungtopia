@@ -10,7 +10,7 @@ mushrooms close off everything else, and solid props (medium mushrooms, lamps, b
 nothing per tick.
 
 - `Contract/` — `Fungtopia.Map.Contract` (namespace `Fungtopia.Map`), see below.
-- `Core/` — `Fungtopia.Map.Core`: `MapModule`, the module's one `IModule` (no work per tick).
+- `Core/` — `Fungtopia.Map.Core`: `MapModule`, the module's one `IModule` (no work per tick), and `MushroomPalette`, the colors and glow of the mushrooms the view draws.
 - `Godot/` — `Main.tscn` with `MapView`, which draws the ground from the Contract.
 - `Tests/` — `MapTests.cs`: xUnit tests of the Contract (including `Props`) and of `MapModule` with a fake `IMessageBus`.
 
@@ -133,10 +133,21 @@ headless), using its own copies of the forest's toon shaders (`Godot/Shaders/`):
 - low roots spreading from the foot of each Deep Forest mushroom and a few loose ones between
   (one MultiMesh); the DeepForest module draws those mushrooms themselves and the gloom and fog;
 - hedges of round blobs just past every walkable edge (darker around the Deep Forest; not along the forest's own edge, where
-  the Forest module's mushroom ring stands), giant spotted mushrooms on the cliffs (some with big
-  round eyes looking at the walkable ground), and little glowing mushroom lamps beside both roads
+  the Forest module's mushroom ring stands), giant spotted mushrooms on the cliffs (no eyes or faces), and little glowing mushroom lamps beside both roads
   (the `Area.Road` lamps of `Props.All`, exactly there and that tall) — each kind one MultiMesh;
+- the mushrooms are "vivid" (Tony, 2026-10-25; `MushroomPalette`): caps in saturated, bright
+  cherry and tomato red, orange, caramel brown, violet and orchid pink; lamps golden, candy pink and
+  sky blue; crisp pure white spots, clean light cream stems and gills. The caps' toon shading
+  (`mushroom_cap.gdshader`) adds a small glossy specular band (`gloss`) and a light rim along the
+  edge (`rim`). About 1 in 8 cliff caps glows (emission 2.2), the lamps glow at 2.8;
 - the home interior: wood plank floor, cream walls with wooden skirting, four round windows, a
   door with a knob in the south wall, a ceiling seen only from inside, and a warm light.
 
 Buildings, signposts, NPCs, sky and sun are other modules' (Town, PetCity, Forest, ...).
+
+## Screenshots
+
+`MAP_PREVIEW=road` (on the south road, looking along its lamps toward Mushroom Town) or
+`MAP_PREVIEW=cliffs` (from the south road, west up at the giant mushrooms on the cliffs) makes a
+preview camera current and hides the screens drawn over the world; with `DAYNIGHT_HOUR` for day or
+night, for example `MAP_PREVIEW=road DAYNIGHT_HOUR=22 ./screenshot.sh "" map_road_night.png`.
