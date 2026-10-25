@@ -9,7 +9,8 @@
 #   draws the string. The tips are at y = -TIP_BACK, z = +-TIP_HALF_SPAN.
 # arrow.glb: object "Arrow", the tip at the origin pointing forward: a little purple mushroom
 #   cap with green spots, a wooden shaft behind it and soft green fletching at the end.
-# Materials carry plain colors only; the game draws them toon-shaded with ink outlines.
+# Materials carry plain colors (plus the caps' gloss and the spots' glow, see GLOSSY and GLOWING);
+# the game draws them toon-shaded with ink outlines.
 import math
 import os
 
@@ -22,12 +23,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 COLORS = {
     "Wood": (0.62, 0.38, 0.2),
     "Grip": (0.45, 0.25, 0.14),
-    "TipCap": (0.9, 0.2, 0.22),
-    "Spots": (1.0, 0.96, 0.9),
+    "TipCap": (0.94, 0.07, 0.1),
+    "Spots": (1.0, 1.0, 1.0),
     "Shaft": (0.78, 0.6, 0.38),
-    "PoisonCap": (0.56, 0.24, 0.72),
-    "PoisonSpots": (0.55, 0.95, 0.35),
-    "Stem": (0.95, 0.9, 0.78),
+    "PoisonCap": (0.66, 0.14, 0.95),
+    "PoisonSpots": (0.5, 1.0, 0.3),
+    "Stem": (1.0, 0.96, 0.84),
     "Fletch": (0.5, 0.85, 0.45),
 }
 
@@ -37,6 +38,11 @@ TIP_BACK = MAJOR - MAJOR * math.cos(HALF_ARC)
 TIP_HALF_SPAN = MAJOR * math.sin(HALF_ARC)
 ARROW_LENGTH = 0.72
 
+# Vivid mushrooms (Tony, 2026-10-25): the caps are glossy (a low roughness, which the game draws
+# as a toon specular band and a rim light) and the poison spots glow with their whole color.
+GLOSSY = {"TipCap", "PoisonCap"}
+GLOWING = {"PoisonSpots"}
+
 
 def material(name, color):
     mat = bpy.data.materials.get(name)
@@ -45,7 +51,10 @@ def material(name, color):
         mat.use_nodes = True
     bsdf = mat.node_tree.nodes.get("Principled BSDF")
     bsdf.inputs["Base Color"].default_value = (*color, 1.0)
-    bsdf.inputs["Roughness"].default_value = 0.8
+    bsdf.inputs["Roughness"].default_value = 0.35 if name in GLOSSY else 0.8
+    if name in GLOWING:
+        bsdf.inputs["Emission Color"].default_value = (*color, 1.0)
+        bsdf.inputs["Emission Strength"].default_value = 1.0
     mat.diffuse_color = (*color, 1.0)
     return mat
 

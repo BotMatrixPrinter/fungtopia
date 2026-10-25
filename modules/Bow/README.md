@@ -99,12 +99,23 @@ stuck arrow shrinks away at the end of its 5 s.
 
 `blender -b --factory-startup --python modules/Bow/Models/bow.py` (from the repository root)
 writes `bow.glb` and `arrow.glb`; commit both with the script. `bow.glb`: a chunky wooden bow with
-a brown grip at the origin and little red, white-spotted mushroom caps on its tips (the game draws
-the string). `arrow.glb`: tip at the origin pointing forward (-Z in Godot), a little purple
-mushroom cap with glowing green spots on a cream stem, a wooden shaft and soft round green
-fletching, 0.72 m long. The view loads them at run time with `GltfDocument` from the files'
+a brown grip at the origin and little cherry-red (0.94, 0.07, 0.1), pure-white-spotted mushroom
+caps on its tips (the game draws the string). `arrow.glb`: tip at the origin pointing forward (-Z
+in Godot), a little rich poison-purple (0.66, 0.14, 0.95) mushroom cap with glowing green
+(0.5, 1, 0.3) spots on a clean light cream (1, 0.96, 0.84) stem, a wooden shaft and soft round
+green fletching, 0.72 m long. The view loads them at run time with `GltfDocument` from the files'
 bytes (an export must include `*.glb` as non-resource files). Only `arrow.glb` is drawn by this
 module now; `bow.glb` is kept for the held bow the Player module draws.
+
+The mushrooms are vivid (Tony, 2026-10-25, the same rule in every module): saturated, bright caps,
+pure white spots, a clean cream stem. The caps are exported glossy (roughness 0.35, everything
+else 0.8): `ToonModels` turns a roughness under 0.8 into the toon shader's `gloss`, a small soft
+white specular band and a brighter rim light along the cap's edge. The poison spots carry a glTF
+emission of their whole color, which `ToonModels` (through `ToonColor.Glow`) makes linear the
+way it does the albedo, as an sRGB swatch, and passes on as the shader's `glow`: about
+(0.21, 1, 0.07), twice the earlier glow of half their old color, in the same saturated green. The
+wood, shaft and fletching keep their colors. The Player module's nocked arrow (`characters.py`)
+should use the same cap, spot and stem colors.
 
 ## Screenshots
 

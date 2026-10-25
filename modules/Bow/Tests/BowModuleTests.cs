@@ -716,6 +716,140 @@ public class BowModuleTests
             Assert.NotEqual(1, a.Shot); // the first arrow is gone
     }
 
+    // ---- Models: vivid mushrooms ----
+
+    /// <summary>
+    /// The materials of arrow.glb or bow.glb (modules/Bow/Models) by name: base color (the
+    /// Blender swatch, which the view draws as an sRGB color), roughness and emission.
+    /// </summary>
+    private static Dictionary<string, (float[] Color, float Roughness, float[] Emission)> Materials(string file)
+    {
+        var dir = new System.IO.DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !System.IO.Directory.Exists(System.IO.Path.Combine(dir.FullName, "modules", "Bow", "Models")))
+            dir = dir.Parent;
+        Assert.NotNull(dir);
+        var bytes = System.IO.File.ReadAllBytes(System.IO.Path.Combine(dir!.FullName, "modules", "Bow", "Models", file));
+        int length = BitConverter.ToInt32(bytes, 12);
+        using var json = System.Text.Json.JsonDocument.Parse(new ReadOnlyMemory<byte>(bytes, 20, length));
+        var result = new Dictionary<string, (float[], float, float[])>();
+        foreach (var m in json.RootElement.GetProperty("materials").EnumerateArray())
+        {
+            var pbr = m.GetProperty("pbrMetallicRoughness");
+            var color = new float[] { 1f, 1f, 1f }; // glTF leaves out a white base color
+            if (pbr.TryGetProperty("baseColorFactor", out var factor))
+                for (int c = 0; c < 3; c++)
+                    color[c] = factor[c].GetSingle();
+            float roughness = pbr.TryGetProperty("roughnessFactor", out var r) ? r.GetSingle() : 1f;
+            var emission = new float[3];
+            if (m.TryGetProperty("emissiveFactor", out var e))
+                for (int c = 0; c < 3; c++)
+                    emission[c] = e[c].GetSingle();
+            result[m.GetProperty("name").GetString()!] = (color, roughness, emission);
+        }
+        return result;
+    }
+
+    /// <summary>Hue (degrees), saturation and value of a color.</summary>
+    private static (float Hue, float Saturation, float Value) Hsv(float[] c)
+    {
+        float max = MathF.Max(c[0], MathF.Max(c[1], c[2])), min = MathF.Min(c[0], MathF.Min(c[1], c[2]));
+        float d = max - min, hue = 0f;
+        if (d > 0f)
+            hue = max == c[0] ? 60f * ((c[1] - c[2]) / d) : max == c[1] ? 60f * ((c[2] - c[0]) / d + 2f) : 60f * ((c[0] - c[1]) / d + 4f);
+        return ((hue + 360f) % 360f, max > 0f ? d / max : 0f, max);
+    }
+
+    [Fact]
+    public void TheArrowsPoisonCapIsARichBrightPurple()
+    {
+        var (hue, saturation, value) = Hsv(Materials("arrow.glb")["PoisonCap"].Color);
+        Assert.InRange(hue, 270f, 295f);       // still poison purple, not blue or pink
+        Assert.InRange(saturation, 0.8f, 1f);  // was 0.67
+        Assert.InRange(value, 0.85f, 0.97f);   // was 0.72; bright, but not washed out to white
+    }
+
+    [Fact]
+    public void TheBowsTipCapsAreCherryRedWithPureWhiteSpots()
+    {
+        var bow = Materials("bow.glb");
+        var (hue, saturation, value) = Hsv(bow["TipCap"].Color);
+        Assert.True(hue <= 8f || hue >= 352f, $"hue {hue}");
+        Assert.InRange(saturation, 0.88f, 1f); // was 0.78
+        Assert.InRange(value, 0.85f, 0.97f);
+        Assert.All(bow["Spots"].Color, c => Assert.True(c >= 0.999f, $"{c}"));
+    }
+
+    [Fact]
+    public void TheArrowsStemIsACleanLightCream()
+    {
+        var c = Materials("arrow.glb")["Stem"].Color;
+        Assert.True(c[0] >= c[1] && c[1] > c[2], "warm cream, not grey");
+        Assert.True(c[2] >= 0.8f, "light, not tan");
+        Assert.True(c[1] >= 0.94f && c[2] < 0.94f, "cream, not pure white");
+    }
+
+    [Fact]
+    public void TheMushroomCapsAreGlossyAndNothingElseIs()
+    {
+        var arrow = Materials("arrow.glb");
+        var bow = Materials("bow.glb");
+        // ToonModels turns a roughness under 0.8 into the toon shader's specular band and rim light.
+        Assert.InRange(arrow["PoisonCap"].Roughness, 0f, 0.45f);
+        Assert.InRange(bow["TipCap"].Roughness, 0f, 0.45f);
+        foreach (var name in new[] { "PoisonSpots", "Stem", "Shaft", "Fletch" })
+            Assert.Equal(0.8f, arrow[name].Roughness, 3);
+        foreach (var name in new[] { "Wood", "Grip", "Spots" })
+            Assert.Equal(0.8f, bow[name].Roughness, 3);
+    }
+
+    [Fact]
+    public void ThePoisonSpotsGlowTwiceAsBright()
+    {
+        var spots = Materials("arrow.glb")["PoisonSpots"];
+        var (hue, saturation, _) = Hsv(spots.Color);
+        Assert.InRange(hue, 90f, 130f); // still poison green
+        Assert.True(saturation >= 0.65f, $"saturation {saturation}");
+        // The glow was half the spots' color (self_light 0.5); now it is the whole color.
+        for (int c = 0; c < 3; c++)
+            Assert.True(spots.Emission[c] >= 0.95f * spots.Color[c], $"channel {c}: {spots.Emission[c]}");
+        Assert.All(Materials("arrow.glb")["PoisonCap"].Emission, e => Assert.Equal(0f, e));
+    }
+
+    [Fact]
+    public void TheViewHandsTheShaderTwiceTheEarlierGlowInThePoisonGreen()
+    {
+        // Godot's glTF importer stores the spots' emission (0.5, 1, 0.3) sRGB-encoded.
+        var imported = new Vector3(LinearToSrgb(0.5f), LinearToSrgb(1f), LinearToSrgb(0.3f));
+        var glow = ToonColor.Glow(imported, 1f);
+        // The earlier glow: half the spots' old sRGB color (0.55, 0.95, 0.35), made linear.
+        var old = 0.5f * ToonColor.SrgbToLinear(new Vector3(0.55f, 0.95f, 0.35f));
+        Assert.InRange(glow.Y / old.Y, 1.8f, 2.5f);
+        Assert.True(glow.X < 0.3f * glow.Y, $"red {glow.X}");  // still poison green, not mint
+        Assert.True(glow.Z < 0.3f * glow.Y, $"blue {glow.Z}");
+        Assert.Equal(2f * glow.Y, ToonColor.Glow(imported, 2f).Y, 4); // energy applied unconverted
+
+        // Godot's Color.LinearToSrgb, per channel.
+        static float LinearToSrgb(float c) =>
+            c < 0.0031308f ? c * 12.92f : 1.055f * MathF.Pow(c, 1f / 2.4f) - 0.055f;
+    }
+
+    [Fact]
+    public void ColorsThatAreNotMushroomsStayAsTheyWere()
+    {
+        var arrow = Materials("arrow.glb");
+        var bow = Materials("bow.glb");
+        AssertColor(new[] { 0.78f, 0.6f, 0.38f }, arrow["Shaft"].Color);
+        AssertColor(new[] { 0.5f, 0.85f, 0.45f }, arrow["Fletch"].Color);
+        AssertColor(new[] { 0.62f, 0.38f, 0.2f }, bow["Wood"].Color);
+        AssertColor(new[] { 0.45f, 0.25f, 0.14f }, bow["Grip"].Color);
+
+        static void AssertColor(float[] expected, float[] actual)
+        {
+            for (int c = 0; c < 3; c++)
+                Assert.Equal(expected[c], actual[c], 3);
+        }
+    }
+
     // ---- Engine rules ----
 
     [Fact]
