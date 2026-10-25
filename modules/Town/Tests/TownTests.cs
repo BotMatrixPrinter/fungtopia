@@ -208,6 +208,107 @@ public class TownTests
             Assert.Contains(mat, used);
     }
 
+    /// <summary>The base colors (r, g, b, as town.py sets them) of Models/town.glb's materials, by name.</summary>
+    private static Dictionary<string, Vector3> ModelColors()
+    {
+        using var json = ModelJson();
+        var colors = new Dictionary<string, Vector3>();
+        foreach (var material in json.RootElement.GetProperty("materials").EnumerateArray())
+        {
+            // glTF leaves the factor out when it is pure white (its default).
+            var color = Vector3.One;
+            if (material.GetProperty("pbrMetallicRoughness").TryGetProperty("baseColorFactor", out var c))
+                color = new Vector3(c[0].GetSingle(), c[1].GetSingle(), c[2].GetSingle());
+            colors[material.GetProperty("name").GetString()!] = color;
+        }
+        return colors;
+    }
+
+    private static float Saturation(Vector3 c)
+    {
+        float max = MathF.Max(c.X, MathF.Max(c.Y, c.Z)), min = MathF.Min(c.X, MathF.Min(c.Y, c.Z));
+        return max <= 0f ? 0f : (max - min) / max;
+    }
+
+    [Fact]
+    public void MushroomCapsAreVividWithPureWhiteSpotsAndCleanCreamStems()
+    {
+        var colors = ModelColors();
+        // Every colored cap clearly saturated and bright (the dull ones were 0.25 to 0.4 saturated).
+        foreach (var cap in TownLook.Caps)
+        {
+            Assert.True(colors.ContainsKey(cap), cap);
+            if (cap == "CapWhite")
+                continue;
+            var c = colors[cap];
+            Assert.True(Saturation(c) >= 0.6f, $"{cap} {c} is not saturated enough");
+            Assert.True(MathF.Max(c.X, MathF.Max(c.Y, c.Z)) >= 0.95f, $"{cap} {c} is not bright enough");
+        }
+        // The red caps a pure cherry/tomato red, not brownish or pinkish.
+        var red = colors["Cap"];
+        Assert.True(red.X >= 0.9f && red.Y <= 0.15f && red.Z <= 0.15f, $"Cap {red}");
+        // The clinic's cap and the white spots pure white.
+        foreach (var white in new[] { "CapWhite", "Spots" })
+            Assert.Equal(new Vector3(1f, 1f, 1f), colors[white]);
+        // Stems (the houses' walls, the fountain's, lamps' and bench legs) a clean light cream.
+        var stem = colors["Wall"];
+        Assert.True(stem.X >= 0.99f && stem.Y >= 0.94f && stem.Z is >= 0.8f and <= 0.9f, $"Wall {stem}");
+    }
+
+    [Fact]
+    public void EveryCapMaterialIsGlossyAndRimLitAndGlowIsTwiceAsBright()
+    {
+        // Each Cap* material of the model is in TownLook.Caps, which TownModels shades with the
+        // glossy band and rim (CapPinkInner is the inside of Millie's cat-ear chimneys, not a cap).
+        foreach (var name in ModelColors().Keys)
+            if (name.StartsWith("Cap") && name != "CapPinkInner")
+                Assert.True(TownLook.IsCap(name), name);
+        Assert.False(TownLook.IsCap("Wall"));
+        Assert.False(TownLook.IsCap("Spots"));
+        Assert.True(TownLook.CapGloss > 0f);
+        Assert.True(TownLook.CapRim > 0f);
+        // Glowing mushrooms (Glow: lamp bulbs, the street lamps' glowing spots, the lanterns) twice
+        // as bright as before (0.12 by day, 2.2 at night); the windows stay as they were.
+        Assert.Equal(2f * 0.12f, TownLook.GlowAt(0f), 4);
+        Assert.Equal(2f * 2.2f, TownLook.GlowAt(1f), 4);
+        Assert.Equal(0.12f * 0.7f, TownLook.WindowGlowAt(0f), 4);
+        Assert.Equal(2.2f * 0.7f, TownLook.WindowGlowAt(1f), 4);
+    }
+
+    [Fact]
+    public void ThingsThatAreNotMushroomsKeepTheirColors()
+    {
+        var colors = ModelColors();
+        // Cushions, the outfits in Abby's window and the berry jars used to share the caps'
+        // materials; they keep their old colors under their own.
+        var kept = new Dictionary<string, Vector3>
+        {
+            ["FabricPink"] = new(0.98f, 0.62f, 0.74f),
+            ["FabricYellow"] = new(0.98f, 0.8f, 0.3f),
+            ["FabricBlue"] = new(0.42f, 0.66f, 0.94f),
+            ["FabricOrange"] = new(0.98f, 0.56f, 0.24f),
+            ["Jar"] = new(0.99f, 0.98f, 0.96f),
+            ["WallWhite"] = new(0.97f, 0.97f, 0.95f),
+            ["WallPink"] = new(1.0f, 0.88f, 0.88f),
+            ["Stone"] = new(0.72f, 0.7f, 0.66f),
+            ["Wood"] = new(0.72f, 0.46f, 0.28f),
+            ["WoodDark"] = new(0.5f, 0.3f, 0.18f),
+            ["Leaf"] = new(0.42f, 0.74f, 0.36f),
+            ["Awning"] = new(0.98f, 0.5f, 0.58f),
+            ["DoorRed"] = new(0.82f, 0.32f, 0.26f),
+            ["Window"] = new(1.0f, 0.86f, 0.5f),
+            ["Glow"] = new(1.0f, 0.88f, 0.5f),
+            ["Water"] = new(0.46f, 0.8f, 0.98f),
+            ["PetalPink"] = new(1.0f, 0.6f, 0.72f),
+            ["Cross"] = new(0.92f, 0.18f, 0.2f),
+        };
+        foreach (var (name, color) in kept)
+            Assert.True(Vector3.Distance(color, colors[name]) < 1e-3f, $"{name} {colors[name]}");
+        Assert.Contains("FabricPink", ModelMaterials("FurnitureShop"));
+        Assert.Contains("FabricBlue", ModelMaterials("ClothingShop"));
+        Assert.Contains("Jar", ModelMaterials("FoodStall"));
+    }
+
     [Fact]
     public void KindsTownDoesNotDrawAreSkippedNotThrown()
     {

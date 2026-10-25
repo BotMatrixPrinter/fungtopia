@@ -15,12 +15,13 @@ tall), which are walked over.
 
 - `Contract/` — `Fungtopia.Town.Contract` (namespace `Fungtopia.Town`): `TownLights`.
 - `Core/` — `Fungtopia.Town.Core`: `TownModule`, the module's one `IModule`; `TownLayout`, the
-  placement list; `TownGround`, how each placement stands on the uneven ground.
+  placement list; `TownGround`, how each placement stands on the uneven ground; `TownLook`, the
+  mushroom caps' gloss and rim and how bright Glow and windows are.
 - `Godot/` — `Main.tscn` with `TownView` (draws the placements, lamps' lights), `TownModels`
   (loads `town.glb` at run time, toon materials); `Preview.tscn` with `TownPreview` (for
   screenshots); `Shaders/` (toon surface, ink outline).
 - `Models/` — `town.py`, the Blender script that builds and exports `town.glb` next to it.
-- `Tests/` — `TownTests.cs`: xUnit tests of `TownLayout` (its props are exactly the Map's Town props), of `town.glb` having an object for every placement (and the food stall's materials: wood, spotted cap, sign, food, steam, lanterns), of `TownGround` (bases never float over the ground nor sink deep, at many spots over the town, roads and the rough Deep Forest), and of `TownModule` with a fake `IMessageBus`.
+- `Tests/` — `TownTests.cs`: xUnit tests of `TownLayout` (its props are exactly the Map's Town props), of `town.glb` having an object for every placement (and the food stall's materials: wood, spotted cap, sign, food, steam, lanterns), of the vivid mushrooms (`town.glb`'s caps saturated and bright, spots pure white, stems light cream, every cap material glossy and rim-lit, Glow twice as bright, non-mushroom colors unchanged), of `TownGround` (bases never float over the ground nor sink deep, at many spots over the town, roads and the rough Deep Forest), and of `TownModule` with a fake `IMessageBus`.
 
 Test it with `./test.sh Town` from the repository root.
 
@@ -62,9 +63,21 @@ allocations per tick.
 `TownView` puts one copy of a `town.glb` object at each placement, turned by `Yaw` and scaled to the
 placement's size, standing where `TownGround.Fit` says (below). Big stems, foundations and basins
 (houses, the clinic, Abby's shop, the fountain, street lamps, planters: `HasRootFlare`) get a
-stone skirt from just above their highest ground widening down into the ground, so they look rooted. While `LampsLit` the lamp bulbs and windows glow (fading over 1.5 s) and each
+stone skirt from just above their highest ground widening down into the ground, so they look rooted. While `LampsLit` the lamp bulbs and windows glow (fading over 1.5 s; `TownLook`: Glow 0.24 by day
+and 4.4 at night, twice what it was so glowing mushrooms clearly glow, windows 0.084 and 1.54) and each
 street lamp has a warm `OmniLight3D` at its bulb (0.8 of its height), the food stall one among
 its lanterns (0.63 of its height); by day they are off. The sky and sun are DayNight's.
+
+### Vivid mushrooms
+
+The game's rule for every mushroom (Tony, 2026-10-25): caps in saturated, bright colors, white
+spots pure white, stems a clean light cream, a soft glossy band and a light rim on each cap, glowing
+mushrooms twice as bright; every other color stays. `TownModels` draws the `TownLook.Caps`
+materials (`Cap`, `CapPink`, `CapWhite`, `CapOrange`, `CapLilac`, `CapBlue`, `CapYellow`, `CapMint`)
+with the toon shader's `gloss` (`CapGloss`, a small specular band) and `rim_light` (`CapRim`), both 0
+on everything else. Cushions, the outfits in Abby's window and the berry jars have their own
+materials (`FabricPink`, `FabricYellow`, `FabricBlue`, `FabricOrange`, `Jar`), so they keep their
+colors.
 
 ## Ground
 
@@ -81,17 +94,22 @@ to it) and looks as tall as it is from the high side. Nothing floats, no cap sin
 writes `town.glb`; commit it with the script. Chunky mushroom buildings on stone foundations,
 toon-shaded with ink outlines, and no eyes or faces on anything:
 
-- **PlayerHouse** — the biggest: a red cap with cream spots, a round red door with a stone step,
+Cap colors (`town.py`): `Cap` cherry red (0.97, 0.1, 0.1), `CapPink` (1.0, 0.36, 0.64), `CapOrange`
+(1.0, 0.46, 0.06), `CapLilac` (0.68, 0.34, 1.0), `CapBlue` (0.18, 0.52, 1.0), `CapYellow` (1.0, 0.8,
+0.08), `CapMint` (0.26, 0.96, 0.72), `CapWhite` and `Spots` pure white; `Wall` (the stems) light cream
+(1.0, 0.95, 0.84).
+
+- **PlayerHouse** — the biggest: a cherry-red cap with white spots, a round red door with a stone step,
   a welcome mat, round windows with flower boxes, a chimney, a
   little mushroom mailbox.
-- **MillieHouse** — a pink cap with two chimneys shaped like cat ears, a round blue door.
+- **MillieHouse** — a hot-pink cap with two chimneys shaped like cat ears, a round blue door.
 - **Clinic** — white walls and a white cap with pale spots, a red cross on the cap's front, one
   standing on top and one over the arched door, and a little sign with a red cross by the path.
 - **FurnitureShop** — a wooden stall: counter, back shelves with cushions, a pink and cream
   striped awning with a scalloped edge, a sign board, two chairs and three mushroom lamps on display.
 - **Fountain** — a round stone basin of water, a spotted mushroom in the middle with water
   streaming from its rim.
-- **ClothingShop** — Abby's pastel boutique: a mint cap with white spots, pale pink walls and a
+- **ClothingShop** — Abby's boutique: a bright mint cap with white spots, pale pink walls and a
   shop front with a pink and white striped, scalloped awning, a lilac arched door, a big window
   with three little outfits on stands (a dress, a shirt with shorts, a sun hat and scarf), a round
   window, flower boxes, two little lanterns by the door, and a big clothes-hanger sign on the cap
@@ -101,7 +119,7 @@ toon-shaded with ink outlines, and no eyes or faces on anything:
   under the cap's front; on the planked counter two baskets of berry muffins, a steaming pot of
   soup (static steam puffs) and two pies, more pies and berry jars on the back shelf; four little
   lanterns (Glow) that light up at night with the street lamps.
-- **House0..House3** — orange, lilac, blue and yellow caps, round or arched doors, flower boxes,
+- **House0..House3** — bright orange, purple, blue and yellow caps, round or arched doors, flower boxes,
   two with chimneys.
 - **StreetLamp** (modelled 3.2 m, a glowing bulb under a spotted cap), **Bench** (on
   mushroom-stem legs), **Fence** (a 3.5 m picket segment, 0.8 m tall, a post at each end),

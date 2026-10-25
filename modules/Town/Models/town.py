@@ -9,7 +9,8 @@
 # origin (a little foundation below it, for uneven ground), its front (door, counter, seat)
 # toward Blender +Y (Godot -Z, a building's front at rotation 0). Chunky and cute; no eyes or
 # faces on anything (only creatures have them). Materials carry plain colors only; the game draws
-# them toon-shaded with ink outlines, and makes Glow (lamp bulbs) and Window light up at night.
+# them toon-shaded with ink outlines (the mushroom caps, vivid and saturated, with a glossy band and a
+# rim), and makes Glow (lamp bulbs, glowing caps and spots) and Window light up at night.
 import math
 import os
 
@@ -20,22 +21,22 @@ from mathutils import Matrix
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 COLORS = {
-    "Wall": (1.0, 0.93, 0.78),
+    "Wall": (1.0, 0.95, 0.84),
     "WallWhite": (0.97, 0.97, 0.95),
     "Stone": (0.72, 0.7, 0.66),
     "StoneDark": (0.56, 0.54, 0.52),
     "Wood": (0.72, 0.46, 0.28),
     "WoodDark": (0.5, 0.3, 0.18),
-    "Cap": (0.9, 0.26, 0.22),
-    "CapPink": (0.98, 0.62, 0.74),
+    "Cap": (0.97, 0.1, 0.1),
+    "CapPink": (1.0, 0.36, 0.64),
     "CapPinkInner": (1.0, 0.82, 0.86),
-    "CapWhite": (0.99, 0.98, 0.96),
-    "CapOrange": (0.98, 0.56, 0.24),
-    "CapLilac": (0.7, 0.56, 0.9),
-    "CapBlue": (0.42, 0.66, 0.94),
-    "CapYellow": (0.98, 0.8, 0.3),
+    "CapWhite": (1.0, 1.0, 1.0),
+    "CapOrange": (1.0, 0.46, 0.06),
+    "CapLilac": (0.68, 0.34, 1.0),
+    "CapBlue": (0.18, 0.52, 1.0),
+    "CapYellow": (1.0, 0.8, 0.08),
     "Gills": (0.96, 0.86, 0.7),
-    "Spots": (1.0, 0.97, 0.88),
+    "Spots": (1.0, 1.0, 1.0),
     "SpotsPale": (0.92, 0.9, 0.94),
     "Cross": (0.92, 0.18, 0.2),
     "DoorRed": (0.82, 0.32, 0.26),
@@ -59,7 +60,7 @@ COLORS = {
     "PetalBlue": (0.56, 0.7, 1.0),
     "PetalWhite": (1.0, 1.0, 0.97),
     "Soot": (0.24, 0.2, 0.22),
-    "CapMint": (0.66, 0.9, 0.82),
+    "CapMint": (0.26, 0.96, 0.72),
     "WallPink": (1.0, 0.88, 0.88),
     "DoorLilac": (0.76, 0.62, 0.92),
     "Display": (1.0, 0.95, 0.97),
@@ -71,6 +72,12 @@ COLORS = {
     "Soup": (0.96, 0.62, 0.26),
     "Pie": (0.92, 0.72, 0.42),
     "Steam": (0.97, 0.97, 1.0),
+    # Things that are not mushrooms but once shared the caps' colors (cushions, outfits, jars).
+    "FabricPink": (0.98, 0.62, 0.74),
+    "FabricYellow": (0.98, 0.8, 0.3),
+    "FabricBlue": (0.42, 0.66, 0.94),
+    "FabricOrange": (0.98, 0.56, 0.24),
+    "Jar": (0.99, 0.98, 0.96),
 }
 ORDER = list(COLORS)
 
@@ -394,7 +401,7 @@ def furniture_shop():
         p.add(box((w - 0.8, 0.6, 0.08), T(0, -d / 2 + 0.6, z), bevel=0.02), "WoodDark")
     # Little things on the back shelves: cushions, a stool, a pot.
     for i, x in enumerate((-2.4, -1.4, -0.4, 0.6, 1.6, 2.5)):
-        mat = ("Cushion", "CapPink", "CapYellow", "CapBlue", "Leaf", "CapOrange")[i]
+        mat = ("Cushion", "FabricPink", "FabricYellow", "FabricBlue", "Leaf", "FabricOrange")[i]
         p.add(sphere(0.2, T(x, -d / 2 + 0.6, 1.14 if i % 2 else 1.94), scale=(1.2, 1, 0.8), segments=12, rings=6), mat)
     # The counter at the front.
     p.add(box((w - 1.2, 0.7, 1.0), T(0, d / 2 - 0.55, 0.65), bevel=0.06), "Wood")
@@ -525,7 +532,7 @@ def outfit_stand(piece, matrix, kind, mat):
         piece.add(box((0.4, 0.18, 0.42), matrix @ T(0, 0, 0.8), bevel=0.07), mat)
         for side in (-1, 1):
             piece.add(box((0.2, 0.15, 0.13), matrix @ T(side * 0.26, 0, 0.92) @ R("Y", side * 30), bevel=0.05), mat)
-        piece.add(box((0.36, 0.17, 0.34), matrix @ T(0, 0, 0.42), bevel=0.06), "CapBlue")
+        piece.add(box((0.36, 0.17, 0.34), matrix @ T(0, 0, 0.42), bevel=0.06), "FabricBlue")
     else:
         # A sun hat on top of the pole with a scarf hanging below it.
         piece.add(cylinder(0.3, 0.04, matrix @ T(0, 0, 0.92), segments=24), mat)
@@ -556,7 +563,7 @@ def clothing_shop():
     for z in (wz0, wz1):
         p.add(box((wx1 - wx0 + 0.14, 0.16, 0.14), T((wx0 + wx1) / 2, front + 0.02, z), bevel=0.03), "Wood")
     p.add(box((wx1 - wx0, 0.5, 0.05), T((wx0 + wx1) / 2, front - 0.25, wz0 + 0.02), bevel=0.0), "Display")
-    for k, (kind, mat) in enumerate((("dress", "PetalPink"), ("shirt", "CapYellow"), ("hat", "AwningCream"))):
+    for k, (kind, mat) in enumerate((("dress", "PetalPink"), ("shirt", "FabricYellow"), ("hat", "AwningCream"))):
         x = wx0 + (k + 0.5) * (wx1 - wx0) / 3
         outfit_stand(p, T(x, front - 0.25, wz0 + 0.045) @ S(0.95, 0.95, 0.95), kind, mat)
     front_flower_box(p, (wx0 + wx1) / 2, front, wz0 - 0.3, wx1 - wx0 + 0.2, ("PetalPink", "PetalWhite", "PetalYellow"))
@@ -639,7 +646,7 @@ def food_stall():
     for x in (-1.2, 0.0, 1.2):
         pie(p, T(x, -d / 2 + 0.5, 1.535) @ S(0.8, 0.8, 0.8))
     for x in (-0.6, 0.6):
-        p.add(cylinder(0.12, 0.2, T(x, -d / 2 + 0.5, 1.64), segments=12, radius2=0.1), "CapWhite")
+        p.add(cylinder(0.12, 0.2, T(x, -d / 2 + 0.5, 1.64), segments=12, radius2=0.1), "Jar")
         p.add(cylinder(0.1, 0.05, T(x, -d / 2 + 0.5, 1.765), segments=12), "Berry")
     # The counter at the front, planked, and its top.
     cy = d / 2 - 0.5

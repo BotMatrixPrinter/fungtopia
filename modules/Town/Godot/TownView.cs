@@ -15,9 +15,6 @@ namespace Fungtopia.Town.View;
 /// </summary>
 public partial class TownView : Node3D, IModuleView
 {
-    /// <summary>How bright bulbs and windows glow by day (self light; the night value is <see cref="NightGlow"/>).</summary>
-    public const float DayGlow = 0.12f;
-    public const float NightGlow = 2.2f;
     private const float LampEnergy = 2.4f;
     private const float FadeSeconds = 1.5f;
     /// <summary>Where the bulb hangs, as a share of the lamp's height (2.62 m of the 3.2 m model).</summary>
@@ -79,9 +76,9 @@ public partial class TownView : Node3D, IModuleView
     private void Apply(float lit)
     {
         _lit = lit;
-        float glow = Mathf.Lerp(DayGlow, NightGlow, lit);
-        TownModels.Glow?.SetShaderParameter("self_light", glow);
-        TownModels.Window?.SetShaderParameter("self_light", glow * 0.7f);
+        // How bright bulbs, glowing caps and windows glow, day to night: TownLook.
+        TownModels.Glow?.SetShaderParameter("self_light", TownLook.GlowAt(lit));
+        TownModels.Window?.SetShaderParameter("self_light", TownLook.WindowGlowAt(lit));
         foreach (var light in _lights)
         {
             light.Visible = lit > 0f;
