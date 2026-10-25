@@ -11,7 +11,8 @@
 # Meters, feet at the origin, facing Blender +Y (Godot's -Z, forward, after the glTF export).
 # Separate objects, each with its pivot where it moves, so the game can animate them:
 #   Body (pivot at its middle), Head (pivot at the neck), LegFL / LegFR / LegBL / LegBR (pivot at
-#   the shoulder or hip), Tail (pivot at its root). The crow has Body, Head, WingL / WingR (pivot
+#   the shoulder or hip), Tail (pivot at its root), EarL / EarR (children of Head, pivot at the
+#   ear's base, so the ears can lie back). The crow has Body, Head, WingL / WingR (pivot
 #   at the shoulder), Tail, LegL / LegR (pivot at the hip).
 # Materials carry plain colors only; the game draws them toon-shaded with ink outlines.
 import math
@@ -30,9 +31,11 @@ COLORS = {
     "Mouth": (0.4, 0.12, 0.14),
     "Nose": (0.95, 0.5, 0.55),
     "Whisker": (0.3, 0.18, 0.16),
-    "Cap": (0.9, 0.2, 0.2),
-    "Spots": (1.0, 0.96, 0.9),
-    "Stem": (0.98, 0.92, 0.8),
+    # Mushrooms, vivid like every mushroom in the game: a pure cherry red cap, crisp white
+    # spots, a clean light cream stem (the game adds a glossy highlight and a rim light on caps).
+    "Cap": (0.93, 0.04, 0.05),
+    "Spots": (1.0, 1.0, 1.0),
+    "Stem": (1.0, 0.96, 0.87),
     # The cat.
     "CatFur": (1.0, 0.55, 0.22),
     "CatLight": (1.0, 0.93, 0.82),
@@ -159,11 +162,16 @@ class Part:
         m = Matrix.Translation(Vector(center) - self.pivot) @ rotation
         self._add(make, mat, m)
 
-    def build(self):
+    def build(self, parent=None):
+        """The mesh object, at its pivot; under parent (a built Part's object) when given."""
         obj = new_mesh_object(self.name, self.bm)
         for mat in self.materials:
             obj.data.materials.append(mat)
-        obj.location = self.pivot
+        if parent is None:
+            obj.location = self.pivot
+        else:
+            obj.parent = parent
+            obj.location = self.pivot - parent.location
         return obj
 
 
@@ -266,13 +274,16 @@ def cat():
             root = hc + Vector((side * 0.1, hr * 0.84, -0.05 + dz * 0.5))
             tip = root + Vector((side * 0.2, -0.03, dz * 1.6 + 0.01))
             head.capsule(mats["Whisker"], root, tip, 0.005, segments=6)
+    head_obj = head.build()
+    for name, side in (("EarL", -1), ("EarR", 1)):
         # The ears: little spotted mushroom caps on short stems, tipped outward.
         tilt = Matrix.Rotation(math.radians(side * 28), 4, "Y") @ Matrix.Rotation(math.radians(-8), 4, "X")
         base = hc + Vector((side * 0.13, -0.02, hr * 0.78))
+        ear = Part(name, base - (tilt @ Vector((0, 0, 0.03, 0))).to_3d())
         up = (tilt @ Vector((0, 0, 1, 0))).to_3d()
-        head.cone(mats["Stem"], base, 0.05, 0.045, 0.09, rotation=tilt, segments=16)
-        mushroom_cap(head, mats, base + up * 0.08, 0.11, 0.09, tilt=tilt, spots=5)
-    head.build()
+        ear.cone(mats["Stem"], base, 0.05, 0.045, 0.09, rotation=tilt, segments=16)
+        mushroom_cap(ear, mats, base + up * 0.08, 0.11, 0.09, tilt=tilt, spots=5)
+        ear.build(head_obj)
 
     # Tail: long, curving up and back, with a cream tip; pivot at its root.
     root = Vector((0, -0.29, 0.38))
@@ -326,13 +337,16 @@ def dog():
     for side in (-1, 1):
         head.sphere(mats["Blush"], hc + Vector((side * 0.16, hr * 0.68, -0.05)), (0.04, 0.018, 0.026),
                     rotation=Matrix.Rotation(math.radians(side * -40), 4, "Z"), segments=16, rings=8)
+    head_obj = head.build()
+    for name, side in (("EarL", -1), ("EarR", 1)):
         # Pointy ears, tipped out a little, with a darker inside.
         tilt = Matrix.Rotation(math.radians(side * 22), 4, "Y") @ Matrix.Rotation(math.radians(-6), 4, "X")
         base = hc + Vector((side * 0.13, -0.02, hr * 0.72))
-        head.cone(mats["DogFur"], base, 0.08, 0.008, 0.2, rotation=tilt, segments=20)
-        head.cone(mats["DogEar"], base + (tilt @ Vector((0, 0.035, 0.01, 0))).to_3d(), 0.05, 0.006, 0.15,
-                  rotation=tilt, segments=16)
-    head.build()
+        ear = Part(name, base)
+        ear.cone(mats["DogFur"], base, 0.08, 0.008, 0.2, rotation=tilt, segments=20)
+        ear.cone(mats["DogEar"], base + (tilt @ Vector((0, 0.035, 0.01, 0))).to_3d(), 0.05, 0.006, 0.15,
+                 rotation=tilt, segments=16)
+        ear.build(head_obj)
 
     # Tail: a short fluffy plume curling up; pivot at its root.
     root = Vector((0, -0.3, 0.42))

@@ -6,7 +6,7 @@ namespace Fungtopia.Pet.View;
 
 /// <summary>
 /// Draws the pet: the chosen pet's model placed between the last two fixed ticks, turned to face
-/// <see cref="PetState.Facing"/>, and animated from its motion, bites, flight and sitting; the
+/// <see cref="PetState.Facing"/>, and animated from its motion, dash and pounce, bites, flight and sitting; the
 /// model changes when another owned pet becomes active. Nothing is drawn before the game starts
 /// (the starter pet comes from the start screen).
 /// </summary>
@@ -67,7 +67,8 @@ public partial class PetView : Node3D, IModuleView
 
         var velocity = _pet.Velocity;
         float speed = MathF.Sqrt(velocity.X * velocity.X + velocity.Z * velocity.Z);
-        model.Animate((float)delta, speed, _pet.Sitting, _pet.SinceBite, _current.Attacking, _pet.Altitude);
+        model.Animate((float)delta, speed, _pet.Sitting, _pet.SinceBite, _current.Attacking, _pet.Altitude,
+            _pet.Dashing, _pet.Pouncing, _pet.PounceProgress);
     }
 
     private static Vector3 ToGodot(System.Numerics.Vector3 v) => new(v.X, v.Y, v.Z);

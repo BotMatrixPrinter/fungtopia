@@ -3,7 +3,7 @@
 The player's pets: the starter, a Mushroom Cat or a Mushroom Dog chosen on the start screen, and
 the Mushroom Crow adopted in Pet City. The active pet follows the player everywhere on the Map's walkable ground
 (the forest, the roads, Mushroom Town, Pet City, into the house with them), runs off to bite cute
-mushroom monsters near the player (the Crow flies about 2 m up beside the player and swoops down
+mushroom monsters near the player, dashes to the one the player aims the bow at and pounces on it (the Crow flies about 2 m up beside the player and swoops down
 to peck them), comes back, steers around giant mushroom trunks and buildings, follows the ground,
 and sits by the player while they are defeated. Owned pets that are not active stay at home.
 
@@ -15,7 +15,8 @@ and sits by the player while they are defeated. Owned pets that are not active s
 - `Models/` — `pets.py`, the Blender script that builds and exports `cat.glb`, `dog.glb` and
   `crow.glb` next to it.
 - `Tests/` — `PetModuleTests.cs`: xUnit tests of `PetModule` with a fake `IMessageBus`, and of
-  `dog.glb` (one smooth body and head without lumps, all its parts kept).
+  the models: `dog.glb` (one smooth body and head without lumps, all its parts kept), the ears as
+  their own parts, and the vivid mushroom colors of all three.
 
 Test it with `./test.sh Pet` from the repository root.
 
@@ -35,7 +36,7 @@ positive turns left; the direction of yaw `a` is `(-sin a, 0, -cos a)`.
 ## Core
 
 `PetModule` reads `Fungtopia.Player.PlayerState` and `TeleportPlayer` (Player Contract),
-`Fungtopia.Monsters.MonsterState`, `Fungtopia.StartScreen.GameStart` (StartScreen Contract),
+`Fungtopia.Monsters.MonsterState`, `Fungtopia.Bow.BowState` (Bow Contract), `Fungtopia.StartScreen.GameStart` (StartScreen Contract),
 `AdoptPet` and `SetActivePet`, `Fungtopia.Save.CollectSave` and `RestorePart` (Save Contract), publishes
 `Fungtopia.Monsters.HitMonster` (Monsters Contract), `Fungtopia.Save.SavePart`, and uses the Map's `Ground` (height,
 obstacles) and `Areas` (walkable ground) (Map Contract). Until the first `PlayerState` it waits
@@ -74,11 +75,27 @@ Each tick, for the active pet:
   there comes out to the player.
 - **Target.** With no target it picks the alive monster nearest to the player within 8 m of the
   player. It keeps that target while it is alive, published and within 10 m of the player.
+- **Aimed target.** A monster is aimed at when the latest `BowState.Target` (the crosshair's
+  point; a zero `Target` is no aim) lies on a living monster's sphere as the Bow module hits it
+  (center `Position` + (0, `Radius`, 0), radius `Radius`, within `AimTolerance` 0.1 m) and that
+  monster is within `AimRange` (15 m, horizontal) of the player. The pet takes it as its target at
+  once, switching from any other (`Aimed`), and keeps it while it is alive, published and within
+  15 m of the player, even after the crosshair moves off, until another monster is aimed at.
+  While the player is defeated aiming changes nothing.
 - **Biting.** It runs to the target at 7 m/s until their footprints are within 0.4 m, turns to
   it and bites with `HitMonster(MonsterId, Damage 1, no poison, Source 1)`: at once, then every
   1 s while in reach (the 1 s also counts while it is running). The Crow swoops down (6 m/s)
   once within 1.5 m of reach, pecks the same way only once at `PeckHeight` (0.4 m) or lower,
   every 0.8 s (`AttackInterval(kind)`), and climbs back up (3 m/s) when done.
+- **Dash and pounce.** To an aimed target the Cat and the Dog dash at `DashSpeed` (14 m/s,
+  `Dashing`), still steering round obstacles on walkable ground. Once their footprint is within
+  `PounceDistance` (1.8 m) of biting reach they pounce (`Pouncing`, `PounceProgress` 0..1): a leap
+  of `PounceSeconds` (0.35 s) along an arc `PounceHeight` (0.5 m) high (`Position` leaves the
+  ground), landing just inside biting reach (following the monster if it moves) facing it, with
+  the first bite on landing; then they bite every 1 s as above. One pounce per aimed target (none
+  when already in reach); if it chases the monster on afterwards it runs at the dash speed. The
+  Crow instead swoops at `AimSwoopSpeed` (12 m/s) in a straight line down to its peck (`Dashing`,
+  no leap), then pecks as above.
 - **Returning.** When the target is defeated, gone or left behind by the player, it picks the
   next one in range, else goes back to the player.
 - **Obstacles.** Looking up to 3 m ahead, it steers past the edge of the nearest obstacle
@@ -86,13 +103,14 @@ Each tick, for the active pet:
   side of it, and is pushed out of any it touches (a 0.35 m circle); it stays on walkable ground
   (`Areas.Walkable` with its radius), sliding along the edge.
 - **Ground.** Its feet are always on `Ground.HeightAt` (the Crow's `Altitude` above it).
-- **Defeated player.** While `PlayerState.Alive` is false it drops its target, goes to 1.1 m
+- **Defeated player.** While `PlayerState.Alive` is false it drops its target (an aimed one too), goes to 1.1 m
   from the player and sits there (`Sitting`; the Crow lands) until they come back.
 
 Helpers: `Started` (`GameStart` came or a started game was restored), `Kind` (the active pet), `Owned`,
 `Owns(kind)`, `PlaceAt(feet, facing)` puts the pet somewhere (on the ground, the Crow hovering).
-The view also reads `Velocity`, `Altitude`, `Sitting`, `SinceBite`, `Teleported` (also set on
-the tick after a teleport or switch between ticks) and `Ticks`; tests also read `TargetId`. No
+The view also reads `Velocity`, `Altitude`, `Sitting`, `SinceBite`, `Dashing`, `Pouncing`,
+`PounceProgress`, `Teleported` (also set on the tick after a teleport or switch between ticks) and
+`Ticks`; tests also read `TargetId` and `Aimed`. No
 allocations per tick (it keeps up to 128 `MonsterState`s a tick in a fixed array).
 
 ## View
@@ -104,11 +122,17 @@ model when it changes, placed between the last two ticks
 `PetModel` loads `cat.glb` or `dog.glb` at run time with `GltfDocument` from the file's bytes
 (so a fresh checkout runs without an editor import), replaces each material with the toon shader
 in the glTF material's color plus an ink outline, and animates the parts: a trot on diagonal leg
-pairs with a body bob, a pounce on each bite (a hop forward, head up, front paws reaching out),
-sitting (tipping back around the shoulders, hind legs tucked, front legs straight), a head that
-looks around while idle, and a tail that wags all the time, fastest while sitting or attacking.
-The Crow flaps its wings and bobs while flying, leans forward into a swoop, dips to peck on each
-hit, dangles its feet in the air, and folds its wings once landed.
+pairs with a body bob, the dash to an aimed monster as a fast, low, stretched gallop (front legs
+together then hind legs, body leaning forward and rocking, ears laid back, tail streaming out
+behind), the pounce onto it (a quick crouch, then a spring with the body stretched long, front
+paws reaching forward and hind legs kicking back, and a small squash on landing), a hop on each
+later bite (head up, front paws reaching out), sitting (tipping back around the shoulders, hind
+legs tucked, front legs straight), a head that looks around while idle, and a tail that wags all
+the time, fastest while sitting or attacking. The Crow flaps its wings and bobs while flying,
+leans forward into a swoop (hard, nose down, wings swept back, while dashing), dips to peck on
+each hit, dangles its feet in the air, and folds its wings once landed. Mushroom caps (`Cap`,
+and their `Spots`) get a soft glossy highlight and a light white rim light from the toon shader
+(`gloss`, `rim_light`).
 
 ## Models
 
@@ -116,12 +140,14 @@ hit, dangles its feet in the air, and folds its wings once landed.
 writes `cat.glb`, `dog.glb` and `crow.glb`; commit them with the script. The Mushroom Cat: a round orange
 body with soft stripes and a cream belly, a big round head with huge eyes with sparkles, a pink
 nose, a little "w" mouth, rosy cheeks, whiskers, two red spotted mushroom caps on short stems
-for ears, and a long curving tail with a cream tip. The Mushroom Dog: one smooth round brown body
+for ears (`EarL`/`EarR`), and a long curving tail with a cream tip. The Mushroom Dog: one smooth round brown body
 (no lumps) with a cream chest, a smooth round head a little wide at the cheeks, big eyes, a cream muzzle with
-a black nose and a little tongue, pointy ears, three small red spotted mushrooms growing on its
+a black nose and a little tongue, pointy ears (`EarL`/`EarR`), three small red spotted mushrooms growing on its
 back, a blue collar with a golden tag, and a curled fluffy tail. Separate objects with pivots
 where they move: `Body`, `Head` (neck), `LegFL`/`LegFR`/`LegBL`/`LegBR` (shoulder or hip),
-`Tail` (root). The Mushroom Crow: a round dark indigo body with a lilac belly and spots, a big
+`Tail` (root), and `EarL`/`EarR` (children of `Head`, pivot at the ear's base). Mushrooms are
+vivid, as everywhere in the game: caps a pure cherry red (`Cap`), spots crisp pure white (`Spots`),
+stems a clean light cream (`Stem`). The Mushroom Crow: a round dark indigo body with a lilac belly and spots, a big
 red spotted mushroom cap on its head with two little mushrooms beside it, huge sparkly eyes,
 rosy cheeks, an orange beak, small wings with lilac feather tips, a little tail fan and orange
 feet; parts `Body`, `Head` (neck), `WingL`/`WingR` (shoulder), `Tail`, `LegL`/`LegR` (hip).
@@ -131,4 +157,6 @@ Feet at the origin, facing -Z in Godot.
 
 `./screenshot.sh modules/Pet/Godot/Preview.tscn` shows all three pets (the Crow hovering above
 the others); the environment variable `PET_PREVIEW` picks the pose: `front` (default), `side`,
-`trot`, `sit` or `pounce`; `crow` shows the Crow alone close up, flying, and `crow-peck` pecking.
+`trot`, `sit`, `pounce` (the hop of a bite), `dash` (galloping to an aimed monster, the Crow
+swooping), `crouch` and `leap` (the start and the middle of the pounce onto it); `crow` shows the
+Crow alone close up, flying, `crow-peck` pecking and `crow-dash` swooping.

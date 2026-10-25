@@ -2,6 +2,7 @@ using System;
 using System.Numerics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Fungtopia.Bow;
 using Fungtopia.Map;
 using Fungtopia.Monsters;
 using Fungtopia.Player;
@@ -17,13 +18,14 @@ namespace Fungtopia.Pet;
 /// <see cref="AdoptPet"/> (the Mushroom Crow). Only the active pet is out with the player: it
 /// follows them at about 2 m (the Crow hovers about 2 m up beside them), catches up when far and
 /// appears beside them when over 30 m away or when they are teleported; goes for the nearest
-/// alive monster within 8 m of the player, bites it every second (the Crow swoops down and pecks
-/// every 0.8 s) and comes back; runs around obstacles on the Map's walkable ground; sits by the
+/// alive monster within 8 m of the player, or the one the player aims the bow at within 15 m
+/// (dashing to it and finishing with a pounce), bites it every second (the Crow swoops down and
+/// pecks every 0.8 s) and comes back; runs around obstacles on the Map's walkable ground; sits by the
 /// defeated player. Publishes <see cref="PetState"/> and <see cref="OwnedPets"/> every tick and
 /// <see cref="HitMonster"/> for each bite or peck. Saves the owned and active pets in the "Pet"
 /// part of a save game (<see cref="CollectSave"/>, <see cref="RestorePart"/>).
 /// </summary>
-public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageHandler<MonsterState>,
+public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageHandler<MonsterState>, IMessageHandler<BowState>,
     IMessageHandler<TeleportPlayer>, IMessageHandler<AdoptPet>, IMessageHandler<SetActivePet>,
     IMessageHandler<GameStart>, IMessageHandler<CollectSave>, IMessageHandler<RestorePart>
 {
@@ -79,6 +81,20 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
     public const float SwoopSpeed = 6f;
     /// <summary>The Crow starts swooping down when this much farther from its target than biting reach, meters.</summary>
     public const float SwoopStart = 1.5f;
+    /// <summary>A monster the player aims at within this horizontal distance of them becomes the target; it is kept while within it.</summary>
+    public const float AimRange = 15f;
+    /// <summary>How far off a monster's sphere the crosshair's point may be and still aim at it, meters.</summary>
+    public const float AimTolerance = 0.1f;
+    /// <summary>Running speed of the Cat and the Dog toward an aimed monster, meters per second.</summary>
+    public const float DashSpeed = 14f;
+    /// <summary>Speed of the Crow's straight swoop to an aimed monster, meters per second.</summary>
+    public const float AimSwoopSpeed = 12f;
+    /// <summary>The Cat and the Dog pounce when their footprint is this much farther from the monster than biting reach, meters.</summary>
+    public const float PounceDistance = 1.8f;
+    /// <summary>How long a pounce lasts, seconds.</summary>
+    public const float PounceSeconds = 0.35f;
+    /// <summary>The top of the pounce's arc above the ground, meters.</summary>
+    public const float PounceHeight = 0.5f;
 
     private IMessageBus? _bus;
     private Vector3 _playerPosition;
@@ -95,6 +111,15 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
     private Vector2 _xz;
     /// <summary>Appeared beside the player between ticks (a teleport, a pet switch): the next tick reports it.</summary>
     private bool _teleportPending;
+    /// <summary>The crosshair's point from the latest <see cref="BowState"/>, if one came since the last tick.</summary>
+    private Vector3 _aimPoint;
+    private bool _hasAim;
+    /// <summary>The target was aimed at (dash to it, pounce once, keep it within <see cref="AimRange"/>).</summary>
+    private bool _aimed;
+    /// <summary>The pounce on the aimed target is done (or was not needed): no other one until another monster is aimed at.</summary>
+    private bool _pounced;
+    private int _pounceTargetId = -1;
+    private Vector2 _pounceFrom, _pounceTo;
 
     /// <summary>Where a save part that cannot be restored is reported (one line each).</summary>
     public Action<string> Log { get; set; } = Console.WriteLine;
@@ -136,6 +161,18 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
 
     public bool Attacking => TargetId >= 0;
 
+    /// <summary>Whether its target is one the player aimed at (see <see cref="AimRange"/>).</summary>
+    public bool Aimed => TargetId >= 0 && _aimed;
+
+    /// <summary>Running (the Crow: swooping) fast to an aimed target this tick.</summary>
+    public bool Dashing { get; private set; }
+
+    /// <summary>In the leap of a pounce onto an aimed target (the Cat and the Dog).</summary>
+    public bool Pouncing { get; private set; }
+
+    /// <summary>How far through its pounce it is, 0 to 1 (0 when not pouncing).</summary>
+    public float PounceProgress { get; private set; }
+
     /// <summary>Sitting by the defeated player (the Crow lands to sit).</summary>
     public bool Sitting { get; private set; }
 
@@ -160,6 +197,7 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
         _bus = bus;
         bus.Subscribe<PlayerState>(this);
         bus.Subscribe<MonsterState>(this);
+        bus.Subscribe<BowState>(this);
         bus.Subscribe<TeleportPlayer>(this);
         bus.Subscribe<AdoptPet>(this);
         bus.Subscribe<SetActivePet>(this);
@@ -198,6 +236,14 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
             _monsters[_monsterCount++] = message;
     }
 
+    /// <summary>The crosshair's point: a monster on it becomes the target (see <see cref="AimRange"/>).</summary>
+    public void Handle(in BowState message)
+    {
+        _aimPoint = message.Target;
+        // Zero until the bow has a player: no aim.
+        _hasAim = message.Target != Vector3.Zero;
+    }
+
     /// <summary>The player is moved at once (fast travel, the house door, the clinic): the pet comes along.</summary>
     public void Handle(in TeleportPlayer message)
     {
@@ -208,7 +254,7 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
         _hasPlayer = true;
         if (!Started)
             return;
-        TargetId = -1;
+        DropTarget();
         Sitting = false;
         TeleportBeside(_playerPosition);
         _teleportPending = true;
@@ -265,7 +311,7 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
         if (kind == Kind)
             return;
         Kind = kind;
-        TargetId = -1;
+        DropTarget();
         Sitting = false;
         _biteCooldown = 0f;
         SinceBite = 100f;
@@ -339,7 +385,7 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
         _ownsDog = data.Dog;
         _ownsCrow = data.Crow;
         Kind = kind;
-        TargetId = -1;
+        DropTarget();
         Sitting = false;
         _biteCooldown = 0f;
         SinceBite = 100f;
@@ -366,6 +412,7 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
         if (!Started)
         {
             _monsterCount = 0;
+            _hasAim = false;
             return;
         }
         SinceBite += dt;
@@ -373,11 +420,13 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
             _biteCooldown -= dt;
 
         Vector3 start = Position;
+        Dashing = false;
         if (_hasPlayer)
             Think(dt);
         Velocity = Teleported || dt <= 0f ? Vector3.Zero : (Position - start) / dt;
 
         _monsterCount = 0; // the Monsters module publishes every monster again next tick
+        _hasAim = false; // and the Bow module its aim
         State = MakeState();
         _bus.Publish(State);
         var owned = Owned;
@@ -393,7 +442,7 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
 
         if (!_playerAlive)
         {
-            TargetId = -1;
+            DropTarget();
             _following = false;
             if (!Sitting)
                 Sitting = !MoveToward(player, SitDistance, Speed(Flat(Position, player) - SitDistance), dt);
@@ -406,25 +455,47 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
         Sitting = false;
 
         ChooseTarget(player);
+        if (Pouncing)
+        {
+            Pounce(dt);
+            _following = false;
+            return;
+        }
         if (TargetId >= 0)
         {
             ref readonly var m = ref FindMonster(TargetId);
             float reach = m.Radius + Radius + BiteReach;
-            if (Flat(Position, m.Position) > reach)
-                MoveToward(m.Position, reach - 0.1f, AttackSpeed, dt);
             float gap = Flat(Position, m.Position);
+            if (_aimed && !crow && !_pounced)
+            {
+                // Dash in and pounce from about PounceDistance out (no pounce when already in reach).
+                if (gap > reach && gap <= reach + PounceDistance)
+                {
+                    StartPounce(in m);
+                    Pounce(dt);
+                    _following = false;
+                    return;
+                }
+                if (gap <= reach)
+                    _pounced = true;
+            }
+            if (gap > reach || (_aimed && crow && Altitude > PeckHeight + 1e-3f))
+            {
+                if (_aimed && crow)
+                    SwoopToward(in m, reach, dt);
+                else
+                    MoveToward(m.Position, reach - 0.1f, _aimed ? DashSpeed : AttackSpeed, dt);
+                Dashing = _aimed;
+            }
+            gap = Flat(Position, m.Position);
             // The Crow swoops down as it closes in and pecks once it is low enough.
-            if (crow)
+            if (crow && !Dashing)
                 Fly(gap <= reach + SwoopStart ? PeckHeight : HoverHeight, dt);
             if (gap <= reach)
             {
                 TurnToward(Yaw(m.Position - Position), dt);
                 if (_biteCooldown <= 1e-4f && (!crow || Altitude <= PeckHeight + 1e-3f))
-                {
-                    _biteCooldown = AttackInterval(Kind);
-                    SinceBite = 0f;
-                    _bus!.Publish(new HitMonster(m.MonsterId, BiteDamage, 0f, 0f, BiteSource));
-                }
+                    Bite(in m);
             }
             _following = false;
             return;
@@ -450,6 +521,93 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
             TurnToward(crow ? _playerFacing : Yaw(player - Position), dt * 0.4f);
     }
 
+    private void Bite(in MonsterState m)
+    {
+        _biteCooldown = AttackInterval(Kind);
+        SinceBite = 0f;
+        _bus!.Publish(new HitMonster(m.MonsterId, BiteDamage, 0f, 0f, BiteSource));
+    }
+
+    /// <summary>Forgets the target and any aim; a pounce in the air is cut short (the caller puts the pet back down).</summary>
+    private void DropTarget()
+    {
+        TargetId = -1;
+        _aimed = false;
+        _pounced = false;
+        Pouncing = false;
+        PounceProgress = 0f;
+        _pounceTargetId = -1;
+    }
+
+    /// <summary>Where a pounce on <paramref name="m"/> from <paramref name="from"/> lands: just inside biting reach, on the near side.</summary>
+    private static Vector2 Landing(in MonsterState m, Vector2 from)
+    {
+        var center = new Vector2(m.Position.X, m.Position.Z);
+        var away = from - center;
+        float d = away.Length();
+        away = d > 1e-4f ? away / d : Vector2.UnitY;
+        return center + away * (m.Radius + Radius + BiteReach - 0.05f);
+    }
+
+    private void StartPounce(in MonsterState m)
+    {
+        Pouncing = true;
+        _pounced = true;
+        PounceProgress = 0f;
+        _pounceTargetId = m.MonsterId;
+        _pounceFrom = _xz;
+        _pounceTo = Landing(in m, _xz);
+    }
+
+    /// <summary>
+    /// The leap: along an arc <see cref="PounceHeight"/> high over <see cref="PounceSeconds"/>, to
+    /// biting reach of the monster (followed if it moves), landing facing it with the first bite.
+    /// </summary>
+    private void Pounce(float dt)
+    {
+        int i = _pounceTargetId == TargetId ? IndexOf(_pounceTargetId) : -1;
+        if (i >= 0)
+            _pounceTo = Landing(in _monsters[i], _pounceFrom);
+        PounceProgress = MathF.Min(1f, PounceProgress + dt / PounceSeconds);
+        float p = PounceProgress;
+        var next = Vector2.Lerp(_pounceFrom, _pounceTo, p);
+        ResolveCollisions(ref next);
+        if (Allowed(_xz, next))
+            _xz = next;
+        Altitude = 4f * PounceHeight * p * (1f - p);
+        var to = _pounceTo - _xz;
+        if (i >= 0)
+            to = new Vector2(_monsters[i].Position.X, _monsters[i].Position.Z) - _xz;
+        if (to.LengthSquared() > 1e-8f)
+            TurnToward(Yaw(new Vector3(to.X, 0f, to.Y)), dt);
+        if (p >= 1f)
+        {
+            Altitude = 0f;
+            Pouncing = false;
+            PounceProgress = 0f;
+            if (i >= 0)
+            {
+                ref readonly var m = ref _monsters[i];
+                Facing = WrapAngle(Yaw(m.Position - new Vector3(_xz.X, 0f, _xz.Y)));
+                Bite(in m);
+            }
+        }
+        SetPosition();
+    }
+
+    /// <summary>The Crow's swoop to an aimed monster: straight down to its peck, at <see cref="AimSwoopSpeed"/>.</summary>
+    private void SwoopToward(in MonsterState m, float reach, float dt)
+    {
+        float across = MathF.Max(0f, Flat(Position, m.Position) - (reach - 0.1f));
+        float down = MathF.Max(0f, Altitude - PeckHeight);
+        float length = MathF.Sqrt(across * across + down * down);
+        if (length < 1e-4f)
+            return;
+        MoveToward(m.Position, reach - 0.1f, AimSwoopSpeed * across / length, dt);
+        Altitude -= MathF.Min(down, AimSwoopSpeed * dt * down / length);
+        SetPosition();
+    }
+
     /// <summary>Climbs or swoops toward <paramref name="height"/> above the ground (the Crow; others stay on it).</summary>
     private void Fly(float height, float dt)
     {
@@ -461,15 +619,28 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
         SetPosition();
     }
 
-    /// <summary>Keeps a target while it is alive and near the player; else picks the nearest one to the player.</summary>
+    /// <summary>
+    /// Takes a monster the player aims at at once; else keeps a target while it is alive and near
+    /// the player (an aimed one within <see cref="AimRange"/>); else picks the nearest one to the player.
+    /// </summary>
     private void ChooseTarget(Vector3 player)
     {
+        int aimed = AimedMonster(player);
+        if (aimed >= 0 && !(_aimed && aimed == TargetId))
+        {
+            TargetId = aimed;
+            _aimed = true;
+            _pounced = false;
+            return;
+        }
         if (TargetId >= 0)
         {
             int i = IndexOf(TargetId);
-            if (i >= 0 && _monsters[i].Alive && Flat(_monsters[i].Position, player) <= GiveUpRange)
+            if (i >= 0 && _monsters[i].Alive && Flat(_monsters[i].Position, player) <= (_aimed ? AimRange : GiveUpRange))
                 return;
             TargetId = -1;
+            _aimed = false;
+            _pounced = false;
         }
         float best = AttackRange;
         for (int i = 0; i < _monsterCount; i++)
@@ -484,6 +655,33 @@ public sealed class PetModule : IModule, IMessageHandler<PlayerState>, IMessageH
                 TargetId = m.MonsterId;
             }
         }
+    }
+
+    /// <summary>
+    /// The living monster within <see cref="AimRange"/> of the player whose sphere (as the Bow
+    /// module hits it: center <c>Position</c> + (0, Radius, 0), radius <c>Radius</c>) the
+    /// crosshair's point lies on, within <see cref="AimTolerance"/>; the closest one to it, or -1.
+    /// </summary>
+    private int AimedMonster(Vector3 player)
+    {
+        if (!_hasAim)
+            return -1;
+        int found = -1;
+        float best = AimTolerance;
+        for (int i = 0; i < _monsterCount; i++)
+        {
+            ref readonly var m = ref _monsters[i];
+            if (!m.Alive || Flat(m.Position, player) > AimRange)
+                continue;
+            var center = m.Position + new Vector3(0f, m.Radius, 0f);
+            float off = MathF.Abs(Vector3.Distance(_aimPoint, center) - m.Radius);
+            if (off <= best)
+            {
+                best = off;
+                found = m.MonsterId;
+            }
+        }
+        return found;
     }
 
     private int IndexOf(int monsterId)

@@ -6,8 +6,10 @@ namespace Fungtopia.Pet.View;
 /// <summary>
 /// A stand-alone scene showing the Mushroom Cat, the Mushroom Dog and the Mushroom Crow (hovering
 /// above them) on a patch of grass, for screenshots: <c>./screenshot.sh modules/Pet/Godot/Preview.tscn</c>.
-/// The environment variable PET_PREVIEW picks the pose: "front" (default), "side", "trot", "sit"
-/// or "pounce"; "crow" shows the Crow alone close up, flying, and "crow-peck" pecking.
+/// The environment variable PET_PREVIEW picks the pose: "front" (default), "side", "trot", "sit",
+/// "pounce" (the hop of a bite), "dash" (galloping to an aimed monster, the Crow swooping),
+/// "crouch" and "leap" (the start and the middle of the pounce onto it); "crow" shows the Crow
+/// alone close up, flying, "crow-peck" pecking and "crow-dash" swooping.
 /// </summary>
 public partial class PetPreview : Node3D
 {
@@ -70,14 +72,14 @@ public partial class PetPreview : Node3D
         }
 
         _models = new[] { PetModel.Create(PetKind.Cat), PetModel.Create(PetKind.Dog), PetModel.Create(PetKind.Crow) };
-        bool side = _pose is "side" or "trot" or "pounce";
+        bool side = _pose is "side" or "trot" or "pounce" or "dash" or "crouch" or "leap";
         for (int i = 0; i < _models.Length; i++)
         {
             AddChild(_models[i]);
             // Front: turned toward the camera; side: facing right, showing their profiles. The
             // crow hovers between and above the other two.
             float yaw = side ? -Mathf.Pi * 0.5f - 0.35f : Mathf.Pi + (i == 0 ? -0.4f : i == 1 ? 0.4f : 0f);
-            var at = i == 2 ? new Vector3(0f, 0.95f, -0.35f) : new Vector3(i == 0 ? -0.55f : 0.55f, 0f, 0f);
+            var at = i == 2 ? new Vector3(0f, 0.95f, -0.35f) : new Vector3(i == 0 ? -0.55f : 0.55f, _pose == "leap" ? 0.5f : 0f, 0f);
             _models[i].Transform = new Transform3D(new Basis(Vector3.Up, yaw), at);
         }
         camera.LookAtFromPosition(new Vector3(0f, 1.1f, 3.2f), new Vector3(0f, 0.5f, 0f), Vector3.Up);
@@ -96,6 +98,11 @@ public partial class PetPreview : Node3D
                 model.Animate(dt, 0f, false, 0.12f, true, altitude);
                 continue;
             }
+            if (model.Kind == PetKind.Crow && _pose is "crow-dash" or "dash")
+            {
+                model.Animate(dt, 12f, false, 100f, true, altitude, dashing: true);
+                continue;
+            }
             if (model.Kind == PetKind.Crow)
             {
                 model.Animate(dt, _pose == "trot" ? 4f : 0f, false, _pose == "pounce" ? 0.12f : 100f, _pose == "pounce", altitude);
@@ -112,6 +119,16 @@ public partial class PetPreview : Node3D
                 case "pounce":
                     // Caught near the top of a pounce.
                     model.Animate(dt, 0f, false, 0.16f, true);
+                    break;
+                case "dash":
+                    model.Animate(dt, 14f, false, 100f, true, dashing: true);
+                    break;
+                case "crouch":
+                    model.Animate(dt, 0f, false, 100f, true, pouncing: true, pounceProgress: 0.06f);
+                    break;
+                case "leap":
+                    // The middle of the leap, lifted to its height on the arc (0.5 m at the top).
+                    model.Animate(dt, 0f, false, 100f, true, pouncing: true, pounceProgress: 0.45f);
                     break;
                 default:
                     model.Animate(dt, 0f, false, 100f, false);

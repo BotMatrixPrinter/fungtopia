@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Numerics;
+using Fungtopia.Bow;
 using Fungtopia.Map;
 using Fungtopia.Monsters;
 using Fungtopia.Player;
@@ -68,6 +69,8 @@ public class PetModuleTests
     private readonly PetModule _pet = new();
     private PlayerState _player;
     private readonly List<MonsterState> _monsters = new();
+    /// <summary>The Bow module's state published each tick, if any (its Target is the crosshair's point).</summary>
+    private BowState? _bow;
     private long _tick;
 
     public PetModuleTests()
@@ -94,6 +97,8 @@ public class PetModuleTests
         _bus.Publish(_player);
         foreach (var m in _monsters)
             _bus.Publish(m);
+        if (_bow is BowState bow)
+            _bus.Publish(bow);
         _pet.Tick(new TickContext(_tick++, Step));
     }
 
@@ -476,6 +481,322 @@ public class PetModuleTests
         Run(3.0);
         Assert.Equal(2, _pet.TargetId);
         Assert.Equal(2, _bus.Hits[^1].Hit.MonsterId);
+    }
+
+    // ---- Aiming: the monster the player aims at, the dash and the pounce ----
+
+    /// <summary>The crosshair on a monster's sphere as the Bow module hits it: its top (center Position + (0, Radius, 0)).</summary>
+    private static BowState AimAt(MonsterState m) => new(0f, 0, m.Position + new Vector3(0f, 2f * m.Radius, 0f));
+
+    /// <summary>The crosshair on the ground at (x, z), on no monster.</summary>
+    private static BowState AimAtGround(Vector3 at) => new(0f, 0, OnGround(at) + new Vector3(0f, 0.001f, 0f));
+
+    private float Gap(MonsterState m) => Flat(_pet.Position, m.Position) - m.Radius - PetModule.Radius;
+
+    private float FlatSpeed => new Vector2(_pet.Velocity.X, _pet.Velocity.Z).Length();
+
+    [Fact]
+    public void AnAimedMonsterBecomesTheTargetAtOnceAndIsKeptAfterTheCrosshairMovesOff()
+    {
+        _pet.PlaceAt(Middle + new Vector3(2f, 0f, 0f));
+        var near = Monster(1, Middle + new Vector3(-3f, 0f, 0f));
+        // 12 m from the player: beyond the 8 m of automatic targeting, within the 15 m of aiming.
+        var far = Monster(2, Middle + new Vector3(0f, 0f, 12f), radius: 0.6f);
+        _monsters.Add(near);
+        _monsters.Add(far);
+        TickOnce();
+        Assert.Equal(1, _pet.TargetId);
+        Assert.False(_pet.Aimed);
+
+        // Anywhere on its sphere (here its side, 0.08 m out), not just its top.
+        _bow = new BowState(0.5f, 0, far.Position + new Vector3(far.Radius + 0.08f, far.Radius, 0f));
+        TickOnce();
+        Assert.Equal(2, _pet.TargetId);
+        Assert.True(_pet.Aimed);
+        Assert.True(_bus.States[^1].Attacking);
+
+        // The crosshair moves off to the ground: still the aimed monster, though the other is nearer.
+        _bow = AimAtGround(Middle + new Vector3(5f, 0f, 5f));
+        Run(1.0);
+        Assert.Equal(2, _pet.TargetId);
+        // Without any bow message at all it keeps it too.
+        _bow = null;
+        Run(0.5);
+        Assert.Equal(2, _pet.TargetId);
+
+        // Aiming at another monster switches to it at once.
+        _bow = AimAt(near);
+        TickOnce();
+        Assert.Equal(1, _pet.TargetId);
+        Assert.True(_pet.Aimed);
+    }
+
+    [Fact]
+    public void AnAimedTargetIsKeptWithin15MetersAndDroppedWhenFartherDefeatedOrGone()
+    {
+        _pet.PlaceAt(Middle + new Vector3(2f, 0f, 0f));
+        var m = Monster(4, Middle + new Vector3(0f, 0f, 9f));
+        _monsters.Add(m);
+        _bow = AimAt(m);
+        TickOnce();
+        _bow = null;
+        Assert.Equal(4, _pet.TargetId);
+        // Beyond the 10 m an automatic target is given up at, still within 15 m: kept.
+        _monsters[0] = m = Monster(4, Middle + new Vector3(0f, 0f, 14.5f));
+        Run(0.5);
+        Assert.Equal(4, _pet.TargetId);
+        // Over 15 m from the player: dropped, and not taken again automatically.
+        _monsters[0] = m = Monster(4, Middle + new Vector3(0f, 0f, 15.5f));
+        TickOnce();
+        Assert.Equal(-1, _pet.TargetId);
+
+        // Defeated: dropped.
+        _monsters[0] = m = Monster(4, Middle + new Vector3(0f, 0f, 12f));
+        _bow = AimAt(m);
+        TickOnce();
+        _bow = null;
+        Assert.Equal(4, _pet.TargetId);
+        _monsters[0] = Monster(4, m.Position, alive: false);
+        TickOnce();
+        Assert.Equal(-1, _pet.TargetId);
+
+        // No longer published: dropped.
+        _monsters[0] = m;
+        _bow = AimAt(m);
+        TickOnce();
+        _bow = null;
+        Assert.Equal(4, _pet.TargetId);
+        _monsters.Clear();
+        TickOnce();
+        Assert.Equal(-1, _pet.TargetId);
+    }
+
+    [Fact]
+    public void OnlyALivingMonsterWithin15MetersWithTheCrosshairOnItsSphereIsAimedAt()
+    {
+        _pet.PlaceAt(Middle + new Vector3(2f, 0f, 0f));
+        var tooFar = Monster(1, Middle + new Vector3(0f, 0f, 15.5f));
+        var dead = Monster(2, Middle + new Vector3(0f, 0f, 10f), alive: false);
+        var missed = Monster(3, Middle + new Vector3(10f, 0f, 0f), radius: 0.5f);
+        _monsters.Add(tooFar);
+        _monsters.Add(dead);
+        _monsters.Add(missed);
+        foreach (var aim in new[]
+        {
+            AimAt(tooFar),
+            AimAt(dead),
+            // 0.2 m above the top of its sphere, and on the ground beside it.
+            new BowState(0f, 0, missed.Position + new Vector3(0f, 1.2f, 0f)),
+            AimAtGround(missed.Position + new Vector3(0.8f, 0f, 0f)),
+        })
+        {
+            _bow = aim;
+            Run(0.2);
+            Assert.Equal(-1, _pet.TargetId);
+            Assert.False(_pet.Dashing);
+        }
+        // 0.08 m above the top: within the 0.1 m allowed.
+        _bow = new BowState(0f, 0, missed.Position + new Vector3(0f, 1.08f, 0f));
+        TickOnce();
+        Assert.Equal(3, _pet.TargetId);
+    }
+
+    [Fact]
+    public void AimingChangesNothingWhileThePlayerIsDefeated()
+    {
+        _pet.PlaceAt(Middle + new Vector3(4f, 0f, 0f));
+        var m = Monster(1, Middle + new Vector3(-3f, 0f, 0f));
+        _monsters.Add(m);
+        _player = PlayerAt(Middle, alive: false);
+        _bow = AimAt(m);
+        Run(3.0);
+        Assert.True(_pet.Sitting);
+        Assert.Equal(-1, _pet.TargetId);
+        Assert.False(_pet.Dashing);
+        Assert.False(_pet.Pouncing);
+        Assert.Empty(_bus.Hits);
+        AssertOnGround();
+    }
+
+    [Theory]
+    [InlineData(PetKind.Cat)]
+    [InlineData(PetKind.Dog)]
+    public void DashesToAnAimedMonsterAt14MetersASecondAndPouncesOntoItWithTheFirstBite(PetKind kind)
+    {
+        if (kind == PetKind.Dog)
+            _bus.Publish(new AdoptPet(PetKind.Dog));
+        _pet.PlaceAt(Middle + new Vector3(2f, 0f, 0f), facing: 0f);
+        var m = Monster(9, Middle + new Vector3(-10f, 0f, 3f), radius: 0.5f);
+        _monsters.Add(m);
+        _bow = AimAt(m);
+        TickOnce();
+        _bow = AimAtGround(Middle); // the crosshair moves off at once
+
+        var dashSpeeds = new List<float>();
+        long pounceStart = -1, landed = -1;
+        float gapAtPounce = 0f, highest = 0f;
+        var progress = new List<float>();
+        for (int i = 0; i < 240 && landed < 0; i++)
+        {
+            bool wasPouncing = _pet.Pouncing;
+            int hits = _bus.Hits.Count;
+            float gapBefore = Gap(m);
+            TickOnce();
+            if (_pet.Dashing)
+            {
+                Assert.False(_pet.Pouncing);
+                AssertOnGround();
+                dashSpeeds.Add(FlatSpeed);
+            }
+            if (_pet.Pouncing)
+            {
+                if (!wasPouncing)
+                {
+                    pounceStart = _tick - 1;
+                    gapAtPounce = gapBefore;
+                }
+                progress.Add(_pet.PounceProgress);
+                highest = MathF.Max(highest, _pet.Position.Y - Ground.HeightAt(_pet.Position.X, _pet.Position.Z));
+                Assert.Equal(hits, _bus.Hits.Count); // no bite in the air
+            }
+            else if (wasPouncing)
+            {
+                landed = _tick - 1;
+                // The first bite comes on landing.
+                Assert.Single(_bus.Hits);
+                Assert.Equal(landed, _bus.Hits[0].Tick);
+            }
+        }
+        Assert.True(landed > 0, "never landed a pounce");
+
+        // The dash: 14 m/s (twice the 7 of an automatic target).
+        Assert.NotEmpty(dashSpeeds);
+        Assert.InRange(dashSpeeds.Max(), PetModule.DashSpeed - 0.05f, PetModule.DashSpeed + 0.05f);
+        Assert.True(dashSpeeds.Count(v => v > PetModule.DashSpeed - 0.5f) > dashSpeeds.Count / 2);
+        // It pounces from about 1.8 m beyond biting reach (one tick of a 14 m/s dash is 0.23 m).
+        Assert.InRange(gapAtPounce - PetModule.BiteReach, PetModule.PounceDistance - 0.25f, PetModule.PounceDistance + 0.01f);
+        // A 0.35 s leap along a 0.5 m arc, its progress going 0 to 1.
+        Assert.InRange((landed - pounceStart) * Step, PetModule.PounceSeconds - 1.5 * Step, PetModule.PounceSeconds + 1.5 * Step);
+        Assert.InRange(highest, 0.45f, 0.51f);
+        for (int i = 1; i < progress.Count; i++)
+            Assert.True(progress[i] > progress[i - 1]);
+        Assert.All(progress, p => Assert.InRange(p, 0f, 1f));
+        Assert.False(_pet.Pouncing);
+        Assert.Equal(0f, _pet.PounceProgress);
+
+        // Landed at biting reach, on the ground, facing the monster.
+        AssertOnGround();
+        Assert.InRange(Gap(m), PetModule.BiteReach - 0.12f, PetModule.BiteReach);
+        var toMonster = Vector2.Normalize(new Vector2(m.Position.X - _pet.Position.X, m.Position.Z - _pet.Position.Z));
+        var facing = new Vector2(-MathF.Sin(_pet.Facing), -MathF.Cos(_pet.Facing));
+        Assert.True(Vector2.Dot(toMonster, facing) > 0.99f);
+
+        // Then it bites every 1 s as before, the same bite, and does not pounce again.
+        Run(3.0, () => Assert.False(_pet.Pouncing));
+        Assert.Equal(4, _bus.Hits.Count);
+        for (int i = 1; i < _bus.Hits.Count; i++)
+            Assert.Equal(60, _bus.Hits[i].Tick - _bus.Hits[i - 1].Tick);
+        foreach (var (_, hit) in _bus.Hits)
+        {
+            Assert.Equal(9, hit.MonsterId);
+            Assert.Equal(PetModule.BiteDamage, hit.Damage);
+            Assert.Equal(0f, hit.PoisonDamagePerSecond);
+            Assert.Equal(PetModule.BiteSource, hit.Source);
+        }
+        Assert.False(_pet.Dashing);
+    }
+
+    [Fact]
+    public void TheDashStillGoesAroundGiantMushroomsOnWalkableGround()
+    {
+        var trunk = TrunkWithRoomAround();
+        float gap = trunk.Radius + 4f;
+        _player = PlayerAt(new Vector3(trunk.X + gap, 0f, trunk.Z));
+        _pet.PlaceAt(new Vector3(trunk.X + gap - 0.5f, 0f, trunk.Z));
+        var m = Monster(3, new Vector3(trunk.X - gap + 1f, 0f, trunk.Z));
+        _monsters.Add(m);
+        _bow = AimAt(m);
+        Run(4.0, () =>
+        {
+            Assert.False(Ground.Blocks(_pet.Position.X, _pet.Position.Z, PetModule.Radius - 0.02f));
+            Assert.True(Areas.Walkable(_pet.Position.X, _pet.Position.Z, PetModule.Radius - 0.02f));
+        });
+        Assert.NotEmpty(_bus.Hits);
+        Assert.True(Gap(m) <= PetModule.BiteReach + 0.01f);
+    }
+
+    [Fact]
+    public void TheCrowSwoopsStraightToAnAimedMonsterAt12MetersASecondAndPecks()
+    {
+        TickOnce();
+        AdoptCrow();
+        _pet.PlaceAt(Middle + new Vector3(2f, 0f, 0f));
+        var m = Monster(6, Middle + new Vector3(-9f, 0f, 2f));
+        _monsters.Add(m);
+        _bow = AimAt(m);
+        var speeds = new List<float>();
+        float lastHeight = Height;
+        int swoopTicks = 0;
+        for (int i = 0; i < 120 && _bus.Hits.Count == 0; i++)
+        {
+            TickOnce();
+            Assert.False(_pet.Pouncing);
+            if (_pet.Dashing)
+            {
+                swoopTicks++;
+                speeds.Add(_pet.Velocity.Length());
+                // Straight down to its peck: always lower, never climbing back up first.
+                Assert.True(Height <= lastHeight + 1e-4f);
+            }
+            lastHeight = Height;
+        }
+        Assert.NotEmpty(_bus.Hits);
+        Assert.True(swoopTicks > 10);
+        Assert.InRange(speeds.Max(), PetModule.AimSwoopSpeed - 0.05f, PetModule.AimSwoopSpeed + 0.05f);
+        Assert.True(Height <= PetModule.PeckHeight + 0.01f);
+        Assert.True(Gap(m) <= PetModule.BiteReach + 0.01f);
+        // About 11 m and 1.6 m down at 12 m/s: under a second, much sooner than flying at 7.
+        Assert.True(_bus.Hits[0].Tick < 70, $"first peck at tick {_bus.Hits[0].Tick}");
+        Run(2.0);
+        for (int i = 1; i < _bus.Hits.Count; i++)
+            Assert.Equal(48, _bus.Hits[i].Tick - _bus.Hits[i - 1].Tick);
+    }
+
+    [Fact]
+    public void AutomaticTargetingIsUnchangedByABowAimedAtNoMonster()
+    {
+        // Two players' pets side by side: one gets the bow aiming at the ground every tick, the other no bow at all.
+        var plain = new PetModule();
+        var plainBus = new FakeBus();
+        plain.Start(plainBus);
+        plainBus.Publish(new GameStart(GameStart.Girl, GameStart.Cat));
+        _pet.PlaceAt(Middle + new Vector3(2f, 0f, 0f));
+        plain.PlaceAt(Middle + new Vector3(2f, 0f, 0f));
+        _monsters.Add(Monster(7, Middle + new Vector3(-6f, 0f, 2f)));
+        _monsters.Add(Monster(8, Middle + new Vector3(6f, 0f, -4f)));
+        _bow = AimAtGround(Middle + new Vector3(0f, 0f, -4f));
+        for (int i = 0; i < 300; i++)
+        {
+            if (i == 150)
+                _monsters[0] = Monster(7, Middle + new Vector3(-6f, 0f, 2f), alive: false);
+            plainBus.Tick = _tick;
+            plainBus.Publish(_player);
+            foreach (var m in _monsters)
+                plainBus.Publish(m);
+            plain.Tick(new TickContext(_tick, Step));
+            TickOnce();
+            Assert.Equal(plain.Position, _pet.Position);
+            Assert.Equal(plain.TargetId, _pet.TargetId);
+            Assert.False(_pet.Aimed);
+            Assert.False(_pet.Dashing);
+            Assert.False(_pet.Pouncing);
+            // An automatic target is run to at 7 m/s at most.
+            Assert.True(FlatSpeed <= PetModule.AttackSpeed + 0.01f);
+        }
+        Assert.Equal(8, _pet.TargetId);
+        Assert.Equal(plainBus.Hits.Select(h => (h.Tick, h.Hit.MonsterId)), _bus.Hits.Select(h => (h.Tick, h.Hit.MonsterId)));
+        Assert.Contains(_bus.Hits, h => h.Hit.MonsterId == 7);
+        Assert.Contains(_bus.Hits, h => h.Hit.MonsterId == 8);
     }
 
     // ---- The defeated player ----
@@ -1176,13 +1497,74 @@ public class PetModuleTests
         return nodes;
     }
 
-    private static string DogGlb()
+    private static string DogGlb() => Glb("dog");
+
+    private static string Glb(string name)
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir != null && !File.Exists(Path.Combine(dir.FullName, "modules", "Pet", "Models", "dog.glb")))
+        while (dir != null && !File.Exists(Path.Combine(dir.FullName, "modules", "Pet", "Models", name + ".glb")))
             dir = dir.Parent;
         Assert.NotNull(dir);
-        return Path.Combine(dir!.FullName, "modules", "Pet", "Models", "dog.glb");
+        return Path.Combine(dir!.FullName, "modules", "Pet", "Models", name + ".glb");
+    }
+
+    /// <summary>A GLB's JSON: its materials' base colors (pets.py's swatch colors, as the exporter writes them) and each node's parent.</summary>
+    private static (Dictionary<string, Vector3> Colors, Dictionary<string, string> Parents) ReadGlbInfo(string path)
+    {
+        var bytes = File.ReadAllBytes(path);
+        int jsonLength = BitConverter.ToInt32(bytes, 12);
+        using var doc = JsonDocument.Parse(new ReadOnlyMemory<byte>(bytes, 20, jsonLength));
+        var root = doc.RootElement;
+        var colors = new Dictionary<string, Vector3>();
+        foreach (var m in root.GetProperty("materials").EnumerateArray())
+        {
+            // Pure white is glTF's default: the exporter leaves it out.
+            var color = Vector3.One;
+            if (m.TryGetProperty("pbrMetallicRoughness", out var pbr) && pbr.TryGetProperty("baseColorFactor", out var c))
+                color = new Vector3(c[0].GetSingle(), c[1].GetSingle(), c[2].GetSingle());
+            colors[m.GetProperty("name").GetString()!] = color;
+        }
+        var nodes = root.GetProperty("nodes").EnumerateArray().ToArray();
+        var parents = new Dictionary<string, string>();
+        foreach (var node in nodes)
+            if (node.TryGetProperty("children", out var children))
+                foreach (var child in children.EnumerateArray())
+                    parents[nodes[child.GetInt32()].GetProperty("name").GetString()!] = node.GetProperty("name").GetString()!;
+        return (colors, parents);
+    }
+
+    [Theory]
+    [InlineData("cat")]
+    [InlineData("dog")]
+    [InlineData("crow")]
+    public void MushroomsAreVividCherryRedWithPureWhiteSpotsAndCreamStems(string pet)
+    {
+        var (colors, _) = ReadGlbInfo(Glb(pet));
+        var cap = colors["Cap"];
+        // A pure, bright cherry red: full red, almost no green or blue (saturation over 0.9).
+        Assert.True(cap.X >= 0.9f, $"cap red {cap}");
+        Assert.True(cap.Y <= 0.1f && cap.Z <= 0.1f, $"cap {cap}");
+        Assert.True((cap.X - MathF.Min(cap.Y, cap.Z)) / cap.X > 0.9f);
+        Assert.Equal(Vector3.One, colors["Spots"]);
+        // A clean light cream stem: light, warm, only a little yellow.
+        var stem = colors["Stem"];
+        Assert.True(stem.X >= 0.98f && stem.Y >= 0.93f && stem.Z is >= 0.8f and <= 0.92f, $"stem {stem}");
+    }
+
+    [Theory]
+    [InlineData("cat")]
+    [InlineData("dog")]
+    public void TheEarsAreTheirOwnPartsOnTheHeadSoTheyCanLieBack(string pet)
+    {
+        var (_, parents) = ReadGlbInfo(Glb(pet));
+        var model = ReadGlb(Glb(pet));
+        foreach (var ear in new[] { "EarL", "EarR" })
+        {
+            Assert.Equal("Head", parents[ear]);
+            Assert.True(model[ear].Pivot.Y > 0.1f, "an ear's pivot is at its base, up on the head");
+            Assert.Contains(pet == "cat" ? "Cap" : "DogEar", model[ear].Parts.Keys);
+        }
+        Assert.DoesNotContain(pet == "cat" ? "Cap" : "DogEar", model["Head"].Parts.Keys);
     }
 
     /// <summary>How far p is off the ellipsoid surface: 0 on it, below 0 inside, above 0 outside.</summary>
@@ -1219,16 +1601,21 @@ public class PetModuleTests
         // Head center (0, 0.68 up, 0.32 forward) in glTF (forward is -Z), relative to the neck pivot.
         var center = new Vector3(0, 0.68f, -0.32f) - pivot;
         var fur = parts["DogFur"];
-        // Below the ears' bases every fur vertex is on the one round head (cheek spheres stuck out
-        // at its lower sides); the ears are the only fur above it.
-        var face = fur.Where(p => p.Y - center.Y < 0.1f).ToList();
+        // Every fur vertex is on the one round head (cheek spheres stuck out at its lower sides);
+        // the ears are their own parts on it.
+        var face = fur;
         Assert.NotEmpty(face);
         var min = face.Aggregate(Vector3.Min);
         var max = face.Aggregate(Vector3.Max);
         var radii = new Vector3((max.X - min.X) / 2, (max.Z - min.Z) / 2, (max.Z - min.Z) / 2);
         Assert.All(face, p => Assert.InRange(OffEllipsoid(p, center, radii), -0.01f, 0.01f));
         Assert.InRange(radii.X, 0.24f, 0.3f);
-        Assert.Contains(fur, p => p.Y - center.Y > 0.3f);
+        // The pointy ears stand up on top of it.
+        foreach (var ear in new[] { "EarL", "EarR" })
+        {
+            var (earPivot, earParts) = dog[ear];
+            Assert.Contains(earParts["DogFur"], p => p.Y + earPivot.Y - center.Y > 0.3f);
+        }
     }
 
     [Fact]
@@ -1240,7 +1627,9 @@ public class PetModuleTests
         // Cream chest, the little mushrooms on the back, the collar and its tag.
         foreach (var mat in new[] { "DogLight", "Stem", "Cap", "Spots", "Collar", "Tag" })
             Assert.Contains(mat, dog["Body"].Parts.Keys);
-        foreach (var mat in new[] { "DogLight", "DogNose", "Eye", "Tongue", "Blush", "DogEar" })
+        foreach (var mat in new[] { "DogLight", "DogNose", "Eye", "Tongue", "Blush" })
             Assert.Contains(mat, dog["Head"].Parts.Keys);
+        foreach (var ear in new[] { "EarL", "EarR" })
+            Assert.Contains("DogEar", dog[ear].Parts.Keys);
     }
 }
