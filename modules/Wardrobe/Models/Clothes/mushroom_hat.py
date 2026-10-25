@@ -11,9 +11,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from kit import *  # noqa: E402,F401,F403
 
 reset()
-red = material("Cap", (0.92, 0.22, 0.25))
-spot = material("Spots", (1.0, 0.97, 0.92))
-gills = material("Gills", (1.0, 0.9, 0.78))
+red = material("Cap", CAP_RED)
+spot = material("Spots", SPOT_WHITE)
+gills = material("Gills", STEM_CREAM)
 head = Part("Head")
 base = HEAD_C.z + 0.24
 head.sphere(red, (0, -0.01, base), (0.52, 0.5, 0.32), cut=((0, 0, base), (0, 0, -1)), segments=40, rings=20)

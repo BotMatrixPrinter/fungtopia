@@ -52,6 +52,12 @@ BOTTOM_OUT = 0.02
 FOOT_C = (0.085, 0.062)
 FOOT_R = (0.095, 0.125, 0.064)
 
+# Vivid mushrooms (the game's rule; the same values as Core/MushroomLook.cs): a saturated cherry-red
+# cap, crisp pure white spots, a clean light cream stem and gills.
+CAP_RED = (0.95, 0.06, 0.1)
+SPOT_WHITE = (1.0, 1.0, 1.0)
+STEM_CREAM = (1.0, 0.95, 0.84)
+
 
 def reset():
     bpy.ops.wm.read_factory_settings(use_empty=True)

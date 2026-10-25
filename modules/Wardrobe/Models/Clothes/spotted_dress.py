@@ -11,8 +11,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from kit import *  # noqa: E402,F401,F403
 
 reset()
-red = material("Cloth", (0.92, 0.28, 0.32))
-spot_mat = material("Spots", (1.0, 0.96, 0.9))
+red = material("Cloth", CAP_RED)
+spot_mat = material("Spots", SPOT_WHITE)
 cream = material("Collar", (1.0, 0.92, 0.8))
 body = Part("Body")
 cloth(body, red, out=TOP_OUT + 0.002)

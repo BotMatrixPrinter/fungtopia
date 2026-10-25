@@ -415,6 +415,112 @@ public class ModelFitTests
         Assert.True(scarf.Min(p => p.Y) > Cone.Bottom + (Cone.Top - Cone.Bottom) * 0.35f, "the scarf's tails hang down the front a little");
     }
 
+    private static void Near(Vector3 expected, Vector3 actual, string what) =>
+        Assert.True(Vector3.Distance(expected, actual) < 0.002f, $"{what}: {actual}, expected {expected}");
+
+    /// <summary>Hue in degrees (0 red), saturation and value of an RGB color.</summary>
+    private static (float Hue, float Saturation, float Value) Hsv(Vector3 c)
+    {
+        float max = Math.Max(c.X, Math.Max(c.Y, c.Z)), min = Math.Min(c.X, Math.Min(c.Y, c.Z)), d = max - min;
+        float hue = d == 0 ? 0 : max == c.X ? 60f * ((c.Y - c.Z) / d) : max == c.Y ? 60f * ((c.Z - c.X) / d + 2) : 60f * ((c.X - c.Y) / d + 4);
+        return ((hue + 360f) % 360f, max == 0 ? 0 : d / max, max);
+    }
+
+    [Fact]
+    public void MushroomColorsAreVivid()
+    {
+        // Caps a saturated, bright cherry red (not brownish or dull pink): before they were (0.92, 0.22, 0.25), saturation 0.76.
+        var (hue, saturation, value) = Hsv(MushroomLook.CapRed);
+        Assert.True(hue >= 350f || hue <= 5f, $"cap hue {hue}");
+        Assert.True(saturation >= 0.88f, $"cap saturation {saturation}");
+        Assert.True(value >= 0.9f, $"cap brightness {value}");
+        Assert.Equal(new Vector3(1f, 1f, 1f), MushroomLook.Spot);
+        // Stems: a clean light cream, warm but not white and not muddy.
+        var stem = MushroomLook.Stem;
+        Assert.True(stem.X >= 0.98f && stem.X >= stem.Y && stem.Y > stem.Z && stem.Z >= 0.78f && stem.Z <= 0.9f, $"stem {stem}");
+        var (_, stemSaturation, _) = Hsv(stem);
+        Assert.True(stemSaturation is > 0.08f and < 0.25f, $"stem saturation {stemSaturation}");
+    }
+
+    [Fact]
+    public void EveryMushroomOnTheClothesUsesTheVividColors()
+    {
+        foreach (var id in MushroomLook.Items)
+        {
+            Assert.True(Catalog.TryGet(id, out var item), id);
+            var colors = Model(item.ModelPath).Colors();
+            Assert.Contains(MushroomLook.SpotsMaterial, colors.Keys);
+            foreach (var (name, color) in colors)
+            {
+                if (name == MushroomLook.CapMaterial)
+                    Near(MushroomLook.CapRed, color, $"{id}: {name}");
+                else if (name == MushroomLook.SpotsMaterial)
+                    Near(MushroomLook.Spot, color, $"{id}: {name}");
+                else if (name is MushroomLook.StemMaterial or MushroomLook.GillsMaterial)
+                    Near(MushroomLook.Stem, color, $"{id}: {name}");
+            }
+        }
+        Assert.Contains(MushroomLook.CapMaterial, Model(Catalog.Items[Catalog.IndexOf("mushroom_hat")].ModelPath).Colors().Keys);
+        // The Spotted Mushroom Dress is a cap: its cloth is the cap red.
+        Near(MushroomLook.CapRed, Model(Catalog.Items[Catalog.IndexOf("spotted_dress")].ModelPath).Colors()["Cloth"], "spotted_dress: Cloth");
+        // Only the clothes with a mushroom have mushroom materials.
+        foreach (var item in Catalog.Items)
+            if (Array.IndexOf(MushroomLook.Items, item.Id) < 0)
+                Assert.DoesNotContain(Model(item.ModelPath).Colors().Keys, MushroomLook.IsMushroom);
+    }
+
+    [Fact]
+    public void EveryOtherColorOfTheMushroomClothesStaysAsItWas()
+    {
+        var expected = new Dictionary<(string, string), Vector3>
+        {
+            [("mushroom_hoodie", "Cloth")] = new(0.55f, 0.85f, 0.72f),
+            [("mushroom_hoodie", "Trim")] = new(0.42f, 0.72f, 0.6f),
+            [("mushroom_hoodie", "String")] = new(1f, 0.97f, 0.92f),
+            [("mushroom_backpack", "Strap")] = new(0.6f, 0.35f, 0.2f),
+            [("spotted_dress", "Collar")] = new(1f, 0.92f, 0.8f),
+            [("ladybug_backpack", "Shell")] = new(0.92f, 0.18f, 0.2f),
+        };
+        foreach (var ((id, material), color) in expected)
+            Near(color, Model(Catalog.Items[Catalog.IndexOf(id)].ModelPath).Colors()[material], $"{id}: {material}");
+    }
+
+    [Fact]
+    public void MushroomCapsGetAGlossyBandAndMushroomsARimLight()
+    {
+        Assert.Equal(1f, MushroomLook.Gloss(MushroomLook.CapMaterial));
+        Assert.Equal(1f, MushroomLook.Gloss(MushroomLook.SpotsMaterial));
+        Assert.Equal(0f, MushroomLook.Gloss(MushroomLook.StemMaterial));
+        foreach (var name in new[] { MushroomLook.CapMaterial, MushroomLook.SpotsMaterial, MushroomLook.StemMaterial, MushroomLook.GillsMaterial })
+            Assert.True(MushroomLook.Rim(name) > 0f, name);
+        foreach (var name in new[] { "Cloth", "Trim", "Strap", "Shell", "Hair", "Skin", "" })
+            Assert.Equal((0f, 0f), (MushroomLook.Gloss(name), MushroomLook.Rim(name)));
+        // The toon shader draws them and the view sets them on the mushroom surfaces.
+        string shader = File.ReadAllText(Path.Combine(RepoRoot(), "modules", "Wardrobe", "Godot", "Shaders", "toon.gdshader"));
+        Assert.Contains("uniform float gloss", shader);
+        Assert.Contains("uniform float rim_light", shader);
+        Assert.Matches(@"SPECULAR_LIGHT\s*\+=.*gloss", shader);
+        string view = File.ReadAllText(Path.Combine(RepoRoot(), "modules", "Wardrobe", "Godot", "ToonGlb.cs"));
+        Assert.Contains("SetShaderParameter(\"gloss\", MushroomLook.Gloss(", view);
+        Assert.Contains("SetShaderParameter(\"rim_light\", MushroomLook.Rim(", view);
+    }
+
+    [Fact]
+    public void TheModelScriptsUseTheSameMushroomColors()
+    {
+        string kit = File.ReadAllText(Path.Combine(RepoRoot(), "modules", "Wardrobe", "Models", "kit.py"));
+        Vector3 Py(string name)
+        {
+            var m = Regex.Match(kit, name + @" = \(([\d.]+), ([\d.]+), ([\d.]+)\)");
+            Assert.True(m.Success, name);
+            float F(int i) => float.Parse(m.Groups[i].Value, System.Globalization.CultureInfo.InvariantCulture);
+            return new Vector3(F(1), F(2), F(3));
+        }
+        Near(MushroomLook.CapRed, Py("CAP_RED"), "CAP_RED");
+        Near(MushroomLook.Spot, Py("SPOT_WHITE"), "SPOT_WHITE");
+        Near(MushroomLook.Stem, Py("STEM_CREAM"), "STEM_CREAM");
+    }
+
     /// <summary>
     /// A .glb read back: each node's name, parent, mesh and world transform (glTF's frame, Godot's),
     /// and its mesh's vertices by material.
@@ -462,6 +568,20 @@ public class ModelFitTests
         }
 
         public bool Has(string name) => _index.ContainsKey(name);
+
+        /// <summary>Each material's base color by name (glTF's default white when it has none).</summary>
+        public Dictionary<string, Vector3> Colors()
+        {
+            var colors = new Dictionary<string, Vector3>();
+            foreach (var m in _json.GetProperty("materials").EnumerateArray())
+            {
+                var c = new Vector3(1f, 1f, 1f);
+                if (m.TryGetProperty("pbrMetallicRoughness", out var pbr) && pbr.TryGetProperty("baseColorFactor", out var f))
+                    c = new Vector3(f[0].GetSingle(), f[1].GetSingle(), f[2].GetSingle());
+                colors[m.GetProperty("name").GetString()!] = c;
+            }
+            return colors;
+        }
 
         public Vector3 Origin(string name)
         {

@@ -6,12 +6,13 @@ clothes for free) and Abby's shop screen (Mushroom Town: buy clothes for Mushroo
 Some clothes are rewards. Adding a piece of clothing is one `Catalog` entry plus one model script.
 
 - `Contract/` — `Fungtopia.Wardrobe.Contract` (namespace `Fungtopia.Wardrobe`), see below.
-- `Core/` — `Fungtopia.Wardrobe.Core`: `WardrobeModule`, the module's one `IModule`, and
-  `WardrobePrompts` (the screens' controls hints as button icons, see [Prompts](#prompts)).
+- `Core/` — `Fungtopia.Wardrobe.Core`: `WardrobeModule`, the module's one `IModule`,
+  `WardrobePrompts` (the screens' controls hints as button icons, see [Prompts](#prompts)) and
+  `MushroomLook` (the vivid mushroom colors, gloss and rim, see [Models](#models)).
 - `Godot/` — `Main.tscn` with `WardrobeView` (the screens); `WardrobeScreen`, `ShopScreen` and their
   frame `ScreenPanel`; `CapButton` (the big mushroom Done / Buy buttons); `AbbyPortrait` (Abby drawn in the shop's header); `WardrobeGlyphs` (makes this module's icons loadable unimported); `IconStudio` (renders each
   model's little icon in its own `SubViewport`); `ToonGlb` (loads the .glb files toon-shaded with ink
-  outlines); `Mannequin` and `Preview.tscn` (for screenshots only); `Shaders/`; `Glyphs/`
+  outlines, mushrooms glossy); `Mannequin` and `Preview.tscn` (for screenshots only); `Shaders/`; `Glyphs/`
   (`key_pgup`, `key_pgdn`: the tab keys' icons, which the Input module lacks, drawn like its
   keycaps by `make_glyphs.py`, run with `python3`).
 - `Models/` — `kit.py` (shared Blender helpers and the rig's sizes), `Clothes/<id>.py` and
@@ -23,7 +24,8 @@ Some clothes are rewards. Adding a piece of clothing is one `Catalog` entry plus
   flick exactly one), `WardrobePromptsTests` (each device's hints show its own icons only) and
   `ModelFitTests` (the models read back against the Player's rig: their parts and pivots, nothing
   inside the body or reaching the head or hands, tops and dresses cover the cone without sleeves,
-  bottoms are its lower band, shoes fit the feet, head pieces sit on the head, backpacks on the back).
+  bottoms are its lower band, shoes fit the feet, head pieces sit on the head, backpacks on the back;
+  the mushrooms use `MushroomLook`'s vivid colors and every other color is unchanged).
 
 Test it with `./test.sh Wardrobe` from the repository root.
 
@@ -192,7 +194,15 @@ it, and stays clear of the head and the floating hands:
   top with its tails down the front.
 
 Materials carry plain colors; a hair style's material `Hair` takes the hair color. No eyes or faces
-on clothes. `ModelFitTests` reads the .glb files and the Player's rig back and checks all this.
+on clothes.
+
+**Vivid mushrooms** (the game's rule for every mushroom): the clothes with a mushroom (Red
+Mushroom-Cap Hat, Mushroom Backpack, Mushroom Pocket Hoodie's pocket mushroom, Spotted Mushroom
+Dress) use `kit.py`'s `CAP_RED` (0.95, 0.06, 0.1: a saturated cherry red) for caps (materials `Cap`;
+the dress's `Cloth`), `SPOT_WHITE` (pure white) for `Spots` and `STEM_CREAM` (1, 0.95, 0.84: a clean
+light cream) for `Stem` and `Gills`, the same values as `Core/MushroomLook.cs`. `ToonGlb` gives
+`Cap` and `Spots` surfaces the toon shader's `gloss` (a small soft specular band) and every mushroom
+material a lighter `rim_light`; other surfaces get neither. No item here glows. `ModelFitTests` reads the .glb files and the Player's rig back and checks all this.
 
 ## Screenshots
 

@@ -38,7 +38,7 @@ public static class ToonGlb
         return scene;
     }
 
-    /// <summary>Replaces every material under <paramref name="node"/> with the toon shader in its color, with an outline.</summary>
+    /// <summary>Replaces every material under <paramref name="node"/> with the toon shader in its color, with an outline (mushrooms glossy, see <see cref="MushroomLook"/>).</summary>
     public static void Toon(Node node)
     {
         if (node is MeshInstance3D mesh && mesh.Mesh != null)
@@ -49,8 +49,15 @@ public static class ToonGlb
                 var source = mesh.Mesh.SurfaceGetMaterial(i);
                 // glTF stores linear colors; the shader's albedo is an sRGB color like Blender's swatch.
                 var color = source is BaseMaterial3D b ? b.AlbedoColor.SrgbToLinear() : Colors.White;
+                string name = source?.ResourceName ?? "";
                 var toon = Material(color);
-                toon.SetMeta("name", source?.ResourceName ?? "");
+                toon.SetMeta("name", name);
+                // Mushrooms: a glossy band on the caps and a light rim (every other surface: none).
+                if (MushroomLook.IsMushroom(name))
+                {
+                    toon.SetShaderParameter("gloss", MushroomLook.Gloss(name));
+                    toon.SetShaderParameter("rim_light", MushroomLook.Rim(name));
+                }
                 mesh.SetSurfaceOverrideMaterial(i, toon);
             }
         }

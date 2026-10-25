@@ -11,9 +11,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from kit import *  # noqa: E402,F401,F403
 
 reset()
-stem = material("Stem", (1.0, 0.92, 0.8))
-red = material("Cap", (0.92, 0.25, 0.27))
-spot_mat = material("Spots", (1.0, 0.97, 0.92))
+stem = material("Stem", STEM_CREAM)
+red = material("Cap", CAP_RED)
+spot_mat = material("Spots", SPOT_WHITE)
 strap = material("Strap", (0.6, 0.35, 0.2))
 body = Part("Body")
 z = 0.32
