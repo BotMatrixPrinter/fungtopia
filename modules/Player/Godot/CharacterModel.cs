@@ -22,7 +22,7 @@ public partial class CharacterModel : Node3D
     private const string Shaders = "res://modules/Player/Godot/Shaders/";
 
     /// <summary>Surfaces drawn without an ink outline (small soft details).</summary>
-    private static readonly HashSet<string> NoOutline = new() { "EyeShine", "Blush", "Mouth", "String", "PoisonSpots" };
+    private static readonly HashSet<string> NoOutline = new() { "EyeShine", "Blush", "Mouth", "String", Mushrooms.PoisonSpots };
 
     /// <summary>Materials each character tints itself (so two characters can look different).</summary>
     private static readonly HashSet<string> Tinted = new() { "Skin", "Eye", "Hair" };
@@ -292,7 +292,8 @@ public partial class CharacterModel : Node3D
 
     private static readonly Dictionary<string, ShaderMaterial> s_materials = new();
 
-    /// <summary>The toon material for a glTF material: its color, an ink outline unless it is a small detail.</summary>
+    /// <summary>The toon material for a glTF material: its color, an ink outline unless it is a small detail; mushroom caps
+    /// glossy and rim lit, glow spots glowing (<see cref="Mushrooms"/>).</summary>
     private static ShaderMaterial ToonMaterial(Material? source, bool cache)
     {
         string name = source?.ResourceName ?? "";
@@ -305,8 +306,15 @@ public partial class CharacterModel : Node3D
         var material = new ShaderMaterial { Shader = s_toon };
         // glTF stores linear colors; the shader's albedo is an sRGB color like Blender's swatch.
         material.SetShaderParameter("albedo", color.SrgbToLinear());
-        if (name == "EyeShine" || name == "PoisonSpots")
+        if (name == "EyeShine")
             material.SetShaderParameter("self_light", 0.6f);
+        if (Mushrooms.Glows(name))
+            material.SetShaderParameter("self_light", Mushrooms.GlowLight);
+        if (Mushrooms.IsCap(name))
+        {
+            material.SetShaderParameter("gloss", Mushrooms.Gloss);
+            material.SetShaderParameter("rim_light", Mushrooms.RimLight);
+        }
         if (!NoOutline.Contains(name))
             material.NextPass = s_outline;
         if (cache)

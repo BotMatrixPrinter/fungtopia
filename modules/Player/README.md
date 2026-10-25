@@ -10,17 +10,20 @@ after defeat until it is teleported (to the clinic the next morning).
 - `Contract/` — `Fungtopia.Player.Contract` (namespace `Fungtopia.Player`), see below.
 - `Core/` — `Fungtopia.Player.Core`: `PlayerModule`, the module's one `IModule`; `ArcheryPose`,
   `ArcheryState` and `ArcheryPose.Frame` (the archery pose as pure functions, for the view); `CharacterLook`, `Rig`
-  and `BuiltinPieces` (what the character looks like from the Wardrobe's `AppearanceState`).
+  and `BuiltinPieces` (what the character looks like from the Wardrobe's `AppearanceState`);
+  `Mushrooms` (the carried mushrooms' materials, colors, gloss, rim light and glow).
 - `Godot/` — `Main.tscn` with `PlayerView`, which draws the character; `CharacterModel` (the
   model, toon materials and procedural animation); `Preview.tscn` (both characters side by side,
-  for screenshots); `Shaders/` (toon surface with hit flash, ink outline).
+  for screenshots); `Shaders/` (toon surface with hit flash and, for mushroom caps, a glossy band and
+  rim light; ink outline).
 - `Models/` — `characters.py`, the Blender script that builds and exports `girl.glb` and
   `boy.glb` next to it.
 - `Tests/` — `PlayerModuleTests.cs`: xUnit tests of `PlayerModule` (with a fake `IMessageBus`;
   also the save part's round trip and bad saved Json),
   `ArcheryPose` and `CharacterLook` (also standing idle and turning while the wardrobe is open),
   and of `girl.glb` and `boy.glb` read back (the rig's parts and pivots, the floating head over
-  the cone body, floating hands and feet, no arm or leg meshes).
+  the cone body, floating hands and feet, no arm or leg meshes; the vivid mushroom colors and
+  materials, the other colors unchanged).
 
 Test it with `./test.sh Player` from the repository root.
 
@@ -157,7 +160,9 @@ gliding. The view has no camera: the camera module follows `PlayerState`.
 `CharacterModel` loads `girl.glb` or `boy.glb` at run time with `GltfDocument` from the file's
 bytes (so a fresh checkout runs without an editor import; an export must include `*.glb` as
 non-resource files), replaces each material with the toon shader in the glTF material's color
-plus an ink outline, and animates the parts. `Apply(CharacterLook)` dresses it: it tints the
+plus an ink outline (mushroom caps, `Mushrooms.IsCap`, also get the shader's soft white specular
+band, `Mushrooms.Gloss`, and a stronger rim light, `Mushrooms.RimLight`; the poison cap's glow
+spots glow at `Mushrooms.GlowLight`, 1.2, twice the eye sparkles' 0.6), and animates the parts. `Apply(CharacterLook)` dresses it: it tints the
 character's own `Skin`, `Eye` and `Hair` materials, shows or hides the built-in pieces, and loads
 the hair style's and each worn item's .glb (cached bytes) the same way, parenting each of its
 objects to the rig part of the same name with no offset (`Fungtopia.Wardrobe.Attach`), so worn
@@ -229,9 +234,12 @@ part, at its pivot, for the game to hide: `Hair` (Head), `DefaultTop` (Body), `D
 `DefaultHead` (the Girl's ribbon). The Wardrobe's clothes were sized for the old rounded body and
 legs (its `kit.py`): they still attach, but look off until they are refit to the cone. A wooden
 bow slung on the back (its strap a band across the cone) with
-mushroom-red tips, and for shooting the same bow 1.3 times bigger, without its string (the game
+mushroom-red tips (material `MushroomRed`, its own, not the ribbon's), and for shooting the same bow 1.3 times bigger, without its string (the game
 draws the string), its two limbs separate children for bending, and a nocked poison
-mushroom-tipped arrow (0.78 m). The Girl has a ribbon bow on her
+mushroom-tipped arrow (0.78 m). The mushrooms are "vivid" (Tony, 2026-10-25, the rule for every
+mushroom in the game; `Core/Mushrooms.cs` keeps the same colors): the tips a pure tomato red
+(0.96, 0.1, 0.06), the arrow's `PoisonCap` a rich bright purple (0.62, 0.12, 0.95) with bright
+green `PoisonSpots` (0.5, 1.0, 0.25) on a clean light cream `Stem` (1.0, 0.96, 0.86). The Girl has a ribbon bow on her
 head, pigtail puffs and a pink dress with white spots coloring the cone; the Boy a red bow tie and
 two buttons on a blue shirt coloring the cone, and trousers as a band round its bottom. Separate objects with pivots where they move: `Body`, `Head`
 (neck), `LegL`/`LegR` (hip), `ArmL`/`ArmR` (shoulder), `HandL`/`HandR` (hand center; the

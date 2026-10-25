@@ -6,7 +6,7 @@
 # Kids made of simple shapes, from Saria's drawings (2026-10-25), with floating hands and head
 # like Animal Crossing: a big round head with large dark oval eyes floating a few cm above a
 # smooth cone body (a triangle from the front, no neck), two round hands floating beside it, two
-# little round shoes under it, no arms or legs, and a bow carried on the back. The Girl has a
+# little round shoes under it, no arms or legs, and a bow carried on the back (its tips little mushroom-red caps). The Girl has a
 # ribbon bow on her head and a pink spotted dress coloring the cone; the Boy a bow tie, a blue
 # shirt coloring the cone and trousers as a band round its bottom. Both
 # share one modular rig (skin body parts) with the outfit and hair as separate child objects, so
@@ -41,11 +41,14 @@ COLORS = {
     "Wood": (0.62, 0.38, 0.2),
     "String": (0.95, 0.92, 0.82),
     "Shoe": (0.42, 0.24, 0.18),
-    # The nocked arrow, like the Bow module's arrow.glb: a poison mushroom tip.
+    # Mushrooms, "vivid" (Tony, 2026-10-25; the game keeps Core/Mushrooms.cs in step): the bow's
+    # tomato-red tips, and the nocked arrow's poison mushroom tip (like the Bow module's
+    # arrow.glb): a rich purple cap, glowing green spots, a clean cream stem.
+    "MushroomRed": (0.96, 0.1, 0.06),
+    "PoisonCap": (0.62, 0.12, 0.95),
+    "PoisonSpots": (0.5, 1.0, 0.25),
+    "Stem": (1.0, 0.96, 0.86),
     "Shaft": (0.78, 0.6, 0.38),
-    "PoisonCap": (0.56, 0.24, 0.72),
-    "PoisonSpots": (0.55, 0.95, 0.35),
-    "Stem": (0.95, 0.9, 0.78),
     "Fletch": (0.5, 0.85, 0.45),
 }
 
@@ -428,7 +431,7 @@ def build(kind):
         tips.append(bow.pivot + (sling @ local).to_3d())
     bow.capsule(mats["String"], tips[0], tips[1], 0.009, segments=6)
     for tip in tips:
-        bow.sphere(mats["Ribbon"], tip, (0.045, 0.045, 0.04), segments=12, rings=6)
+        bow.sphere(mats["MushroomRed"], tip, (0.045, 0.045, 0.04), segments=12, rings=6)
     bow.build()
     # HandBow: HAND_BOW_SCALE times the size, a grip wrap at its pivot, and its two limbs as child
     # objects at the same pivot (HandBowLimbTop / HandBowLimbBottom), which the game bends back
@@ -446,7 +449,7 @@ def build(kind):
                    rotation=sling @ Matrix.Translation((-hmajor, 0, 0)) @ Matrix.Rotation(sign * half_arc / 2, 4, "Z"),
                    arc=half_arc / (2 * math.pi), segments=120)
         local = Vector((hmajor * math.cos(half_arc) - hmajor, sign * hmajor * math.sin(half_arc), 0, 1))
-        limb.sphere(mats["Ribbon"], limb.pivot + (sling @ local).to_3d(), (0.045 * k, 0.045 * k, 0.04 * k), segments=12, rings=6)
+        limb.sphere(mats["MushroomRed"], limb.pivot + (sling @ local).to_3d(), (0.045 * k, 0.045 * k, 0.04 * k), segments=12, rings=6)
         limb.build(held_obj)
 
     # The nocked arrow: a poison mushroom tip (a purple cap with glowing green spots on a cream

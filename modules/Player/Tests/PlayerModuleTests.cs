@@ -2032,6 +2032,19 @@ public class PlayerModuleTests
 
         public string ParentOf(string name) => Node(name).Parent < 0 ? "" : Nodes[Node(name).Parent].Name;
 
+        /// <summary>The base color of the material named <paramref name="material"/> (glTF's baseColorFactor, RGB).</summary>
+        public Vector3 Color(string material)
+        {
+            foreach (var m in _json.GetProperty("materials").EnumerateArray())
+                if (m.GetProperty("name").GetString() == material)
+                {
+                    var c = m.GetProperty("pbrMetallicRoughness").GetProperty("baseColorFactor");
+                    return new Vector3(c[0].GetSingle(), c[1].GetSingle(), c[2].GetSingle());
+                }
+            Assert.Fail($"no material {material}");
+            return default;
+        }
+
         /// <summary>The materials of the node's own mesh.</summary>
         public IEnumerable<string> Materials(string name)
         {
@@ -2226,6 +2239,74 @@ public class PlayerModuleTests
             Assert.True((low.X + high.X) / 2 * side > 0.05f, foot);
             Assert.True(Math.Max(MathF.Abs(low.X), MathF.Abs(high.X)) < WidestBetween(skin, bottom, bottom + 0.05f), $"{foot} sticks out sideways");
         }
+    }
+
+    /// <summary>Hue in degrees (0..360), saturation and value (0..1) of an RGB color.</summary>
+    private static (float Hue, float Saturation, float Value) Hsv(Vector3 c)
+    {
+        float max = MathF.Max(c.X, MathF.Max(c.Y, c.Z)), min = MathF.Min(c.X, MathF.Min(c.Y, c.Z)), d = max - min;
+        float hue = d == 0 ? 0 : max == c.X ? 60 * ((c.Y - c.Z) / d) : max == c.Y ? 60 * ((c.Z - c.X) / d + 2) : 60 * ((c.X - c.Y) / d + 4);
+        return ((hue + 360) % 360, max == 0 ? 0 : d / max, max);
+    }
+
+    [Theory]
+    [InlineData("girl")]
+    [InlineData("boy")]
+    public void TheCarriedMushroomsAreVivid(string file)
+    {
+        var glb = new Glb(file);
+        // The bow's tips are mushroom-red caps of their own, not the ribbon's color (the grip wrap keeps that).
+        foreach (var part in new[] { "BackBow", "HandBowLimbTop", "HandBowLimbBottom" })
+        {
+            Assert.Contains(Mushrooms.Red, glb.Materials(part));
+            Assert.DoesNotContain("Ribbon", glb.Materials(part));
+        }
+        Assert.Contains("Ribbon", glb.Materials("HandBow"));
+        Assert.Equal(new[] { "Fletch", Mushrooms.PoisonCap, Mushrooms.PoisonSpots, "Shaft", Mushrooms.Stem },
+            glb.Materials("NockArrow").Distinct().OrderBy(m => m, StringComparer.Ordinal));
+        foreach (var m in new[] { Mushrooms.Red, Mushrooms.PoisonCap, Mushrooms.PoisonSpots, Mushrooms.Stem })
+            Assert.True(Vector3.Distance(Mushrooms.Color(m)!.Value, glb.Color(m)) < 0.002f, m);
+        Assert.Null(Mushrooms.Color("Ribbon"));
+
+        // A pure tomato red: saturated and bright, not pink or brownish (the old tips were the ribbon's pinkish red).
+        var red = Hsv(Mushrooms.RedColor);
+        Assert.True(red.Hue < 8 || red.Hue > 355, $"red hue {red.Hue}");
+        Assert.InRange(red.Saturation, 0.9f, 1f);
+        Assert.InRange(red.Value, 0.9f, 1f);
+        // Still poison purple, but richer and brighter than the old (0.56, 0.24, 0.72).
+        var purple = Hsv(Mushrooms.PoisonCapColor);
+        var oldPurple = Hsv(new Vector3(0.56f, 0.24f, 0.72f));
+        Assert.InRange(purple.Hue, 265f, 290f);
+        Assert.True(purple.Saturation >= 0.85f && purple.Saturation > oldPurple.Saturation + 0.15f, $"purple saturation {purple.Saturation}");
+        Assert.True(purple.Value >= 0.9f && purple.Value > oldPurple.Value, $"purple value {purple.Value}");
+        // Glowing green spots; a clean light cream stem (light, warm, barely tinted).
+        var spots = Hsv(Mushrooms.PoisonSpotsColor);
+        Assert.InRange(spots.Hue, 90f, 130f);
+        Assert.True(spots.Saturation >= 0.7f && spots.Value >= 0.95f);
+        var stem = Mushrooms.StemColor;
+        Assert.True(stem.X >= stem.Y && stem.Y >= stem.Z && stem.Z >= 0.8f && stem.X >= 0.98f, $"stem {stem}");
+
+        // Every other color stays as it was.
+        var ribbon = file == "girl" ? new Vector3(0.95f, 0.24f, 0.36f) : new Vector3(0.92f, 0.22f, 0.24f);
+        Assert.True(Vector3.Distance(ribbon, glb.Color("Ribbon")) < 0.002f);
+        Assert.True(Vector3.Distance(new Vector3(0.62f, 0.38f, 0.2f), glb.Color("Wood")) < 0.002f);
+        Assert.True(Vector3.Distance(new Vector3(0.78f, 0.6f, 0.38f), glb.Color("Shaft")) < 0.002f);
+        Assert.True(Vector3.Distance(new Vector3(0.5f, 0.85f, 0.45f), glb.Color("Fletch")) < 0.002f);
+    }
+
+    [Fact]
+    public void MushroomCapsAreGlossyAndRimLitAndTheGlowSpotsGlowTwiceAsBright()
+    {
+        Assert.True(Mushrooms.IsCap(Mushrooms.Red));
+        Assert.True(Mushrooms.IsCap(Mushrooms.PoisonCap));
+        foreach (var other in new[] { Mushrooms.Stem, Mushrooms.PoisonSpots, "Ribbon", "Wood", "Skin", "" })
+            Assert.False(Mushrooms.IsCap(other), other);
+        Assert.True(Mushrooms.Glows(Mushrooms.PoisonSpots));
+        Assert.False(Mushrooms.Glows(Mushrooms.PoisonCap));
+        Assert.False(Mushrooms.Glows("EyeShine"));
+        Assert.InRange(Mushrooms.Gloss, 0.3f, 1f);
+        Assert.InRange(Mushrooms.RimLight, 0.15f, 0.6f);
+        Assert.Equal(2 * 0.6f, Mushrooms.GlowLight, 3);
     }
 
     [Fact]
