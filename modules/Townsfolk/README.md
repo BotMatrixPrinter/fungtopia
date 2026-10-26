@@ -19,7 +19,8 @@ cannot be talked to, are not obstacles and never push or block the player: they 
   fake `IMessageBus` (looks, leg poses walking and sitting, spots, ten minutes of life staying in Pet City off obstacles and
   clear of the player, chats facing each other, stepping aside, night and morning, nothing run far
   away, pets, butterflies, the same run every time); `TownsfolkModelsTests.cs`: the `.glb` models
-  read back (the folk's rig and the drawing's shapes and proportions).
+  read back (the folk's rig and the drawing's shapes and proportions: the short body round at the
+  base, the legs inside it).
 
 Test it with `./test.sh Townsfolk` from the repository root.
 
@@ -49,7 +50,7 @@ walkable and clear for a `FolkRadius` (0.35 m) walker):
 `Capsule`, about half each) and its color, the legs' color (about 1 in 3 the skin's), an
 `Accessory` (a `BowTie` on most capsules, a `Bow` on the head for some dresses without a hat) and
 its color, a mushroom-cap `HatStyle` (Dome, Flat, Tall, for about 4 in 10) and its color, and a
-`Height` of 1.35..1.55 m; the model, 1.47 m (`Look.ModelHeight`), is drawn at `Look.Scale`). Each decides
+`Height` of 1.19..1.37 m; the model, 1.30 m (`Look.ModelHeight`), is drawn at `Look.Scale`, 0.92..1.05). Each decides
 in turn, after standing a moment (`Waiting`): meet someone strolling within 22 m for a chat (both
 walk to either side of their midpoint, then `Chatting` 7..16 s facing each other, taking turns
 `Speaking`), sit on a free bench seat (`Sitting` 10..30 s), walk to a door and go in (`Inside`
@@ -117,18 +118,21 @@ designer's drawing (Saria's "you choose between these" page, girl and boy); the 
 Pet module's style, simpler. No eyes or faces on hats or objects. Feet at the origin, facing -Z in
 Godot.
 
-- `folk.glb`: one base townsperson, 1.47 m, of a few clean simple shapes (head about a quarter of
-  the height, body about half, legs about a quarter) the view tints and dresses: a big plain round
-  `Head` (0.38 m across, its top at 1.47 m, pivot at its bottom) with only two big dark oval eyes
-  with white sparkles, set low and wide, and small soft rosy cheeks (no mouth, nose, ears or
-  hair), floating a few cm over the body (no neck); `Body`, an empty at the hip (0.42 m) holding
-  the two body shapes, `Dress` (a clean tall cone, a narrow rounded top, 0.4 m wide at the bottom)
-  and `Capsule` (a tall rounded box 0.32 m wide), and `BowTie` (a big bow tie, as wide as the
-  capsule, at its top); two big oval hands `HandL`/`HandR` (0.18 m tall, 0.14 m wide, three dark
-  finger grooves each) floating well out beside the body at its middle height, at the ends of
-  empty `ArmL`/`ArmR`; two tube legs (0.06 m radius) from under the body, `LegL`/`LegR` (thighs,
-  hip pivots) with `ShinL`/`ShinR` (knee pivots at 0.22 m) down to rounded feet a little wider
-  than the legs; the heights are `Stride`'s. The Head's children: mushroom-cap hats `HatDome`,
+- `folk.glb`: one base townsperson, 1.30 m, of a few clean simple shapes the view tints and
+  dresses (Tony, 2026-10-26: the body about 25% shorter than the old 1.47 m one's and rounder at
+  the base, the legs wider apart inside it, as the Player's): a big plain round `Head` (0.38 m
+  across, its center at 1.11 m, its top at 1.30 m, pivot at its bottom) with only two big dark oval
+  eyes with white sparkles, set low and wide, and small soft rosy cheeks (no mouth, nose, ears or
+  hair), floating 4 cm over the body (no neck); `Body`, an empty at the hip (0.42 m) holding the
+  two body shapes, smooth solids of revolution from 0.36 to 0.88 m: `Dress` (a triangle from the
+  front, narrow and round at the top, 0.42 m wide low down, with a fully rounded, softly curved
+  bottom, no sharp rim) and `Capsule` (a soft egg: 0.28 m wide near the top, widest, 0.38 m, low
+  down, curving round underneath), and `BowTie` (a big bow tie, as wide as the egg there, at its
+  top); two big oval hands `HandL`/`HandR` (0.18 m tall, 0.14 m wide, three dark finger grooves
+  each) floating well out beside the body at its middle height, at the ends of empty
+  `ArmL`/`ArmR`; two tube legs (0.06 m radius) from under the round base, inside its outline seen
+  from the front, `LegL`/`LegR` (thighs, hip pivots at x -/+0.11 m) with `ShinL`/`ShinR` (knee
+  pivots at 0.22 m) down to rounded feet a little wider than the legs; the heights are `Stride`'s. The Head's children: mushroom-cap hats `HatDome`,
   `HatFlat`, `HatTall` (`Hat`, `HatSpots`, `Gills`) and `Bow` (a bow on the head).
 - `cat.glb`, `dog.glb`: simpler Mushroom Cat (mushroom-cap ears) and Mushroom Dog (a little
   mushroom on its back, a collar): `Body`, `Head`, `LegFL`, `LegFR`, `LegBL`, `LegBR`, `Tail`.

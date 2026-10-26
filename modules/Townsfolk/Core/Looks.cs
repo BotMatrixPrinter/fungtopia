@@ -16,7 +16,7 @@ public enum HatStyle : byte { None, Dome, Flat, Tall }
 public readonly struct Look
 {
     /// <summary>The height folk.glb is built at (meters, the top of its head).</summary>
-    public const float ModelHeight = 1.47f;
+    public const float ModelHeight = 1.30f;
 
     public readonly Vector3 Skin;
     public readonly BodyShape Shape;
@@ -112,7 +112,7 @@ public static class Looks
     /// <summary>
     /// A look mixed with <paramref name="rng"/>: about half wear a dress, the others a capsule body
     /// (most of those with a bow tie); about 4 in 10 wear a mushroom-cap hat, and some without one a
-    /// bow on the head; heights 1.35..1.55 m.
+    /// bow on the head; heights 1.19..1.37 m (folk.glb drawn at 0.92..1.05 times its size).
     /// </summary>
     public static Look Mix(Random rng)
     {
@@ -127,7 +127,7 @@ public static class Looks
             ? roll < 7 ? Accessory.BowTie : Accessory.None
             : hat == HatStyle.None && roll < 6 ? Accessory.Bow : Accessory.None;
         var accessoryColor = Pick(rng, AccessoryColors);
-        float height = 1.35f + (float)rng.NextDouble() * 0.2f;
+        float height = 1.19f + (float)rng.NextDouble() * 0.18f;
         return new Look(skin, shape, outfit, legs, accessory, accessoryColor, hat, hatColor, height);
     }
 }

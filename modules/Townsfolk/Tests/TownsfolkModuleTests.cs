@@ -119,10 +119,14 @@ public class TownsfolkModuleTests
         Assert.True(looks.Select(l => l.Hat).Where(h => h != HatStyle.None).Distinct().Count() >= 3);
         Assert.InRange(looks.Count(l => l.Hat != HatStyle.None), 5, 18);
         Assert.Equal(25, looks.Select(l => (l.Skin, l.Shape, l.Outfit, l.Legs, l.Accessory, l.Hat, l.HatColor)).Distinct().Count());
-        // Heights between 1.35 and 1.55 m, spread out; the model is drawn scaled to them.
-        Assert.All(looks, l => Assert.InRange(l.Height, 1.35f, 1.55f));
-        Assert.True(looks.Max(l => l.Height) - looks.Min(l => l.Height) > 0.12f);
-        Assert.All(looks, l => Assert.Equal(l.Height / 1.47f, l.Scale, 4));
+        // Heights between 1.19 and 1.37 m, spread out; the model (1.30 m, its body 25% shorter than
+        // the old 1.47 m one's) is drawn scaled to them, each at their own size as before
+        // (0.92..1.05 times the model): the shorter body takes the head down with it.
+        Assert.Equal(1.30f, Look.ModelHeight);
+        Assert.All(looks, l => Assert.InRange(l.Height, 1.19f, 1.37f));
+        Assert.True(looks.Max(l => l.Height) - looks.Min(l => l.Height) > 0.1f);
+        Assert.All(looks, l => Assert.Equal(l.Height / Look.ModelHeight, l.Scale, 4));
+        Assert.All(looks, l => Assert.InRange(l.Scale, 1.35f / 1.47f - 0.005f, 1.55f / 1.47f + 0.005f));
     }
 
     [Fact]
@@ -153,7 +157,7 @@ public class TownsfolkModuleTests
     [Fact]
     public void SittingBendsTheLegsOverTheBenchEdge()
     {
-        foreach (float scale in new[] { 1.35f / 1.47f, 1f, 1.55f / 1.47f })
+        foreach (float scale in new[] { 1.19f / Look.ModelHeight, 1f, 1.37f / Look.ModelHeight })
         {
             float lift = Stride.SitLift(scale);
             // The body's bottom on the seat.

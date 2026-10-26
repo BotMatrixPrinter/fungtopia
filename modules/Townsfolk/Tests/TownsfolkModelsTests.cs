@@ -186,7 +186,7 @@ public class TownsfolkModelsTests
     public void TheFolkRigIsTheOneTheViewPoses()
     {
         var glb = new Glb("folk");
-        Assert.Equal(1.47f, Look.ModelHeight);
+        Assert.Equal(1.30f, Look.ModelHeight);
         Assert.True(Vector3.Distance(new Vector3(0f, Stride.HipHeight, 0f), glb.Origin("Body")) < 0.001f);
         Assert.Equal(-1, glb.Node("Body").Mesh);
         foreach (var shape in new[] { "Dress", "Capsule", "BowTie" })
@@ -205,63 +205,108 @@ public class TownsfolkModelsTests
             Assert.Equal(leg, glb.ParentOf(shin));
             Assert.Equal(Stride.KneeHeight, glb.Origin(shin).Y, 3);
             Assert.Equal(glb.Origin(leg).X, glb.Origin(shin).X, 3);
-            Assert.True(glb.Origin(leg).X * side > 0.05f, leg);
+            // Wider apart than the old 0.085 m.
+            Assert.Equal(side * Stride.HipSide, glb.Origin(leg).X, 3);
+            Assert.InRange(Stride.HipSide, 0.105f, 0.115f);
             Assert.Equal(new[] { "Legs" }, glb.Materials(leg));
             Assert.Equal(new[] { "Legs" }, glb.Materials(shin));
         }
         var dress = glb.Vertices("Dress");
         Assert.Equal(Stride.BodyBottom, dress.Min(v => v.Y), 2);
         Assert.Equal(Stride.BodyBottom, glb.Vertices("Capsule").Min(v => v.Y), 2);
+        Assert.Equal(Stride.BodyTop, dress.Max(v => v.Y), 2);
+        Assert.Equal(Stride.BodyTop, glb.Vertices("Capsule").Max(v => v.Y), 2);
     }
+
+    /// <summary>A body's outline seen from the front: its radius at each height (rings of the solid of revolution), bottom to top.</summary>
+    private static (float Y, float R)[] Outline(List<Vector3> body) =>
+        body.GroupBy(v => MathF.Round(v.Y, 4)).Select(g => (g.Key, g.Max(Radius))).OrderBy(r => r.Key).ToArray();
+
+    private static float Width(List<Vector3> v, float y0, float y1) => 2f * v.Where(p => p.Y >= y0 && p.Y <= y1).Max(Radius);
 
     [Fact]
     public void TheFolkFollowTheDrawingsProportions()
     {
         var glb = new Glb("folk");
-        const float height = 1.47f;
+        // 1.30 m: the body 25% shorter than the old 1.47 m one's, everything above it lowered with it.
+        const float height = 1.30f;
         var head = glb.Vertices("Head", "Skin");
         var headSize = Size(head);
-        // A big plain round ball about 0.38 m across, its top at 1.47 m: about a quarter of the height.
+        // A big plain round ball about 0.38 m across, its top at 1.30 m, its center at 1.11 m.
         Assert.Equal(height, head.Max(v => v.Y), 2);
+        Assert.Equal(1.11f, Center(head).Y, 2);
         Assert.InRange(headSize.X, 0.36f, 0.4f);
         Assert.InRange(headSize.Y, 0.36f, 0.4f);
         Assert.InRange(headSize.Z, 0.36f, 0.4f);
         float headBottom = head.Min(v => v.Y);
         foreach (var shape in new[] { "Dress", "Capsule" })
         {
-            // Floating a few cm above the body: no neck.
+            // Floating 4 cm above the body: no neck.
             float shapeTop = glb.Vertices(shape).Max(v => v.Y);
-            Assert.InRange(headBottom - shapeTop, 0.02f, 0.08f);
+            Assert.InRange(headBottom - shapeTop, 0.035f, 0.045f);
         }
         foreach (var shape in new[] { "Dress", "Capsule" })
         {
             var body = glb.Vertices(shape);
-            // The body about half the height, the legs under it about a quarter.
-            Assert.InRange((body.Max(v => v.Y) - body.Min(v => v.Y)) / height, 0.42f, 0.52f);
-            Assert.InRange(body.Min(v => v.Y) / height, 0.22f, 0.28f);
+            float lo = body.Min(v => v.Y), hi = body.Max(v => v.Y), h = hi - lo;
+            // About 25% shorter than the old body (0.37 to 1.06 m): 0.36 to 0.88 m, round all the way round.
+            Assert.InRange(lo, 0.35f, 0.37f);
+            Assert.InRange(hi, 0.87f, 0.89f);
+            Assert.InRange(h / 0.69f, 0.72f, 0.78f);
+            var ring = body.Where(v => v.Y > lo + h * 0.3f && v.Y < lo + h * 0.35f).Select(Radius).ToList();
+            Assert.True(ring.Max() - ring.Min() < 0.02f, $"{shape} round");
+            // Rounder at the base: the widest low down, then the outline curves softly round under it
+            // to the middle of the bottom (no sharp rim: it never turns more than 25 degrees between
+            // neighboring rings), and up over a rounded top, only narrowing above the widest.
+            var outline = Outline(body);
+            float widest = outline.Max(r => r.R);
+            float widestY = outline.First(r => r.R == widest).Y;
+            Assert.InRange(widestY, lo + 0.05f, lo + h * 0.3f);
+            Assert.True(body.Where(v => v.Y < lo + 0.01f).Max(Radius) < 0.65f * widest, $"{shape}: a round bottom");
+            Assert.True(body.Where(v => v.Y > hi - 0.01f).Max(Radius) < 0.08f, $"{shape}: a rounded top");
+            for (int i = 1; i + 1 < outline.Length; i++)
+            {
+                var a = new Vector2(outline[i].R - outline[i - 1].R, outline[i].Y - outline[i - 1].Y);
+                var b = new Vector2(outline[i + 1].R - outline[i].R, outline[i + 1].Y - outline[i].Y);
+                float turn = MathF.Acos(Math.Clamp(Vector2.Dot(Vector2.Normalize(a), Vector2.Normalize(b)), -1f, 1f));
+                Assert.True(turn < 25f * MathF.PI / 180f, $"{shape}: a sharp edge at {outline[i].Y}: {turn * 180f / MathF.PI} degrees");
+            }
+            for (int i = 1; i < outline.Length; i++)
+                if (outline[i - 1].Y >= widestY)
+                    Assert.True(outline[i].R <= outline[i - 1].R + 1e-4f, $"{shape} wider again at {outline[i].Y}");
+            // The legs come out from under the base, inside its outline seen from the front (the
+            // tubes and the feet no further out than the base's widest).
+            foreach (var part in new[] { "LegL", "LegR", "ShinL", "ShinR" })
+                Assert.True(glb.Vertices(part).Max(v => MathF.Abs(v.X)) < widest, $"{part} is not inside the {shape}'s base");
         }
 
-        // The dress: a clean tall cone, narrow and rounded at the top, about as wide as the head at the bottom.
+        // The dress: a triangle from the front, about 0.42 m wide low down, narrowing steadily to a
+        // narrow rounded top.
         var dress = glb.Vertices("Dress");
-        float Width(List<Vector3> v, float y0, float y1) => 2f * v.Where(p => p.Y >= y0 && p.Y <= y1).Max(Radius);
-        float bottom = dress.Min(v => v.Y), top = dress.Max(v => v.Y);
-        float hem = Width(dress, bottom, bottom + 0.06f);
-        Assert.InRange(hem, 0.36f, 0.44f);
+        float bottom = dress.Min(v => v.Y), top = dress.Max(v => v.Y), dh = top - bottom;
+        float hem = 2f * dress.Max(Radius);
+        Assert.Equal(0.42f, hem, 2);
+        float last = Width(dress, bottom + dh / 5f, bottom + dh * 2f / 5f);
+        for (int i = 2; i < 5; i++)
+        {
+            float slice = Width(dress, bottom + dh * i / 5f, bottom + dh * (i + 1) / 5f);
+            Assert.True(slice < last - 0.04f, $"slice {i}: {slice} not narrower than {last}");
+            last = slice;
+        }
         Assert.True(Width(dress, top - 0.1f, top) < hem * 0.5f);
-        float mid = Width(dress, (bottom + top) / 2f - 0.02f, (bottom + top) / 2f + 0.02f);
-        Assert.InRange(mid, 0.18f, 0.28f);
-        // The capsule: a tall rounded box about 0.32 m wide with straight sides.
+        // The capsule: a soft egg, about 0.28 m wide near the top, widest (0.38 m) low down.
         var capsule = glb.Vertices("Capsule");
         var capsuleSize = Size(capsule);
-        Assert.InRange(capsuleSize.X, 0.3f, 0.34f);
-        Assert.True(capsuleSize.Z < capsuleSize.X && capsuleSize.Z > 0.2f);
-        float low = capsule.Min(v => v.Y) + capsuleSize.Y * 0.3f, high = capsule.Min(v => v.Y) + capsuleSize.Y * 0.7f;
-        Assert.Equal(Width(capsule, low - 0.02f, low + 0.02f), Width(capsule, high - 0.02f, high + 0.02f), 2);
-        // A big bow tie, about as wide as the capsule, at its top, on its front (-Z).
+        float cb = capsule.Min(v => v.Y), ch = capsuleSize.Y;
+        Assert.Equal(0.38f, capsuleSize.X, 2);
+        Assert.InRange(Width(capsule, cb + ch * 0.78f, cb + ch * 0.82f), 0.25f, 0.31f);
+        Assert.True(Width(capsule, cb + ch * 0.45f, cb + ch * 0.55f) < capsuleSize.X - 0.03f, "wider low down than in the middle");
+        // A big bow tie, about as wide as the egg there, at its top, on its front (-Z).
         var tie = glb.Vertices("BowTie");
-        Assert.InRange(Size(tie).X, capsuleSize.X * 0.8f, capsuleSize.X * 1.1f);
-        Assert.True(Center(tie).Y > capsule.Max(v => v.Y) - 0.2f && tie.Max(v => v.Y) < capsule.Max(v => v.Y));
-        Assert.True(tie.Min(v => v.Z) < capsule.Min(v => v.Z));
+        float tieWidth = Width(capsule, Center(tie).Y - 0.01f, Center(tie).Y + 0.01f);
+        Assert.InRange(Size(tie).X, tieWidth * 0.8f, tieWidth * 1.15f);
+        Assert.True(Center(tie).Y > capsule.Max(v => v.Y) - 0.15f && tie.Max(v => v.Y) < capsule.Max(v => v.Y));
+        Assert.True(tie.Min(v => v.Z) < -Width(capsule, Center(tie).Y - 0.01f, Center(tie).Y + 0.01f) / 2f);
         Assert.True(Size(tie).Y < Size(tie).X * 0.6f, "a bow tie is wider than tall");
 
         float bodyMid = (bottom + top) / 2f;
@@ -292,12 +337,13 @@ public class TownsfolkModelsTests
 
         foreach (var (leg, shin) in new[] { ("LegL", "ShinL"), ("LegR", "ShinR") })
         {
-            // Plain straight tubes (0.06 m radius) from under the body ...
+            // Plain straight tubes (0.06 m radius, as long as before: 0.53 m from the top of the
+            // thigh to the ground) from under the body's base (inside it, checked above) ...
             var thigh = glb.Vertices(leg);
             Assert.InRange(Size(thigh).X, 0.11f, 0.13f);
             Assert.InRange(Size(thigh).Z, 0.11f, 0.13f);
             Assert.InRange(thigh.Max(v => v.Y), bottom, bottom + 0.2f);
-            Assert.True(thigh.All(v => MathF.Abs(v.X) < 0.2f), "under the dress");
+            Assert.Equal(0.53f, thigh.Max(v => v.Y), 2);
             // ... down to rounded feet a little wider than the legs, on the ground.
             var lower = glb.Vertices(shin);
             Assert.InRange(lower.Min(v => v.Y), -0.01f, 0.01f);

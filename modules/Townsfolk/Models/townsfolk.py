@@ -5,15 +5,18 @@
 # or only some of them:
 #   blender -b --factory-startup --python modules/Townsfolk/Models/townsfolk.py -- folk crow
 #
-# folk.glb is one base townsperson in the style of Saria's drawing ("you choose between these"),
-# 1.47 m tall, built of a few clean simple shapes: a big plain round head (0.38 m across, about a
-# quarter of the height) floating a few cm over the body with no neck, only two big dark oval eyes
-# with white sparkles set low and wide on it and small soft rosy cheeks (no mouth, nose, ears or
-# hair); a body about half the height, either Dress (a tall cone, a triangle from the front, 0.4 m
-# wide at the bottom) or Capsule (a tall rounded box 0.32 m wide); two big oval hands (0.18 m tall,
-# 0.14 m wide, three finger grooves each) floating well out beside the body at its middle height,
-# no arms; two plain tube legs (0.06 m radius) from under the body to rounded feet, about a quarter
-# of the height. It carries every dress-up option as its own object, and the game shows one of
+# folk.glb is one base townsperson in the style of Saria's drawing ("you choose between these";
+# Tony, 2026-10-26: "too elongated, the torso should be somewhat shorter and more rounded at the
+# base, and the legs should be further apart but still within the base of the torso"), 1.30 m tall,
+# built of a few clean simple shapes: a big plain round head (0.38 m across, its top at 1.30 m)
+# floating 4 cm over the body with no neck, only two big dark oval eyes with white sparkles set low
+# and wide on it and small soft rosy cheeks (no mouth, nose, ears or hair); a short body (0.36 to
+# 0.88 m) round at the base, either Dress (a triangle from the front, 0.42 m wide low down, with a
+# fully rounded, softly curved bottom) or Capsule (a soft egg: 0.28 m wide near the top, widest,
+# 0.38 m, low down, curving round underneath); two big oval hands (0.18 m tall, 0.14 m wide, three
+# finger grooves each) floating well out beside the body at its middle height, no arms; two plain
+# tube legs (0.06 m radius), wide apart, from under the base (inside its outline seen from the
+# front) to rounded feet. It carries every dress-up option as its own object, and the game shows one of
 # each and tints them per townsperson: Dress or Capsule and BowTie (a big bow tie at the capsule's
 # top), children of Body; the mushroom-cap hats HatDome, HatFlat, HatTall and Bow (a bow on the
 # head), children of Head. Tinted materials: Skin, Outfit, Legs, Bow, Hat.
@@ -70,19 +73,29 @@ COLORS = {
     "WingSpot": (1.0, 0.97, 0.85),
 }
 
-# The townsperson, at 1.47 m (Look.ModelHeight); the leg rig as Core/Stride.cs.
-HEIGHT = 1.47
+# The townsperson, at 1.30 m (Look.ModelHeight); the leg rig as Core/Stride.cs.
+HEIGHT = 1.30
 HEAD_R = 0.19
 HEAD_C = Vector((0, 0, HEIGHT - HEAD_R))
 NECK_Z = HEAD_C.z - HEAD_R
 HIP_Z, KNEE_Z, ANKLE_Z = 0.42, 0.22, 0.07
-LEG_R, LEG_X = 0.06, 0.085
-BODY_BOTTOM, BODY_TOP = 0.37, 1.06
-DRESS_R0, DRESS_R1 = 0.2, 0.06
-CAPSULE_W, CAPSULE_D, CAPSULE_TOP = 0.32, 0.26, 1.055
+LEG_R, LEG_X = 0.06, 0.11
+# The two bodies, smooth solids of revolution from BODY_BOTTOM to BODY_TOP (4 cm under the head):
+# their outlines as (radius, z) points from the axis under the round bottom to the axis over the
+# top, smoothed through them (as the Player's characters.py). Dress: a triangle from the front,
+# narrow and round at the top, 0.42 m wide low down, with a fully rounded, softly curved bottom.
+# Capsule: a soft egg, 0.28 m wide near the top, widest (0.38 m) low down, curving round underneath.
+BODY_BOTTOM, BODY_TOP = 0.36, 0.88
+DRESS = [(0, 0.36), (0.07, 0.362), (0.125, 0.37), (0.168, 0.386), (0.197, 0.41), (0.21, 0.44),
+         (0.2, 0.48), (0.165, 0.57), (0.128, 0.665), (0.092, 0.76), (0.064, 0.828), (0.042, 0.862),
+         (0.02, 0.877), (0, 0.88)]
+CAPSULE = [(0, 0.36), (0.07, 0.363), (0.125, 0.376), (0.163, 0.4), (0.184, 0.433), (0.19, 0.465),
+           (0.185, 0.51), (0.172, 0.575), (0.157, 0.645), (0.143, 0.72), (0.131, 0.785), (0.108, 0.835),
+           (0.072, 0.866), (0.035, 0.878), (0, 0.88)]
+BOW_TIE_Z = 0.79
 HAND_Z = (BODY_BOTTOM + BODY_TOP) / 2
 HAND_X = 0.31
-SHOULDER_X, SHOULDER_Z = 0.17, 0.98
+SHOULDER_X, SHOULDER_Z = 0.17, 0.81
 
 
 def material(name, color):
@@ -254,24 +267,6 @@ def _copy_into(source, target):
     bpy.data.meshes.remove(mesh)
 
 
-def rounded(corners, radii, steps=6):
-    """The polyline through corners, each corner cut round (a quadratic curve) radii[i] along its edges."""
-    points = [corners[0]]
-    for i in range(1, len(corners) - 1):
-        c, d = Vector(corners[i]), radii[i]
-        if d <= 0:
-            points.append(corners[i])
-            continue
-        a = c + (Vector(corners[i - 1]) - c).normalized() * d
-        b = c + (Vector(corners[i + 1]) - c).normalized() * d
-        for k in range(steps + 1):
-            t = k / steps
-            p = a * (1 - t) ** 2 + c * 2 * t * (1 - t) + b * t * t
-            points.append((p.x, p.y))
-    points.append(corners[-1])
-    return points
-
-
 def child(part, parent):
     """Builds part as a child of parent (both pivots at the same point)."""
     obj = part.build()
@@ -336,15 +331,28 @@ def bow(part, mat, center, width, rotation=Matrix.Identity(4)):
                 rotation=rotation, segments=20, rings=10)
 
 
-def lathe_profile(corners, radii, steps=8):
-    """rounded(corners, radii), with rings every few cm along the straight runs for smooth shading
-    (and the toon outline)."""
-    points = rounded(corners, radii, steps=steps)
-    dense = [points[0]]
-    for p, q in zip(points, points[1:]):
-        n = max(1, int(math.dist(p, q) / 0.03))
-        dense += [(p[0] + (q[0] - p[0]) * k / n, p[1] + (q[1] - p[1]) * k / n) for k in range(1, n + 1)]
-    return dense
+def smooth_outline(points):
+    """A body's outline (radius, z) points smoothed through them (a Catmull-Rom curve, mirrored
+    across the axis at both ends so it meets it level), as dense points from the axis under its
+    bottom round its side to the axis over its top."""
+    pts = [(-points[1][0], points[1][1])] + points + [(-points[-2][0], points[-2][1])]
+    curve = []
+    for i in range(1, len(pts) - 2):
+        p0, p1, p2, p3 = pts[i - 1:i + 3]
+        n = max(2, int(math.dist(p1, p2) / 0.008))
+        for k in range(n + (1 if i == len(pts) - 3 else 0)):
+            t = k / n
+            curve.append(tuple(0.5 * (2 * p1[c] + (-p0[c] + p2[c]) * t + (2 * p0[c] - 5 * p1[c] + 4 * p2[c] - p3[c]) * t * t +
+                                      (-p0[c] + 3 * p1[c] - 3 * p2[c] + p3[c]) * t ** 3) for c in (0, 1)))
+    return [(0.0 if r < 1e-6 else r, z) for r, z in curve]
+
+
+def outline_r(points, z):
+    """The radius of a smoothed outline at height z."""
+    for (r0, z0), (r1, z1) in zip(points, points[1:]):
+        if z1 > z0 and z0 <= z <= z1:
+            return r0 + (r1 - r0) * (z - z0) / (z1 - z0)
+    return 0.0
 
 
 def folk(mats):
@@ -385,17 +393,15 @@ def folk(mats):
     # The body: an empty at the hip, with its two shapes and the bow tie under it.
     body_obj = empty("Body", (0, 0, HIP_Z))
     dress = Part("Dress", body_obj.location)
-    dress.lathe(mats["Outfit"], lathe_profile(
-        [(0, BODY_BOTTOM), (DRESS_R0, BODY_BOTTOM), (DRESS_R1, BODY_TOP), (0, BODY_TOP)], [0, 0.05, 0.1, 0]))
+    dress.lathe(mats["Outfit"], smooth_outline(DRESS))
     child(dress, body_obj)
     capsule = Part("Capsule", body_obj.location)
-    r = CAPSULE_W / 2
-    capsule.lathe(mats["Outfit"], lathe_profile(
-        [(0, BODY_BOTTOM), (r, BODY_BOTTOM), (r, CAPSULE_TOP), (0, CAPSULE_TOP)], [0, 0.09, 0.13, 0]),
-        scale=(1.0, CAPSULE_D / CAPSULE_W, 1.0))
+    egg = smooth_outline(CAPSULE)
+    capsule.lathe(mats["Outfit"], egg)
     child(capsule, body_obj)
     bow_tie = Part("BowTie", body_obj.location)
-    bow(bow_tie, mats["Bow"], (0, CAPSULE_D / 2 + 0.01, CAPSULE_TOP - 0.1), CAPSULE_W * 0.98)
+    r = outline_r(egg, BOW_TIE_Z)
+    bow(bow_tie, mats["Bow"], (0, r + 0.01, BOW_TIE_Z), 2 * r)
     child(bow_tie, body_obj)
 
     # Big oval hands floating well out beside the body at its middle height, three finger grooves
@@ -417,7 +423,7 @@ def folk(mats):
                         rotation=n.to_track_quat("Y", "Z").to_matrix().to_4x4(), segments=10, rings=10)
         hand.build()
 
-    # Tube legs from under the body: thighs at the hips, shins at the knees down to rounded feet a
+    # Tube legs from under the body's round base, wide apart but inside it: thighs at the hips, shins at the knees down to rounded feet a
     # little wider than the legs.
     for side, name in ((-1, "L"), (1, "R")):
         x = side * LEG_X

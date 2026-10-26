@@ -29,12 +29,16 @@ public static class Stride
 {
     /// <summary>The hips (LegL / LegR pivots), just inside the bottom of the body.</summary>
     public const float HipHeight = 0.42f;
+    /// <summary>How far out to each side the hips are, inside the round base of the body seen from the front.</summary>
+    public const float HipSide = 0.11f;
     /// <summary>The knees (ShinL / ShinR pivots).</summary>
     public const float KneeHeight = 0.22f;
     /// <summary>The ankle (the middle of the rounded foot's tube end).</summary>
     public const float AnkleHeight = 0.07f;
-    /// <summary>The bottom of the body (the dress's hem, the capsule's bottom).</summary>
-    public const float BodyBottom = 0.37f;
+    /// <summary>The bottom of the body (the lowest point of its round base).</summary>
+    public const float BodyBottom = 0.36f;
+    /// <summary>The top of the body (4 cm under the head).</summary>
+    public const float BodyTop = 0.88f;
     /// <summary>The top of a Pet City bench's seat (meters above the ground).</summary>
     public const float SeatTop = 0.5f;
     /// <summary>A bench's seat edge, in front of a <see cref="CityLife.Seats"/> spot (meters).</summary>
