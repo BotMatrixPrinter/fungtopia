@@ -12,7 +12,7 @@ namespace Fungtopia.PetCity.View;
 /// <c>./screenshot.sh modules/PetCity/Godot/Preview.tscn</c>. It runs its own PetCity Core on a
 /// little bus, draws the Map's ground under it (the Map module's scene, read-only) and its own
 /// simple sky and sun. PETCITY_PREVIEW picks the view: "plaza" (default, from the south
-/// entrance), "store" (Lucy's Pet Store up close), "block", "props" (the statue, benches and lamps on the plaza's west side); add "night" (for example
+/// entrance), "store" (Lucy's Pet Store up close), "block", "props" (the statue, benches and lamps on the plaza's west side), "fungi" (close up along a city block's side, where its little fungi grow), "planter" (close up on a planter's and a lamp's fungi); add "night" (for example
 /// "store,night") for the city at night.
 /// </summary>
 public partial class PetCityPreview : Node3D
@@ -83,6 +83,35 @@ public partial class PetCityPreview : Node3D
             var eye = low + outward * 9f + new System.Numerics.Vector2(outward.Y, -outward.X) * 4f;
             camera.LookAtFromPosition(new Vector3(eye.X, Ground.HeightAt(eye.X, eye.Y) + 1.6f, eye.Y),
                 new Vector3(low.X, lowest + 1.2f, low.Y), Vector3.Up);
+        }
+        else if (mode.Contains("fungi"))
+        {
+            // Along a city block's side, low down, where a row of little fungi grows by its plinth.
+            var b = Buildings.All[PetCityLayout.Pieces[1].BuildingIndex];
+            float hw = b.Width * 0.5f, hd = b.Depth * 0.5f;
+            var eye = b.ToWorld(hw + 2.4f, -hd - 1.4f);
+            var look = b.ToWorld(hw + 0.5f, hd * 0.1f);
+            camera.LookAtFromPosition(new Vector3(eye.X, Ground.HeightAt(eye.X, eye.Y) + 1f, eye.Y),
+                new Vector3(look.X, Ground.HeightAt(look.X, look.Y) + 0.1f, look.Y), Vector3.Up);
+        }
+        else if (mode.Contains("planter"))
+        {
+            // Close up on the little fungi: a planter on the avenue, a lamp's foot and post, a building's foot behind.
+            // The planter nearest the plaza.
+            var planter = PetCityLayout.CityProps[0];
+            float best = float.MaxValue;
+            foreach (var p in PetCityLayout.CityProps)
+            {
+                float d = MathF.Abs(p.Position.Z - plaza.Z) + MathF.Abs(p.Position.X - plaza.X);
+                if (p.Kind == PropKind.Planter && d < best)
+                {
+                    best = d;
+                    planter = p;
+                }
+            }
+            var at = G(planter.Position) + new Vector3(0f, planter.Height, 0f);
+            float side = MathF.Sign(planter.Position.X);
+            camera.LookAtFromPosition(at + new Vector3(-side * 1.2f, 0.5f, -1.9f), at + new Vector3(side * 0.6f, -0.35f, 2.5f), Vector3.Up);
         }
         else if (mode.Contains("store"))
             camera.LookAtFromPosition(G(store) + new Vector3(4f, 3.2f, 13f), G(store) + new Vector3(0f, 2.6f, -4f), Vector3.Up);

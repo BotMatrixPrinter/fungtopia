@@ -18,9 +18,9 @@ public static class PetCityModels
     private static readonly HashSet<string> NoOutline = new() { "EyeShine", "Blush", "Window", "Water", "Glow", "LampGlow" };
 
     /// <summary>Surfaces that glow at night: windows, lamps, the sign's letters and hearts.</summary>
-    private static readonly HashSet<string> NightGlow = new() { "Window", "Glow", "LampGlow", "SignText", "Heart" };
+    private static readonly HashSet<string> NightGlow = new() { "Window", "Glow", "LampGlow", "SignText", "Heart", "FungusGlow" };
 
-    private static readonly Color WindowDay = new(0.56f, 0.78f, 0.96f);
+    private static readonly Color WindowDay = new(0.5f, 0.8f, 1f);
     private static readonly Color WindowNight = new(1f, 0.84f, 0.5f);
 
     private static Shader? s_toon;
@@ -54,11 +54,52 @@ public static class PetCityModels
         {
             var original = source.Mesh.SurfaceGetMaterial(i);
             string material = original?.ResourceName ?? "";
-            var color = material == "Wall" ? wall : material == "Roof" ? roof : material == "CapRoof" ? cap : null;
+            var color = material == "Wall" ? wall : material == "Roof" ? roof : material is "CapRoof" or "LampCap" ? cap : null;
             copy.SetSurfaceOverrideMaterial(i, ToonMaterial(original, color));
         }
         return copy;
     }
+
+    /// <summary>
+    /// A MultiMesh of <paramref name="count"/> copies of the object <paramref name="name"/> (or null
+    /// when missing), toon-shaded with outlines; its tinted materials (<see cref="PetCityLook.TintedMaterials"/>)
+    /// take each instance's color from its custom data (<see cref="Tint"/>).
+    /// </summary>
+    public static MultiMeshInstance3D? Batch(string name, int count)
+    {
+        s_scene ??= Load();
+        if (s_scene?.FindChild(name, true, false) is not MeshInstance3D source || source.Mesh == null)
+        {
+            GD.PushWarning($"Fungtopia: PetCity: {Path} has no object {name}.");
+            return null;
+        }
+        var mesh = (Mesh)source.Mesh.Duplicate();
+        for (int i = 0; i < mesh.GetSurfaceCount(); i++)
+        {
+            var original = source.Mesh.SurfaceGetMaterial(i);
+            string material = original?.ResourceName ?? "";
+            var toon = ToonMaterial(original, null);
+            if (System.Array.IndexOf(PetCityLook.TintedMaterials, material) >= 0)
+                toon.SetShaderParameter("instance_tint", true);
+            if (mesh is ArrayMesh array)
+                array.SurfaceSetMaterial(i, toon);
+        }
+        return new MultiMeshInstance3D
+        {
+            Name = name,
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            Multimesh = new MultiMesh
+            {
+                TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
+                UseCustomData = true,
+                Mesh = mesh,
+                InstanceCount = count,
+            },
+        };
+    }
+
+    /// <summary>A swatch as a MultiMesh instance tint (linear, so a fungus shows its kind's bright colors).</summary>
+    public static Color Tint(Swatch swatch) => ColorOf(swatch).SrgbToLinear();
 
     /// <summary>Lights the windows, lamps and sign (night) or turns them back to daylight glass.</summary>
     public static void SetNight(bool night)
@@ -79,6 +120,7 @@ public static class PetCityModels
                 {
                     "LampGlow" => night ? PetCityLook.LampGlowNight : PetCityLook.GlowDay,
                     "Glow" => night ? PetCityLook.GlowNight : PetCityLook.GlowDay,
+                    "FungusGlow" => night ? PetCityLook.FungusGlowNight : PetCityLook.FungusGlowDay,
                     _ => night ? 0.7f : 0f,
                 };
                 material.SetShaderParameter("self_light", glow);

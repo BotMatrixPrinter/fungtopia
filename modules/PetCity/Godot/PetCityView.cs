@@ -14,15 +14,6 @@ namespace Fungtopia.PetCity.View;
 /// </summary>
 public partial class PetCityView : Node3D, IModuleView
 {
-    /// <summary>The city blocks' wall and roof (parapet) colors, one pair per style; their mushroom cap roofs are <see cref="PetCityLook.StyleCaps"/>.</summary>
-    private static readonly (Color Wall, Color Roof)[] Styles =
-    {
-        (new Color(0.62f, 0.86f, 0.74f), new Color(0.94f, 0.38f, 0.44f)),
-        (new Color(0.78f, 0.7f, 0.96f), new Color(0.98f, 0.62f, 0.36f)),
-        (new Color(1f, 0.84f, 0.48f), new Color(0.5f, 0.6f, 0.96f)),
-        (new Color(0.62f, 0.8f, 0.98f), new Color(0.96f, 0.5f, 0.72f)),
-    };
-
     private static readonly string[] Pets = { "Kitten", "Puppy", "Bunny", "Hamster", "MushroomCrow" };
 
     private PetCityModule? _city;
@@ -39,16 +30,19 @@ public partial class PetCityView : Node3D, IModuleView
 
     public override void _Ready()
     {
-        foreach (var piece in PetCityLayout.Pieces)
+        var pieces = PetCityLayout.Pieces;
+        for (int i = 0; i < pieces.Length; i++)
         {
-            switch (piece.Kind)
+            switch (pieces[i].Kind)
             {
-                case PieceKind.CityBlock: AddCityBlock(piece); break;
-                case PieceKind.PetStore: AddPetStore(piece); break;
+                case PieceKind.CityBlock: AddCityBlock(pieces[i], PetCityFungi.RoofOf(i)!); break;
+                case PieceKind.PetStore: AddPetStore(pieces[i]); break;
             }
         }
-        foreach (var prop in PetCityLayout.CityProps)
-            AddProp(prop);
+        var props = PetCityLayout.CityProps;
+        for (int i = 0; i < props.Length; i++)
+            AddProp(props[i], i);
+        AddFungi();
         _lit = _city?.WindowsLit ?? false;
         Light(_lit);
     }
@@ -118,10 +112,13 @@ public partial class PetCityView : Node3D, IModuleView
         });
     }
 
-    private void AddCityBlock(in Piece piece)
+    /// <summary>Clean bright stone with a hint of <paramref name="tint"/>.</summary>
+    private static Color Stone(Color tint) => PetCityModels.ColorOf(PetCityLook.PlinthStone).Lerp(tint, 0.25f);
+
+    private void AddCityBlock(in Piece piece, string roofModel)
     {
-        var style = Styles[piece.Style];
-        AddPlinth(piece, $"Plinth{piece.BuildingIndex}", style.Wall.Darkened(0.35f));
+        var style = (Wall: PetCityModels.ColorOf(PetCityLook.StyleWalls[piece.Style]), Roof: PetCityModels.ColorOf(PetCityLook.StyleRoofs[piece.Style]));
+        AddPlinth(piece, $"Plinth{piece.BuildingIndex}", Stone(style.Wall));
         var root = new Node3D
         {
             Name = $"CityBlock{piece.BuildingIndex}",
@@ -131,7 +128,7 @@ public partial class PetCityView : Node3D, IModuleView
         var tower = PetCityModels.Instance($"Tower{piece.Stories}", style.Wall, style.Roof);
         if (tower != null)
             root.AddChild(tower);
-        var roof = PetCityModels.Instance(piece.Style % 2 == 0 ? "RoofCap" : "RoofTerrace", style.Wall, style.Roof,
+        var roof = PetCityModels.Instance(roofModel, style.Wall, style.Roof,
             PetCityModels.ColorOf(PetCityLook.StyleCap(piece.Style)));
         if (roof != null)
         {
@@ -143,7 +140,7 @@ public partial class PetCityView : Node3D, IModuleView
     private void AddPetStore(in Piece piece)
     {
         var scale = new Vector3(piece.Size.X / 18f, piece.Size.Y / 11f, piece.Size.Z / 12f);
-        AddPlinth(piece, "PetStorePlinth", new Color(0.86f, 0.7f, 0.78f));
+        AddPlinth(piece, "PetStorePlinth", Stone(PetCityModels.ColorOf(PetCityLook.StoreCap)));
         var root = new Node3D { Name = "PetStore", Transform = Placed(piece, scale) };
         AddChild(root);
         foreach (var name in new[] { "PetStore", "PetStoreInside" })
@@ -183,7 +180,7 @@ public partial class PetCityView : Node3D, IModuleView
         root.AddChild(_storeLight);
     }
 
-    private void AddProp(in CityProp prop)
+    private void AddProp(in CityProp prop, int index)
     {
         var model = PetCityLayout.PropModel(prop.Kind);
         if (model == null)
@@ -202,6 +199,13 @@ public partial class PetCityView : Node3D, IModuleView
         node.Transform = new Transform3D(new Basis(Vector3.Up, prop.Yaw).Scaled(new Vector3(across, tall / height, across)),
             new Vector3(prop.Position.X, prop.Position.Y, prop.Position.Z));
         AddChild(node);
+        if (PetCityFungi.LampCapOf(index) is { } cap && PetCityModels.Instance(cap.Model, cap: PetCityModels.ColorOf(cap.Color)) is { } top)
+        {
+            // The lamp's own cap shape and color, over its post and bulb.
+            top.Name = $"{cap.Model}{prop.PropIndex}";
+            top.Transform = node.Transform;
+            AddChild(top);
+        }
         float flare = PetCityLayout.FlareRadius(prop);
         if (flare > 0f)
         {
@@ -211,9 +215,44 @@ public partial class PetCityView : Node3D, IModuleView
             {
                 Name = $"Flare{prop.PropIndex}",
                 Mesh = new CylinderMesh { TopRadius = prop.Radius * 1.02f, BottomRadius = flare, Height = h, RadialSegments = 24, Rings = 1 },
-                MaterialOverride = PetCityModels.Toon(prop.Kind == PropKind.Statue ? new Color(0.62f, 0.66f, 0.64f) : new Color(0.78f, 0.62f, 0.5f)),
+                MaterialOverride = PetCityModels.Toon(PetCityModels.ColorOf(prop.Kind == PropKind.Statue ? PetCityLook.StatueFlare : PetCityLook.PlanterFlare)),
                 Position = new Vector3(prop.Position.X, prop.Position.Y + h * 0.5f, prop.Position.Z),
             });
+        }
+    }
+
+    /// <summary>
+    /// The little fungi (<see cref="PetCityFungi.All"/>): one MultiMesh per kind, each instance
+    /// scaled, stretched, turned and leaning as the Core says, its cap tinted.
+    /// </summary>
+    private void AddFungi()
+    {
+        var all = PetCityFungi.All;
+        var looks = PetCityFungi.Looks;
+        var counts = new int[looks.Length];
+        foreach (var f in all)
+            counts[(int)f.Kind]++;
+        var batches = new MultiMesh?[looks.Length];
+        for (int k = 0; k < looks.Length; k++)
+        {
+            if (counts[k] == 0 || PetCityModels.Batch(looks[k].Model, counts[k]) is not { } batch)
+                continue;
+            batch.Name = $"Fungi{(FungusKind)k}";
+            AddChild(batch);
+            batches[k] = batch.Multimesh;
+        }
+        var next = new int[looks.Length];
+        foreach (var f in all)
+        {
+            var batch = batches[(int)f.Kind];
+            if (batch == null)
+                continue;
+            var lean = new Vector3(MathF.Sin(f.TiltYaw), 0f, MathF.Cos(f.TiltYaw));
+            var basis = new Basis(Vector3.Up.Cross(lean).Normalized(), f.Tilt) * new Basis(Vector3.Up, f.Yaw)
+                * Basis.FromScale(new Vector3(f.Height * f.Width, f.Height, f.Height * f.Width));
+            int i = next[(int)f.Kind]++;
+            batch.SetInstanceTransform(i, new Transform3D(basis, new Vector3(f.Position.X, f.Position.Y, f.Position.Z)));
+            batch.SetInstanceCustomData(i, PetCityModels.Tint(f.Tint));
         }
     }
 }

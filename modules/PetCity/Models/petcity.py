@@ -15,13 +15,19 @@
 #                       roof. PetStoreInside: its pet beds, cages and the crow's perch.
 #   Counter             the shop counter (5 m x 1 m), drawn at the store's open front.
 #   Kitten, Puppy, Bunny, Hamster, MushroomCrow  the pets on display, at their spots in the store.
+#   RoofCapWavy, RoofCapBell, RoofCapFlat  the other mushroom cap roofs (3 m tall at most).
+#   LampCapDome .. LampCapCone  the city lamps' caps (one shape each; the game picks one per lamp).
+#   Fungus*             the little fungi (fly agaric, bolete, chanterelle, parasol, ink cap, morel, enoki,
+#                       amethyst, puffball, bracket, cup, coral, jelly, glow cap), each 1 m tall; the game
+#                       scales, tilts and tints them ("FungusCap" / "FungusGlow" are white).
 #   CityLamp, Bench, Planter, Statue  the Map's solid props (drawn scaled to each prop's size):
-#                       a glowing mushroom street lamp (0.6 m across, 2.6 m tall), a bench (1.6 m long,
+#                       a glowing street lamp's post and bulb (0.6 m across, 2.6 m tall), a bench (1.6 m long,
 #                       0.9 m tall, its seat along X, facing +Y), a round planter (1.2 m across, 0.7 m
 #                       tall), a verdigris Mushroom Cat statue on a pedestal (2.2 m across, 3.4 m tall).
 # Every piece stands at the origin on the ground, centered on its footprint, its front toward
 # Blender +Y (Godot -Z, as a Map building at rotation 0). The store's contents are placed in the
 # store's own frame. Only creatures (the pets) have eyes; buildings and objects never do.
+import itertools
 import math
 import os
 
@@ -32,50 +38,63 @@ from mathutils import Matrix
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 COLORS = {
-    "Wall": (0.98, 0.72, 0.62),
-    "Roof": (0.92, 0.36, 0.42),
-    "Trim": (1.0, 0.95, 0.86),
-    "Plinth": (0.62, 0.56, 0.66),
-    "Window": (0.56, 0.78, 0.96),
-    "Frame": (0.98, 0.98, 0.96),
-    "Door": (0.6, 0.38, 0.26),
-    "Awning": (0.96, 0.44, 0.52),
-    "AwningStripe": (1.0, 0.97, 0.92),
-    "FlowerBox": (0.58, 0.4, 0.3),
-    "Leaf": (0.46, 0.76, 0.38),
-    "Flower": (1.0, 0.82, 0.32),
+    # Candy-bright paints, clean bright stone, lush greens and flowers in many hues (the same values
+    # as PetCityLook.Paints in Core, which the tests check this .glb against).
+    "Wall": (1.0, 0.7, 0.56),
+    "Roof": (1.0, 0.32, 0.42),
+    "Trim": (1.0, 0.96, 0.86),
+    "Plinth": (0.84, 0.8, 0.92),
+    "Window": (0.5, 0.8, 1.0),
+    "Frame": (1.0, 0.99, 0.96),
+    "Door": (0.86, 0.44, 0.2),
+    "Awning": (1.0, 0.34, 0.5),
+    "AwningStripe": (1.0, 0.98, 0.92),
+    "FlowerBox": (0.86, 0.5, 0.26),
+    "Leaf": (0.28, 0.82, 0.22),
+    "LeafLight": (0.64, 0.92, 0.16),
+    "LeafDeep": (0.1, 0.68, 0.32),
+    "Flower": (1.0, 0.84, 0.1),
+    "FlowerPink": (1.0, 0.36, 0.68),
+    "FlowerBlue": (0.32, 0.56, 1.0),
+    "FlowerPurple": (0.7, 0.36, 1.0),
+    "FlowerOrange": (1.0, 0.52, 0.12),
     # The mushrooms (vivid: saturated bright caps, pure white spots, clean light cream stems; the
-    # same values as PetCityLook in Core, which the tests check this .glb against).
+    # same values as PetCityLook in Core). FungusCap and FungusGlow are white: the game tints them
+    # per mushroom (each kind its colors), as it does LampCap per lamp.
     "Spots": (1.0, 1.0, 1.0),
     "Stem": (1.0, 0.96, 0.86),
     "Cap": (1.0, 0.12, 0.12),
     "CapRoof": (1.0, 0.1, 0.16),
     "StoreCap": (1.0, 0.3, 0.6),
+    "LampCap": (1.0, 0.3, 0.6),
     "LampGlow": (1.0, 0.9, 0.58),
-    "StoreWall": (0.78, 0.9, 0.98),
-    "StoreRoof": (0.98, 0.56, 0.7),
-    "FloorTile": (0.98, 0.9, 0.78),
-    "SignBoard": (1.0, 0.97, 0.9),
-    "SignTrim": (0.96, 0.44, 0.6),
-    "SignText": (0.88, 0.24, 0.4),
-    "Heart": (1.0, 0.36, 0.52),
+    "FungusCap": (1.0, 1.0, 1.0),
+    "FungusGlow": (1.0, 1.0, 1.0),
+    "MorelPit": (0.56, 0.3, 0.12),
+    "Ink": (0.3, 0.22, 0.46),
+    "StoreWall": (0.62, 0.88, 1.0),
+    "StoreRoof": (1.0, 0.56, 0.72),
+    "FloorTile": (1.0, 0.92, 0.76),
+    "SignBoard": (1.0, 0.98, 0.9),
+    "SignTrim": (1.0, 0.4, 0.62),
+    "SignText": (0.94, 0.18, 0.42),
+    "Heart": (1.0, 0.3, 0.5),
     "Glow": (1.0, 0.9, 0.58),
-    "Wood": (0.74, 0.5, 0.32),
-    "WoodDark": (0.5, 0.32, 0.2),
-    "CounterTop": (0.98, 0.66, 0.74),
-    "Bag1": (0.4, 0.62, 0.94),
-    "Bag2": (0.98, 0.78, 0.32),
-    "Bag3": (0.5, 0.8, 0.5),
-    "Bowl": (0.9, 0.36, 0.4),
-    "Cushion": (0.72, 0.6, 0.94),
-    "CushionIn": (1.0, 0.94, 0.9),
-    "Bars": (0.96, 0.82, 0.4),
-    "Straw": (0.98, 0.86, 0.5),
-    "Stone": (0.86, 0.84, 0.9),
-    "Water": (0.5, 0.82, 1.0),
+    "Wood": (0.9, 0.56, 0.28),
+    "WoodDark": (0.66, 0.36, 0.18),
+    "CounterTop": (1.0, 0.62, 0.74),
+    "Bag1": (0.3, 0.6, 1.0),
+    "Bag2": (1.0, 0.78, 0.2),
+    "Bag3": (0.4, 0.86, 0.36),
+    "Bowl": (1.0, 0.32, 0.38),
+    "Cushion": (0.72, 0.54, 1.0),
+    "CushionIn": (1.0, 0.95, 0.9),
+    "Bars": (1.0, 0.82, 0.3),
+    "Straw": (1.0, 0.86, 0.42),
+    "Stone": (0.92, 0.9, 0.97),
     "Bone": (1.0, 0.96, 0.88),
-    "Bronze": (0.5, 0.78, 0.7),
-    "Pot": (0.94, 0.56, 0.42),
+    "Bronze": (0.36, 0.86, 0.72),
+    "Pot": (1.0, 0.52, 0.32),
     # The pets (only they have eyes).
     "Cream": (1.0, 0.96, 0.88),
     "Eye": (0.07, 0.04, 0.06),
@@ -94,6 +113,9 @@ COLORS = {
     "Beak": (1.0, 0.68, 0.24),
 }
 ORDER = list(COLORS)
+GREENS = ("Leaf", "LeafLight", "LeafDeep")
+FLOWERS = ("Flower", "FlowerPink", "FlowerBlue", "FlowerPurple", "FlowerOrange")
+FLOWER_TURN = itertools.count()
 
 
 def material(name, color):
@@ -190,6 +212,38 @@ def dome(radius, height, matrix, segments=32, rings=10):
     return part
 
 
+def revolve(profile, matrix, segments=20, wobble=0.0, waves=0):
+    """A closed surface of revolution about Z from `profile`, (r, z) points from the top (r = 0) round to
+    the bottom (r = 0); `wobble` waves the rim up and down `waves` times (a wavy cap)."""
+    part = bmesh.new()
+    rmax = max(r for r, _ in profile) or 1.0
+    rings = []
+    for r, z in profile:
+        if r <= 1e-6:
+            rings.append([part.verts.new((0.0, 0.0, z))])
+            continue
+        ring = []
+        for k in range(segments):
+            a = 2 * math.pi * k / segments
+            dz = wobble * math.sin(waves * a) * (r / rmax) ** 2 if waves else 0.0
+            ring.append(part.verts.new((math.cos(a) * r, math.sin(a) * r, z + dz)))
+        rings.append(ring)
+    for top, bottom in zip(rings, rings[1:]):
+        for k in range(segments):
+            k2 = (k + 1) % segments
+            if len(top) == 1 and len(bottom) == 1:
+                continue
+            if len(top) == 1:
+                part.faces.new((top[0], bottom[k2], bottom[k]))
+            elif len(bottom) == 1:
+                part.faces.new((top[k], top[k2], bottom[0]))
+            else:
+                part.faces.new((top[k], top[k2], bottom[k2], bottom[k]))
+    bmesh.ops.recalc_face_normals(part, faces=part.faces)
+    bmesh.ops.transform(part, matrix=matrix, verts=part.verts)
+    return part
+
+
 def spots_on_dome(piece, radius, height, base, count=7, size=0.14, mat="Spots", seed=0.0):
     """White spots sitting on a cap of `radius` x `height` whose base is at `base` (a matrix)."""
     for i in range(count):
@@ -281,11 +335,14 @@ def window(piece, frame, x, z, flower=False):
     piece.add(box((w + 0.4, 0.34, 0.14), frame @ T(x, 0.14, z - 0.05), bevel=0.04, segments=1), "Trim")
     if flower:
         piece.add(box((w + 0.1, 0.36, 0.3), frame @ T(x, 0.36, z - 0.24), bevel=0.06, segments=1), "FlowerBox")
+        k = int(round(x * 3 + z * 7))
         for i in range(4):
             fx = x - 0.45 + i * 0.3
-            piece.add(sphere(0.15, frame @ T(fx, 0.38, z - 0.02), scale=(1, 1, 0.8), segments=10, rings=5), "Leaf")
+            piece.add(sphere(0.15, frame @ T(fx, 0.38, z - 0.02), scale=(1, 1, 0.8), segments=10, rings=5),
+                      GREENS[(k + i) % len(GREENS)])
             if i % 2 == 0:
-                piece.add(sphere(0.08, frame @ T(fx + 0.06, 0.48, z + 0.08), segments=8, rings=4), "Flower")
+                piece.add(sphere(0.08, frame @ T(fx + 0.06, 0.48, z + 0.08), segments=8, rings=4),
+                          FLOWERS[next(FLOWER_TURN) % len(FLOWERS)])
 
 
 def tower(stories):
@@ -344,6 +401,26 @@ def roof_cap():
     return p.finish()
 
 
+def roof_cap_variant(name, profile, wobble=0.0, waves=0, spots=True):
+    p = Piece(name)
+    p.add(cylinder(BLOCK * 0.5, 0.5, T(0, 0, 0.25), segments=32), "Trim")
+    p.add(revolve(profile, T(0, 0, 0.4), segments=40, wobble=wobble, waves=waves), "CapRoof")
+    if spots:
+        spots_on_dome(p, BLOCK * 0.62, 1.9, T(0, 0, 0.4), count=9, size=0.12, seed=0.4)
+    return p.finish()
+
+
+def roof_caps():
+    """The other mushroom cap roofs (3 m at most, like RoofCap): wavy, a bell and a flat parasol with a knob."""
+    w = BLOCK * 0.72
+    roof_cap_variant("RoofCapWavy", [(0, 2.2), (w * 0.35, 2.05), (w * 0.65, 1.55), (w * 0.9, 0.8), (w, 0.2),
+                                     (w * 0.9, 0.0), (0, 0.0)], wobble=0.35, waves=7)
+    roof_cap_variant("RoofCapBell", [(0, 2.6), (w * 0.3, 2.5), (w * 0.55, 2.1), (w * 0.72, 1.3), (w * 0.82, 0.3),
+                                     (w * 0.92, -0.2), (w * 0.7, 0.0), (0, 0.0)])
+    roof_cap_variant("RoofCapFlat", [(0, 2.7), (w * 0.12, 2.6), (w * 0.22, 2.0), (w * 0.6, 1.75), (w * 0.95, 1.0),
+                                     (w, 0.6), (w * 0.9, 0.45), (0, 0.4)], spots=False)
+
+
 def roof_terrace():
     p = Piece("RoofTerrace")
     # A flat terrace behind a parapet, a little mushroom water tower and potted mushrooms.
@@ -356,9 +433,8 @@ def roof_terrace():
     p.add(dome(1.9, 1.1, T(2.5, -2.0, 2.8)), "Cap")
     spots_on_dome(p, 1.9, 1.1, T(2.5, -2.0, 2.8), count=6, size=0.16)
     for x, y in ((-3.5, 3.0), (-1.5, 3.4), (3.6, 3.2), (-3.8, -3.4)):
-        p.add(cylinder(0.4, 0.5, T(x, y, 0.55), radius2=0.5, segments=14), "FlowerBox")
-        p.add(cylinder(0.12, 0.5, T(x, y, 1.0), segments=10), "Stem")
-        p.add(dome(0.45, 0.35, T(x, y, 1.2)), "Cap")
+        p.add(cylinder(0.4, 0.5, T(x, y, 0.55), radius2=0.5, segments=14), "Pot")
+        p.add(cylinder(0.44, 0.06, T(x, y, 0.8), segments=14), "LeafDeep")
     return p.finish()
 
 
@@ -589,9 +665,28 @@ def city_lamp():
     p.add(cylinder(0.3, 0.2, T(0, 0, 0.1), segments=20), "Plinth")
     p.add(cylinder(0.09, 2.1, T(0, 0, 1.2), radius2=0.07, segments=12), "Trim")
     p.add(sphere(0.18, T(0, 0, 2.3), segments=14, rings=7), "LampGlow")
-    p.add(dome(0.3, 0.22, T(0, 0, 2.38)), "StoreCap")
-    spots_on_dome(p, 0.3, 0.22, T(0, 0, 2.38), count=5, size=0.06)
     return p.finish()
+
+
+LAMP_CAPS = {
+    # name: (profile from the top round to the bottom, wobble, waves, spotted); top at 2.6 m at most.
+    "LampCapDome": ([(0, 0.22), (0.15, 0.19), (0.26, 0.11), (0.3, 0.02), (0.26, 0.0), (0, 0.0)], 0, 0, True),
+    "LampCapBell": ([(0, 0.22), (0.1, 0.21), (0.18, 0.12), (0.23, -0.04), (0.27, -0.14), (0.2, -0.08), (0, 0.0)], 0, 0, False),
+    "LampCapFlat": ([(0, 0.16), (0.06, 0.15), (0.1, 0.1), (0.3, 0.07), (0.34, 0.02), (0.3, 0.0), (0, 0.0)], 0, 0, False),
+    "LampCapFunnel": ([(0, 0.06), (0.2, 0.12), (0.32, 0.2), (0.34, 0.16), (0.22, 0.04), (0.12, 0.0), (0, 0.0)], 0.03, 6, False),
+    "LampCapWavy": ([(0, 0.2), (0.12, 0.18), (0.24, 0.1), (0.31, 0.03), (0.27, 0.0), (0, 0.0)], 0.04, 6, True),
+    "LampCapCone": ([(0, 0.22), (0.08, 0.16), (0.18, 0.07), (0.28, 0.0), (0.2, -0.02), (0, 0.0)], 0, 0, False),
+}
+
+
+def lamp_caps():
+    """The city lamps' mushroom caps, one shape per object; the game picks one per lamp (and its color)."""
+    for name, (profile, wobble, waves, spotted) in LAMP_CAPS.items():
+        p = Piece(name)
+        p.add(revolve(profile, T(0, 0, 2.38), segments=24, wobble=wobble, waves=waves), "LampCap")
+        if spotted:
+            spots_on_dome(p, 0.26, 0.19, T(0, 0, 2.38), count=5, size=0.08)
+        p.finish()
 
 
 def bench():
@@ -614,11 +709,13 @@ def planter():
     p.add(cylinder(0.62, 0.08, T(0, 0, 0.45), segments=24), "Trim")
     for i in range(7):
         a = 2 * math.pi * i / 7
-        p.add(sphere(0.2, T(math.cos(a) * 0.32, math.sin(a) * 0.32, 0.5), segments=10, rings=5), "Leaf")
-        p.add(sphere(0.07, T(math.cos(a + 0.4) * 0.38, math.sin(a + 0.4) * 0.38, 0.64), segments=8, rings=4), "Flower")
-    p.add(sphere(0.22, T(0, 0, 0.52), segments=10, rings=5), "Leaf")
-    p.add(cylinder(0.04, 0.14, T(0.1, 0.05, 0.6), segments=8), "Stem")
-    p.add(dome(0.09, 0.07, T(0.1, 0.05, 0.66), segments=12, rings=4), "Cap")
+        p.add(sphere(0.16, T(math.cos(a) * 0.45, math.sin(a) * 0.45, 0.5), scale=(1, 1, 0.75), segments=10, rings=5),
+              GREENS[i % len(GREENS)])
+        p.add(sphere(0.07, T(math.cos(a + 0.45) * 0.47, math.sin(a + 0.45) * 0.47, 0.6), segments=8, rings=4),
+              FLOWERS[i % len(FLOWERS)])
+    # Soil in the middle, where the game plants its little mushrooms.
+    p.add(cylinder(0.36, 0.06, T(0, 0, 0.5), segments=20), "LeafDeep")
+    p.add(sphere(0.34, T(0, 0, 0.5), scale=(1, 1, 0.09), segments=16, rings=4), "LeafDeep")
     return p.finish()
 
 
@@ -643,6 +740,179 @@ def statue():
     return p.finish()
 
 
+# The little fungi (decoration under 0.4 m, planted by the game) ---------------------------------
+# Each kind is built 1 m tall (its top at z = 1), standing at the origin; the game scales, stretches
+# and tilts each one, and tints its "FungusCap" / "FungusGlow" per mushroom (PetCityLook.Fungi).
+# A bracket fungus is built against a stem at -Y (Godot +Z), sticking out toward +Y.
+
+
+def stem(p, r1, r2, height, z0=0.0, segments=12):
+    p.add(cylinder(r1, height, T(0, 0, z0 + height / 2), radius2=r2, segments=segments), "Stem")
+
+
+def fly_agaric():
+    p = Piece("FungusFlyAgaric")
+    stem(p, 0.12, 0.08, 0.66)
+    p.add(cylinder(0.13, 0.04, T(0, 0, 0.5), radius2=0.1, segments=12), "Stem")
+    p.add(dome(0.34, 0.36, T(0, 0, 0.64), segments=20, rings=6), "FungusCap")
+    spots_on_dome(p, 0.34, 0.36, T(0, 0, 0.64), count=7, size=0.15)
+    return p.finish()
+
+
+def bolete():
+    p = Piece("FungusBolete")
+    p.add(revolve([(0, 0.6), (0.14, 0.58), (0.2, 0.35), (0.22, 0.12), (0.16, 0.0), (0, 0.0)], T(), segments=14), "Stem")
+    p.add(revolve([(0, 1.0), (0.22, 0.97), (0.38, 0.86), (0.45, 0.66), (0.4, 0.54), (0.2, 0.52), (0, 0.55)], T(),
+                  segments=20), "FungusCap")
+    return p.finish()
+
+
+def chanterelle():
+    p = Piece("FungusChanterelle")
+    # A golden funnel with a wavy rim; its stem flows into the cap.
+    p.add(revolve([(0, 0.82), (0.18, 0.86), (0.34, 0.94), (0.4, 1.0), (0.38, 0.9), (0.24, 0.7), (0.1, 0.4),
+                   (0.08, 0.05), (0.1, 0.0), (0, 0.0)], T(), segments=20, wobble=0.06, waves=6), "FungusCap")
+    return p.finish()
+
+
+def parasol():
+    p = Piece("FungusParasol")
+    stem(p, 0.05, 0.03, 0.92, segments=10)
+    p.add(cylinder(0.06, 0.03, T(0, 0, 0.66), radius2=0.045, segments=10), "Stem")
+    p.add(revolve([(0, 1.0), (0.06, 0.98), (0.1, 0.93), (0.42, 0.88), (0.48, 0.84), (0.44, 0.82), (0, 0.86)], T(),
+                  segments=24), "FungusCap")
+    spots_on_dome(p, 0.38, 0.06, T(0, 0, 0.88), count=8, size=0.07)
+    return p.finish()
+
+
+def ink_cap():
+    p = Piece("FungusInkCap")
+    stem(p, 0.07, 0.05, 0.5, segments=10)
+    p.add(revolve([(0, 1.0), (0.08, 0.98), (0.14, 0.88), (0.17, 0.66), (0.18, 0.42), (0.16, 0.36), (0, 0.4)], T(),
+                  segments=16), "FungusCap")
+    # A shaggy, inky rim.
+    p.add(cylinder(0.185, 0.05, T(0, 0, 0.39), radius2=0.17, segments=16), "Ink")
+    for i in range(10):
+        a = 2 * math.pi * i / 10
+        z = 0.55 + (i % 3) * 0.12
+        p.add(sphere(0.035, T(math.cos(a) * 0.17, math.sin(a) * 0.17, z), scale=(1, 1, 1.6), segments=6, rings=3), "Spots")
+    return p.finish()
+
+
+def morel():
+    p = Piece("FungusMorel")
+    stem(p, 0.13, 0.1, 0.4)
+    p.add(revolve([(0, 1.0), (0.08, 0.92), (0.16, 0.72), (0.2, 0.52), (0.18, 0.36), (0, 0.36)], T(), segments=16),
+          "FungusCap")
+    # The honeycomb: rows of dark pits.
+    for row in range(4):
+        z = 0.45 + row * 0.13
+        r = 0.2 - row * 0.035
+        for i in range(7):
+            a = 2 * math.pi * (i + 0.5 * row) / 7
+            p.add(sphere(0.045, T(math.cos(a) * r, math.sin(a) * r, z), scale=(0.6, 0.6, 1.1), segments=6, rings=3),
+                  "MorelPit")
+    return p.finish()
+
+
+def enoki():
+    p = Piece("FungusEnoki")
+    # A bunch of tall thin stems with tiny caps, of different heights, from one base.
+    p.add(sphere(0.12, T(0, 0, 0.03), scale=(1, 1, 0.5), segments=10, rings=4), "Stem")
+    for i, (x, y, h, lean) in enumerate(((0, 0, 1.0, 0), (0.07, 0.02, 0.86, 9), (-0.06, 0.05, 0.92, -8),
+                                         (0.02, -0.07, 0.74, 12), (-0.05, -0.04, 0.8, -12), (0.08, -0.05, 0.64, 16),
+                                         (-0.08, 0.0, 0.7, -16))):
+        m = T(x, y, 0) @ R("Y" if i % 2 else "X", lean)
+        p.add(cylinder(0.018, h - 0.04, m @ T(0, 0, (h - 0.04) / 2), segments=6), "Stem")
+        p.add(dome(0.05, 0.05, m @ T(0, 0, h - 0.05), segments=10, rings=3), "FungusCap")
+    return p.finish()
+
+
+def amethyst():
+    p = Piece("FungusAmethyst")
+    stem(p, 0.09, 0.07, 0.62)
+    p.add(revolve([(0, 1.0), (0.16, 0.97), (0.3, 0.86), (0.4, 0.7), (0.42, 0.62), (0.36, 0.6), (0, 0.62)], T(),
+                  segments=20, wobble=0.04, waves=5), "FungusCap")
+    return p.finish()
+
+
+def puffball():
+    p = Piece("FungusPuffball")
+    p.add(cylinder(0.16, 0.14, T(0, 0, 0.07), radius2=0.24, segments=12), "Stem")
+    p.add(revolve([(0, 1.0), (0.24, 0.96), (0.4, 0.82), (0.47, 0.56), (0.4, 0.28), (0.24, 0.12), (0, 0.1)], T(),
+                  segments=20), "FungusCap")
+    for i in range(9):
+        a = 2 * math.pi * i / 9
+        r, z = (0.22, 0.92) if i % 2 else (0.38, 0.74)
+        p.add(sphere(0.03, T(math.cos(a) * r, math.sin(a) * r, z), segments=6, rings=3), "Spots")
+    return p.finish()
+
+
+def bracket():
+    p = Piece("FungusBracket")
+    # Three stacked half-shelves against a stem (at -Y), outward toward +Y, banded rims.
+    for i, (z, w, d) in enumerate(((0.8, 0.5, 0.42), (0.45, 0.42, 0.34), (0.12, 0.3, 0.26))):
+        shelf = T(0, 0, z) @ S(w, d, 0.2)
+        part = sphere(1.0, Matrix(), segments=16, rings=6)
+        bmesh.ops.delete(part, geom=[v for v in part.verts if v.co.y < -1e-4], context="VERTS")
+        bmesh.ops.contextual_create(part, geom=[e for e in part.edges if e.is_boundary])
+        bmesh.ops.transform(part, matrix=shelf, verts=part.verts)
+        p.add(part, "FungusCap")
+        p.add(cylinder(1.0, 0.05, T(0, 0, z - 0.02) @ S(w * 1.02, d * 1.02, 1), segments=16), "Stem")
+    return p.finish()
+
+
+def cup_fungus():
+    p = Piece("FungusCup")
+    # A scarlet cup: a deep bowl open on top, cream inside lip.
+    p.add(revolve([(0, 0.55), (0.3, 0.62), (0.42, 0.84), (0.46, 1.0), (0.5, 0.98), (0.48, 0.7), (0.3, 0.28),
+                   (0.12, 0.06), (0, 0.0)], T(), segments=20, wobble=0.04, waves=5), "FungusCap")
+    return p.finish()
+
+
+def coral():
+    p = Piece("FungusCoral")
+    # Branching arms, each forking twice, with round tips.
+    p.add(cylinder(0.1, 0.3, T(0, 0, 0.15), radius2=0.08, segments=10), "FungusCap")
+
+    def branch(m, length, radius, depth):
+        p.add(cylinder(radius, length, m @ T(0, 0, length / 2), radius2=radius * 0.75, segments=8), "FungusCap")
+        tip = m @ T(0, 0, length)
+        if depth == 0:
+            p.add(sphere(radius * 1.1, tip, segments=8, rings=4), "FungusCap")
+            return
+        for k, spread in enumerate((-28, 28)):
+            branch(tip @ R("Z", 90 * k + depth * 40) @ R("X", spread), length * 0.72, radius * 0.72, depth - 1)
+
+    for k in range(3):
+        branch(T(0, 0, 0.28) @ R("Z", 120 * k) @ R("X", 22), 0.34, 0.07, 2)
+    return p.finish()
+
+
+def jelly():
+    p = Piece("FungusJelly")
+    # Glossy ruffled lobes, like a little ear jelly.
+    for i, (x, y, z, s) in enumerate(((0, 0, 0.55, 0.32), (0.18, 0.08, 0.35, 0.26), (-0.16, 0.1, 0.32, 0.24),
+                                      (0.04, -0.16, 0.25, 0.22), (0.0, 0.05, 0.85, 0.18))):
+        p.add(sphere(s, T(x, y, z) @ R("Z", i * 50) @ R("X", 25), scale=(1, 0.45, 0.8), segments=12, rings=6), "FungusCap")
+    return p.finish()
+
+
+def glow_cap():
+    p = Piece("FungusGlowCap")
+    # Bioluminescent: slim stems, three conical caps that glow at night.
+    for x, y, h, r, lean in ((0, 0, 1.0, 0.2, 0), (0.18, 0.06, 0.66, 0.14, 14), (-0.14, 0.1, 0.48, 0.12, -16)):
+        m = T(x, y, 0) @ R("Y", lean)
+        p.add(cylinder(0.03, h - 0.1, m @ T(0, 0, (h - 0.1) / 2), segments=8), "Stem")
+        p.add(revolve([(0, h), (r * 0.4, h - r * 0.4), (r, h - r * 0.9), (r * 0.8, h - r), (0, h - r * 0.8)], m,
+                      segments=14), "FungusGlow")
+    return p.finish()
+
+
+FUNGI = (fly_agaric, bolete, chanterelle, parasol, ink_cap, morel, enoki, amethyst, puffball, bracket, cup_fungus,
+         coral, jelly, glow_cap)
+
+
 bpy.ops.wm.read_factory_settings(use_empty=True)
 for name, color in COLORS.items():
     material(name, color)
@@ -650,6 +920,7 @@ for name, color in COLORS.items():
 for n in range(3, 11):
     tower(n)
 roof_cap()
+roof_caps()
 roof_terrace()
 pet_store()
 counter()
@@ -660,9 +931,12 @@ bunny()
 hamster()
 mushroom_crow()
 city_lamp()
+lamp_caps()
 bench()
 planter()
 statue()
+for build in FUNGI:
+    build()
 
 path = os.path.join(HERE, "petcity.glb")
 bpy.ops.export_scene.gltf(filepath=path, export_format="GLB", export_yup=True)

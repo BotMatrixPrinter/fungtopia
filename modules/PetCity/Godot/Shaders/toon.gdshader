@@ -1,5 +1,6 @@
 // The home's toon surface: soft two-band light, a gentle rim, optional glow (lamps, eye sparkles),
-// and on mushroom caps a soft glossy highlight band and a light rim along the edge.
+// on mushroom caps a soft glossy highlight band and a light rim along the edge, and an optional
+// per-instance tint (the little fungi's caps).
 shader_type spatial;
 render_mode specular_disabled;
 
@@ -10,10 +11,18 @@ uniform float self_light = 0.0;
 uniform float gloss = 0.0;
 // The mushroom caps' light rim along the edge (0: none).
 uniform float rim_light = 0.0;
+// The little fungi (a MultiMesh): each cap tinted by its instance's custom data (linear color).
+uniform bool instance_tint = false;
+
+varying vec3 tint;
+
+void vertex() {
+	tint = instance_tint ? INSTANCE_CUSTOM.rgb : vec3(1.0);
+}
 
 void fragment() {
-	ALBEDO = albedo;
-	EMISSION = albedo * self_light;
+	ALBEDO = albedo * tint;
+	EMISSION = ALBEDO * self_light;
 }
 
 void light() {

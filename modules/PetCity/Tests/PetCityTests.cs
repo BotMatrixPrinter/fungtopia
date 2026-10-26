@@ -549,24 +549,26 @@ public class PetCityTests
     }
 
     [Fact]
-    public void OnlyMushroomsChangedColor()
+    public void TheModelsMaterialsAreTheirMushroomsAndPaints()
     {
-        // The materials the mushrooms shared before keep their colors on what is not a mushroom:
-        // the terraces' parapets, the store's floor tiles, its ceiling lamps, the pets' muzzles.
         var colors = ModelColors();
-        AssertColor(new Swatch(0.92f, 0.36f, 0.42f), colors["Roof"], "Roof");
-        AssertColor(new Swatch(0.98f, 0.56f, 0.7f), colors["StoreRoof"], "StoreRoof");
-        AssertColor(new Swatch(1f, 0.9f, 0.58f), colors["Glow"], "Glow");
-        AssertColor(new Swatch(1f, 0.96f, 0.88f), colors["Cream"], "Cream");
-        AssertColor(new Swatch(0.5f, 0.78f, 0.7f), colors["Bronze"], "Bronze");
+        AssertColor(PetCityLook.LampCaps[0], colors["LampCap"], "LampCap");
+        // The little fungi's caps are white in the model: the view tints each one.
+        foreach (var tinted in PetCityLook.TintedMaterials)
+            AssertColor(new Swatch(1f, 1f, 1f), colors[tinted], tinted);
+        foreach (var (name, paint) in PetCityLook.Paints)
+            AssertColor(paint, colors[name], name);
+        // Every material is a mushroom's, a paint, or one of the pets' own.
+        var pets = new HashSet<string> { "Cream", "Eye", "EyeShine", "Blush", "Nose", "CatFur", "PupFur", "PupEar", "BunnyFur",
+            "BunnyEar", "HamFur", "HamLight", "CrowBody", "CrowLight", "Beak", "Bone", "CushionIn" };
+        foreach (var name in colors.Keys)
+            Assert.True(PetCityLook.IsMushroom(name) || PetCityLook.Paints.ContainsKey(name) || pets.Contains(name), name);
 
         Assert.Contains("CapRoof", ModelMaterials("RoofCap"));
         Assert.DoesNotContain("Roof", ModelMaterials("RoofCap"));
         Assert.Contains("Roof", ModelMaterials("RoofTerrace"));
         var lamp = ModelMaterials("CityLamp");
         Assert.Contains("LampGlow", lamp);
-        Assert.Contains("StoreCap", lamp);
-        Assert.Contains("Spots", lamp);
         Assert.DoesNotContain("Glow", lamp);
         Assert.DoesNotContain("StoreRoof", lamp);
         var store = ModelMaterials("PetStore");
@@ -580,10 +582,319 @@ public class PetCityTests
         }
     }
 
+    // The vibrant world: candy-bright paints, lush greens, flowers in many hues
+
+    /// <summary>The city blocks' walls and roofs per style before (the view's).</summary>
+    private static readonly Swatch[] OldWalls =
+        { new(0.62f, 0.86f, 0.74f), new(0.78f, 0.7f, 0.96f), new(1f, 0.84f, 0.48f), new(0.62f, 0.8f, 0.98f) };
+    private static readonly Swatch[] OldRoofs =
+        { new(0.94f, 0.38f, 0.44f), new(0.98f, 0.62f, 0.36f), new(0.5f, 0.6f, 0.96f), new(0.96f, 0.5f, 0.72f) };
+
+    [Fact]
+    public void PaintsAreCandyBrightNeverWashedOutOrNeon()
+    {
+        foreach (var (name, c) in PetCityLook.Paints)
+        {
+            if (Array.IndexOf(PetCityLook.Neutrals, name) >= 0)
+            {
+                // Clean and bright, lightly tinted.
+                Assert.True(c.Value >= 0.9f && c.Min >= 0.75f && c.Saturation <= 0.25f, $"{name} {c} is not a clean light neutral");
+                continue;
+            }
+            Assert.True(c.Value >= 0.66f, $"{name} {c} is dull");
+            Assert.True(c.Saturation is >= 0.3f and <= 0.92f, $"{name} {c} is washed out or neon");
+            Assert.True(c.Min <= 0.75f, $"{name} {c} is washed out toward white");
+        }
+        // The buildings' paints: richer and at least as bright as before, still not neon.
+        for (int i = 0; i < PetCityLayout.StyleCount; i++)
+        {
+            foreach (var (now, old, what) in new[] { (PetCityLook.StyleWalls[i], OldWalls[i], "wall"), (PetCityLook.StyleRoofs[i], OldRoofs[i], "roof") })
+            {
+                Assert.True(now.Saturation >= old.Saturation + 0.1f, $"style {i} {what} {now} is not richer than {old}");
+                Assert.True(now.Value >= old.Value - 0.06f && now.Value >= 0.9f, $"style {i} {what} {now} is darker than {old}");
+                Assert.True(now.Saturation <= 0.9f, $"style {i} {what} {now} is neon");
+            }
+        }
+        // Clean bright stone under the buildings, and on the statue's pedestal.
+        foreach (var stone in new[] { PetCityLook.PlinthStone, PetCityLook.StatueFlare, PetCityLook.Paints["Stone"] })
+            Assert.True(stone.Value >= 0.85f && stone.Saturation <= 0.15f, $"{stone} is not clean bright stone");
+    }
+
+    [Fact]
+    public void GreensAreLushWithYellowGreenHighlightsAndFlowersComeInManyHues()
+    {
+        var old = new Swatch(0.46f, 0.76f, 0.38f);
+        foreach (var name in PetCityLook.Greens)
+        {
+            var g = PetCityLook.Paints[name];
+            Assert.True(g.G == g.Max && g.Hue is > 80f and < 160f, $"{name} {g} is not green");
+            Assert.True(g.Saturation >= 0.65f && g.Value >= 0.68f, $"{name} {g} is grey-olive, not lush");
+        }
+        Assert.True(PetCityLook.Paints["Leaf"].Saturation > old.Saturation + 0.15f && PetCityLook.Paints["Leaf"].Value > old.Value);
+        // A yellow-green highlight and a deeper, bluer green for variation.
+        var light = PetCityLook.Paints["LeafLight"];
+        Assert.True(light.Hue < 95f && light.Value >= 0.9f, $"{light} is not a yellow-green highlight");
+        Assert.True(PetCityLook.Paints["LeafDeep"].Hue > 130f);
+
+        var hues = new List<float>();
+        foreach (var name in PetCityLook.Flowers)
+        {
+            var f = PetCityLook.Paints[name];
+            Assert.True(f.Saturation >= 0.6f && f.Value >= 0.95f, $"{name} {f} is not a bright flower");
+            foreach (var h in hues)
+            {
+                float d = MathF.Abs(h - f.Hue);
+                Assert.True(MathF.Min(d, 360f - d) >= 20f, $"{name} {f} is the same hue as another flower");
+            }
+            hues.Add(f.Hue);
+        }
+        Assert.True(hues.Count >= 5);
+        // The windows' flower boxes and the planters carry every green and every flower.
+        foreach (var model in new[] { "Tower3", "Planter" })
+        {
+            var used = ModelMaterials(model);
+            foreach (var name in PetCityLook.Greens)
+                Assert.Contains(name, used);
+            foreach (var name in PetCityLook.Flowers)
+                Assert.Contains(name, used);
+        }
+    }
+
+    // The little fungi (variety)
+
+    [Fact]
+    public void ManyKindsOfFungiInManySizesProportionsAndTilts()
+    {
+        var all = PetCityFungi.All;
+        Assert.Equal(Enum.GetValues<FungusKind>().Length, PetCityFungi.Looks.Length);
+        Assert.True(PetCityFungi.Looks.Length >= 14);
+        foreach (var kind in Enum.GetValues<FungusKind>())
+        {
+            var heights = new List<float>();
+            var widths = new List<float>();
+            var tilts = new List<float>();
+            foreach (var f in all)
+                if (f.Kind == kind)
+                {
+                    heights.Add(f.Height);
+                    widths.Add(f.Width);
+                    tilts.Add(f.Tilt);
+                }
+            Assert.True(heights.Count >= 3, $"{kind}: only {heights.Count}");
+            heights.Sort();
+            widths.Sort();
+            tilts.Sort();
+            Assert.True(heights[^1] >= heights[0] * 1.4f, $"{kind} comes in one size");
+            Assert.True(widths[^1] >= widths[0] * 1.15f, $"{kind} comes in one proportion");
+            Assert.True(tilts[^1] >= tilts[0] + 0.03f, $"{kind} comes in one tilt");
+        }
+        // Single mushrooms, pairs and clusters, and groups mixing kinds.
+        int singles = 0, pairs = 0, clusters = 0, mixed = 0;
+        foreach (var g in PetCityFungi.Groups)
+        {
+            if (g.Count == 1) singles++;
+            else if (g.Count == 2) pairs++;
+            else clusters++;
+            for (int i = g.First + 1; i < g.First + g.Count; i++)
+                if (all[i].Kind != all[g.First].Kind)
+                {
+                    mixed++;
+                    break;
+                }
+        }
+        Assert.True(singles >= 10 && pairs >= 10 && clusters >= 10 && mixed >= 10, $"{singles} singles, {pairs} pairs, {clusters} clusters, {mixed} mixed");
+        // Caps of different shapes.
+        var shapes = new HashSet<string>();
+        foreach (var look in PetCityFungi.Looks)
+            foreach (var word in look.Shape.Split(' '))
+                shapes.Add(word);
+        foreach (var shape in new[] { "dome", "flat", "funnel", "bell", "wavy", "cone", "cup", "ball", "shelf", "branching" })
+            Assert.Contains(shape, shapes);
+        // Planted on every kind of spot.
+        foreach (var host in Enum.GetValues<FungusHost>())
+            Assert.Contains(PetCityFungi.Groups.ToArray(), g => g.Host == host);
+    }
+
+    [Fact]
+    public void NoTwoNeighborsAreIdentical()
+    {
+        var groups = PetCityFungi.Groups;
+        var all = PetCityFungi.All;
+        for (int i = 0; i < groups.Length; i++)
+        {
+            for (int j = i + 1; j < groups.Length; j++)
+                if (System.Numerics.Vector3.Distance(groups[i].Center, groups[j].Center) < PetCityFungi.NeighborDistance)
+                    Assert.True(groups[i].Main != groups[j].Main, $"neighboring groups {i} and {j} are both {groups[i].Main}");
+            var g = groups[i];
+            Assert.Equal(g.Main, all[g.First].Kind);
+            for (int a = g.First; a < g.First + g.Count; a++)
+            {
+                Assert.Equal(i, all[a].Group);
+                for (int b = a + 1; b < g.First + g.Count; b++)
+                    Assert.False(all[a].Kind == all[b].Kind
+                        && MathF.Abs(all[a].Height - all[b].Height) < PetCityFungi.AlikeHeight * MathF.Max(all[a].Height, all[b].Height),
+                        $"group {i} has two alike {all[a].Kind}");
+            }
+        }
+        // The lamps: neighbors never share a cap shape or a color; the cap roofs: neighbors never share a shape.
+        var props = PetCityLayout.CityProps;
+        var lampShapes = new HashSet<string>();
+        for (int i = 0; i < props.Length; i++)
+        {
+            var cap = PetCityFungi.LampCapOf(i);
+            Assert.Equal(props[i].Kind == PropKind.Lamp, cap.HasValue);
+            if (cap == null)
+                continue;
+            lampShapes.Add(cap.Value.Model);
+            for (int j = 0; j < i; j++)
+                if (PetCityFungi.LampCapOf(j) is { } other && System.Numerics.Vector3.Distance(props[i].Position, props[j].Position) < PetCityFungi.LampNeighborDistance)
+                {
+                    Assert.NotEqual(other.Model, cap.Value.Model);
+                    Assert.NotEqual(other.Color, cap.Value.Color);
+                }
+        }
+        Assert.Equal(PetCityFungi.LampCapModels.Length, lampShapes.Count);
+        var pieces = PetCityLayout.Pieces;
+        var roofs = new HashSet<string>();
+        for (int i = 0; i < pieces.Length; i++)
+        {
+            string? roof = PetCityFungi.RoofOf(i);
+            Assert.Equal(pieces[i].Kind == PieceKind.CityBlock, roof != null);
+            if (roof == null)
+                continue;
+            Assert.Equal(pieces[i].Style % 2 == 0, roof != "RoofTerrace");
+            roofs.Add(roof);
+            for (int j = 0; j < i; j++)
+                if (roof != "RoofTerrace" && PetCityFungi.RoofOf(j) == roof)
+                    Assert.True(System.Numerics.Vector3.Distance(pieces[i].Position, pieces[j].Position) >= PetCityFungi.RoofNeighborDistance, $"blocks {i} and {j} share {roof}");
+        }
+        foreach (var roof in PetCityFungi.RoofCapModels)
+            Assert.Contains(roof, roofs);
+    }
+
+    [Fact]
+    public void TheFungiAreTheSameEveryRun()
+    {
+        var (groups, fungi) = PetCityFungi.Build();
+        Assert.Equal(PetCityFungi.Groups.ToArray(), groups);
+        Assert.Equal(PetCityFungi.All.ToArray(), fungi);
+        Assert.True(fungi.Length >= 300, $"{fungi.Length} fungi");
+    }
+
+    [Fact]
+    public void FungiAreSmallDecorationAndLeaveEverySolidThingAsItWas()
+    {
+        var props = PetCityLayout.CityProps;
+        foreach (var f in PetCityFungi.All)
+        {
+            Assert.True(f.Height is > 0.04f and <= PetCityFungi.MaxHeight && PetCityFungi.MaxHeight < 0.4f, $"{f.Kind} is {f.Height} m tall");
+            Assert.True(f.Width is > 0.7f and < 1.4f && f.Tilt is >= 0f and <= 0.35f);
+            float ground = Ground.HeightAt(f.Position.X, f.Position.Z);
+            switch (f.Host)
+            {
+                case FungusHost.BuildingFoot:
+                case FungusHost.LampFoot:
+                    // On the ground, outside every building's plinth and every prop.
+                    Assert.InRange(f.Position.Y, ground - 0.05f, ground + 0.01f);
+                    foreach (var p in PetCityLayout.Pieces)
+                        Assert.False(Buildings.All[p.BuildingIndex].Contains(f.Position.X, f.Position.Z, PetCityLayout.PlinthOverhang + 0.05f), $"{f.Kind} inside a building");
+                    foreach (var p in props)
+                        Assert.True(System.Numerics.Vector2.Distance(new(f.Position.X, f.Position.Z), new(p.Position.X, p.Position.Z)) > p.Radius, $"{f.Kind} inside prop {p.PropIndex}");
+                    break;
+                case FungusHost.Planter:
+                case FungusHost.LampPost:
+                    // On the prop, inside its footprint.
+                    var host = Nearest(props, f.Position);
+                    Assert.Equal(f.Host == FungusHost.Planter ? PropKind.Planter : PropKind.Lamp, host.Kind);
+                    Assert.True(System.Numerics.Vector2.Distance(new(f.Position.X, f.Position.Z), new(host.Position.X, host.Position.Z)) < host.Radius);
+                    Assert.True(f.Position.Y > host.Footing.High && f.Position.Y + f.Height < host.Footing.High + host.Height + PetCityFungi.MaxHeight);
+                    break;
+                case FungusHost.Terrace:
+                    var on = Array.Find(PetCityLayout.Pieces.ToArray(), p => Buildings.All[p.BuildingIndex].Contains(f.Position.X, f.Position.Z));
+                    Assert.Equal(PieceKind.CityBlock, on.Kind);
+                    Assert.Equal("RoofTerrace", PetCityFungi.RoofOf(Array.IndexOf(PetCityLayout.Pieces.ToArray(), on)));
+                    Assert.InRange(f.Position.Y, on.Footing.High + on.Size.Y - PetCityLayout.RoofHeight, on.Footing.High + on.Size.Y);
+                    break;
+            }
+        }
+        // Everything solid is still exactly the Map's (the layout's own tests check where and how large).
+        Assert.Equal(PetCityLayout.CityProps.Length, Array.FindAll(Props.All.ToArray(), p => p.Area == Area.PetCity).Length);
+    }
+
+    private static CityProp Nearest(ReadOnlySpan<CityProp> props, System.Numerics.Vector3 at)
+    {
+        var best = props[0];
+        foreach (var p in props)
+            if (System.Numerics.Vector2.Distance(new(p.Position.X, p.Position.Z), new(at.X, at.Z))
+                < System.Numerics.Vector2.Distance(new(best.Position.X, best.Position.Z), new(at.X, at.Z)))
+                best = p;
+        return best;
+    }
+
+    [Fact]
+    public void FungiAreVividAndTheGlowingOnesGlowAtNight()
+    {
+        foreach (var look in PetCityFungi.Looks)
+            foreach (var tint in new[] { look.TintA, look.TintB })
+            {
+                if (look.Pale)
+                    Assert.True(tint.Value >= 0.94f && tint.Min >= 0.8f, $"{look.Model} {tint} is not a clean pale cap");
+                else
+                    Assert.True(tint.Value >= 0.85f && tint.Saturation >= 0.5f, $"{look.Model} {tint} is not vivid");
+            }
+        foreach (var f in PetCityFungi.All)
+        {
+            var look = PetCityFungi.Look(f.Kind);
+            Assert.True(f.Tint.Value >= MathF.Min(look.TintA.Value, look.TintB.Value) - 0.03f, $"{f.Kind} {f.Tint} is duller than its kind");
+            Assert.True(look.Pale || f.Tint.Saturation >= 0.5f, $"{f.Kind} {f.Tint} is not vivid");
+        }
+        var fly = PetCityFungi.Look(FungusKind.FlyAgaric).TintA;
+        Assert.True(fly.R == 1f && fly.G <= 0.2f && fly.B <= 0.2f, "fly agarics are red");
+        // Only the bioluminescent ones glow: blue and green, clearly at night.
+        foreach (var kind in Enum.GetValues<FungusKind>())
+        {
+            var look = PetCityFungi.Look(kind);
+            Assert.Equal(kind == FungusKind.GlowCap, look.Glows);
+            Assert.Equal(look.Glows, ModelMaterials(look.Model).Contains("FungusGlow"));
+        }
+        var glow = PetCityFungi.Look(FungusKind.GlowCap);
+        Assert.True(glow.TintA.Hue is > 170f and < 220f && glow.TintB.Hue is > 110f and < 160f, "glow caps are blue and green");
+        Assert.True(PetCityLook.FungusGlowNight >= 0.7f * PetCityLook.LampGlowNight && PetCityLook.FungusGlowNight >= 5f * PetCityLook.FungusGlowDay);
+        foreach (var lampCap in PetCityLook.LampCaps)
+            Assert.True(lampCap.Value >= 0.98f && lampCap.Saturation >= 0.7f, $"lamp cap {lampCap}");
+    }
+
+    [Fact]
+    public void TheModelHasEveryFungusLampCapAndRoof()
+    {
+        foreach (var look in PetCityFungi.Looks)
+        {
+            var used = ModelMaterials(look.Model);
+            Assert.True(used.Contains("FungusCap") || used.Contains("FungusGlow"), look.Model);
+            foreach (var m in used)
+                Assert.True(PetCityLook.IsMushroom(m), $"{look.Model} uses {m}");
+        }
+        Assert.Contains("Spots", ModelMaterials("FungusFlyAgaric"));
+        Assert.Contains("MorelPit", ModelMaterials("FungusMorel"));
+        Assert.Contains("Ink", ModelMaterials("FungusInkCap"));
+        foreach (var cap in PetCityFungi.LampCapModels)
+            Assert.Contains("LampCap", ModelMaterials(cap));
+        foreach (var roof in PetCityFungi.RoofCapModels)
+            Assert.Contains("CapRoof", ModelMaterials(roof));
+        // The planters and terraces leave their soil to the planted fungi.
+        Assert.DoesNotContain("Cap", ModelMaterials("Planter"));
+        Assert.Contains("Cap", ModelMaterials("RoofTerrace"));
+    }
+
     [Fact]
     public void MushroomsHaveNoEyes()
     {
-        foreach (var name in new[] { "RoofCap", "RoofTerrace", "PetStore", "CityLamp", "Planter", "Statue" })
+        var objects = new List<string> { "RoofCap", "RoofTerrace", "PetStore", "CityLamp", "Planter", "Statue" };
+        objects.AddRange(PetCityFungi.LampCapModels);
+        objects.AddRange(PetCityFungi.RoofCapModels);
+        foreach (var look in PetCityFungi.Looks)
+            objects.Add(look.Model);
+        foreach (var name in objects)
         {
             var used = ModelMaterials(name);
             Assert.DoesNotContain("Eye", used);
