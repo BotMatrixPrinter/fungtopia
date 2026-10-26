@@ -6,7 +6,7 @@ namespace Fungtopia.HUD.View;
 /// <summary>
 /// Draws the HUD Core on top of the game: hearts in a mushroom-cap panel at the top left (shaking
 /// on a hit), the Mushroom Coins panel at the top right (popping, with floating "+50"s), the bow
-/// draw ring around the center crosshair, the clock and below it the quest tracker under the hearts, the place-name banner sliding down at the top center (darker in the Deep Forest), and the fade to black with "You
+/// draw ring around the center crosshair, the minimap under the coins (<see cref="MinimapView"/>), the clock and below it the quest tracker under the hearts, the place-name banner sliding down at the top center (darker in the Deep Forest), and the fade to black with "You
 /// fainted..." and then the wake-up text; all hidden while the start screen is open. It reads the Core
 /// between the last two ticks (<c>Engine.GetPhysicsInterpolationFraction</c>) and sets texts only
 /// when they change.
@@ -18,6 +18,7 @@ public partial class HudView : CanvasLayer, IModuleView
     private const float CoinsWidth = 330f;
     private const float PillHeight = 56f;
     private const float BannerWidth = 560f;
+    private const float MinimapGap = 28f;
     private static readonly Color Black = new(0.05f, 0.03f, 0.07f);
 
     private HudModule? _hud;
@@ -27,6 +28,7 @@ public partial class HudView : CanvasLayer, IModuleView
     private MushroomPanel _coinsPanel = null!;
     private Control _coinsContent = null!;
     private Label _coins = null!;
+    private MinimapView _minimap = null!;
     private readonly Label[] _floaters = new Label[HudModule.FloaterCapacity];
     private readonly int[] _floaterAmounts = new int[HudModule.FloaterCapacity];
     private Crosshair _crosshair = null!;
@@ -53,6 +55,46 @@ public partial class HudView : CanvasLayer, IModuleView
     private int _shownQuest = -1;
 
     public void Bind(IModule module) => _hud = (HudModule)module;
+
+    private string _screenshotAt = "";
+
+    /// <summary>
+    /// Screenshots only: HUD_MINIMAP_AT = town, forest, city, road or deep teleports the player
+    /// there once and keeps the start screen (and every other screen over the world) hidden, so
+    /// the game shows with the HUD and its minimap.
+    /// </summary>
+    private void ScreenshotSetup()
+    {
+        if (_screenshotAt.Length == 0)
+        {
+            _screenshotAt = OS.GetEnvironment("HUD_MINIMAP_AT").ToLowerInvariant();
+            (float x, float z, float yaw) = _screenshotAt switch
+            {
+                "town" => (-12f, 196f, 0.9f),
+                "forest" => (-20f, 8f, -0.7f),
+                "city" => (1f, -205f, 0f),
+                "road" => (3.5f, 122f, Mathf.Pi),
+                "deep" => (-180f, 20f, 2.2f),
+                _ => (float.NaN, 0f, 0f),
+            };
+            if (float.IsNaN(x))
+            {
+                _screenshotAt = "-";
+                return;
+            }
+            _hud!.ShowUnderStartScreen = true;
+            _hud.TeleportPlayerOnce(new System.Numerics.Vector3(x, Fungtopia.Map.Ground.HeightAt(x, z), z), yaw);
+        }
+        if (_screenshotAt == "-" || GetParent() == null)
+            return;
+        foreach (var node in GetParent().GetChildren())
+        {
+            if (node is CanvasLayer layer && layer != this && layer.Visible)
+                layer.Visible = false;
+            else if (node is Control control && control.Visible)
+                control.Visible = false;
+        }
+    }
 
     public override void _Ready()
     {
@@ -84,6 +126,10 @@ public partial class HudView : CanvasLayer, IModuleView
             Text = HudText.Coins(0),
         };
         _coinsContent.AddChild(_coins);
+
+        // Under the coins panel, right-aligned with it; added before the "+50"s so they float over it.
+        _minimap = new MinimapView { Visible = false };
+        _root.AddChild(_minimap);
 
         for (int i = 0; i < _floaters.Length; i++)
         {
@@ -187,6 +233,7 @@ public partial class HudView : CanvasLayer, IModuleView
     {
         if (_hud == null)
             return;
+        ScreenshotSetup();
         // The whole HUD stays hidden while the start screen is open.
         _root.Visible = !_hud.Hidden;
         if (_hud.Hidden)
@@ -207,6 +254,8 @@ public partial class HudView : CanvasLayer, IModuleView
         _coinsContent.Scale = new Vector2(pop, pop);
 
         var viewport = _root.Size;
+        _minimap.Show(_hud, f);
+        _minimap.Position = new Vector2(viewport.X - Margin - _minimap.Size.X, Margin + PanelHeight + MinimapGap);
         for (int i = 0; i < _floaters.Length; i++)
         {
             var floater = _hud.Floater(i);

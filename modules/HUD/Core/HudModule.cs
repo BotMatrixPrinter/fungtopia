@@ -1,4 +1,5 @@
 using System;
+using System.Numerics;
 using Fungtopia.Bow;
 using Fungtopia.DayNight;
 using Fungtopia.Map;
@@ -15,8 +16,8 @@ namespace Fungtopia.HUD;
 /// <see cref="WalletState"/> (popping, with a floating "+50" per <see cref="CoinsEarned"/>), the bow
 /// crosshair and draw ring from <see cref="BowState"/> (only while the bow is in use), the fade to black after <see cref="PlayerDefeated"/> and the
 /// wake-up text after <see cref="WokeUp"/>, the place-name banner when <see cref="PlayerState.Area"/>
-/// changes, the clock from <see cref="TimeOfDay"/> and the quest tracker from <see cref="QuestState"/>;
-/// all of it hidden while <see cref="StartScreenState.Open"/>.
+/// changes, the clock from <see cref="TimeOfDay"/>, the quest tracker from <see cref="QuestState"/> and the
+/// minimap of the current zone with the player's arrow (<see cref="Minimap"/>); all of it hidden while <see cref="StartScreenState.Open"/>.
 /// Animations run on the fixed ticks; the view reads them at a fraction between two ticks.
 /// </summary>
 public sealed class HudModule : IModule,
@@ -45,6 +46,12 @@ public sealed class HudModule : IModule,
     public const float CrosshairLingerSeconds = 0.5f;
     public const float CrosshairFadeSeconds = 0.1f;
 
+    /// <summary>On the Road the minimap shows a square this many meters across around the player.</summary>
+    public const float RoadWindowMeters = 120f;
+
+    /// <summary>A move longer than this in one tick is a teleport: the arrow jumps instead of gliding.</summary>
+    public const float MinimapSnapMeters = 8f;
+
     private IMessageBus? _bus;
     private float _step = 1f / 60f;
 
@@ -61,6 +68,11 @@ public sealed class HudModule : IModule,
     private float _bannerElapsed = float.PositiveInfinity;
     private bool _hasBannerArea;
     private float _questPopElapsed = float.PositiveInfinity;
+    private Vector2 _spotLatest, _spotPrevious, _spotCurrent;
+    private float _facingLatest, _facingPrevious, _facingCurrent;
+    private bool _teleport;
+    private Vector3 _teleportTo;
+    private float _teleportYaw;
 
     public bool HasPlayer { get; private set; }
     public int Health { get; private set; }
@@ -108,6 +120,12 @@ public sealed class HudModule : IModule,
     /// <summary>Counts up whenever the quest tracker's text or check changes.</summary>
     public int QuestVersion { get; private set; }
 
+    /// <summary>The zone the minimap shows: <see cref="PlayerState.Area"/> of the last state.</summary>
+    public Area MinimapArea { get; private set; }
+
+    /// <summary>The picture of <see cref="MinimapArea"/> (built once per zone, then shared); null in the Home interior or before any player.</summary>
+    public MinimapPicture? Minimap { get; private set; }
+
     public void Start(IMessageBus bus)
     {
         ArgumentNullException.ThrowIfNull(bus);
@@ -127,6 +145,11 @@ public sealed class HudModule : IModule,
     {
         if (_bus == null)
             throw new InvalidOperationException("HudModule.Tick before Start.");
+        if (_teleport)
+        {
+            _teleport = false;
+            _bus.Publish(new TeleportPlayer(_teleportTo, _teleportYaw));
+        }
         float dt = (float)context.StepSeconds;
         _step = dt;
         _shakeElapsed += dt;
@@ -139,6 +162,11 @@ public sealed class HudModule : IModule,
 
         _drawPrevious = _drawCurrent;
         _drawCurrent = _drawLatest;
+
+        _spotPrevious = Vector2.DistanceSquared(_spotCurrent, _spotLatest) > MinimapSnapMeters * MinimapSnapMeters ? _spotLatest : _spotCurrent;
+        _spotCurrent = _spotLatest;
+        _facingPrevious = _facingCurrent;
+        _facingCurrent = _facingLatest;
 
         // The crosshair shows while the bow is drawn and lingers a moment after the shot.
         _sinceDrawn = _drawCurrent > 0f ? 0f : _sinceDrawn + dt;
@@ -163,6 +191,21 @@ public sealed class HudModule : IModule,
         int health = Math.Clamp(message.Health, 0, max);
         if (HasPlayer && health < Health)
             _shakeElapsed = 0f;
+        var spot = new Vector2(message.Position.X, message.Position.Z);
+        if (!float.IsFinite(spot.X) || !float.IsFinite(spot.Y))
+            spot = _spotLatest;
+        _spotLatest = spot;
+        _facingLatest = MinimapMath.Wrap(message.Facing);
+        if (!HasPlayer)
+        {
+            _spotPrevious = _spotCurrent = spot;
+            _facingPrevious = _facingCurrent = _facingLatest;
+        }
+        if (!HasPlayer || message.Area != MinimapArea)
+        {
+            MinimapArea = message.Area;
+            Minimap = MinimapPicture.For(message.Area);
+        }
         HasPlayer = true;
         Health = health;
         MaxHealth = max;
@@ -214,7 +257,35 @@ public sealed class HudModule : IModule,
         _wakeElapsed = 0f;
     }
 
-    public void Handle(in StartScreenState message) => Hidden = message.Open;
+    public void Handle(in StartScreenState message) => Hidden = message.Open && !ShowUnderStartScreen;
+
+    /// <summary>
+    /// For screenshots only (the view's HUD_MINIMAP_AT), never in play: the HUD shows even while the
+    /// start screen is open (the view hides the start screen itself).
+    /// </summary>
+    public bool ShowUnderStartScreen
+    {
+        get => _showUnderStartScreen;
+        set
+        {
+            _showUnderStartScreen = value;
+            if (value)
+                Hidden = false;
+        }
+    }
+
+    private bool _showUnderStartScreen;
+
+    /// <summary>
+    /// For screenshots only (the view's HUD_MINIMAP_AT), never in play: publishes one
+    /// <see cref="TeleportPlayer"/> to <paramref name="at"/> facing <paramref name="yaw"/> on the next tick.
+    /// </summary>
+    public void TeleportPlayerOnce(Vector3 at, float yaw)
+    {
+        _teleport = true;
+        _teleportTo = at;
+        _teleportYaw = yaw;
+    }
 
     public void Handle(in QuestState message)
     {
@@ -335,6 +406,50 @@ public sealed class HudModule : IModule,
         float t = TimeAt(_questPopElapsed, _step, fraction);
         return t >= PopSeconds ? 1f : 1f + 0.5f * PopGrowth * MathF.Sin(MathF.PI * t / PopSeconds);
     }
+
+    // Minimap
+
+    /// <summary>
+    /// The minimap shows: there is a player outdoors (not in the Home interior), the HUD is not
+    /// hidden by the start screen, and the screen has not gone fully black after fainting.
+    /// </summary>
+    public bool MinimapVisible => HasPlayer && !Hidden && Minimap != null && !(Fainted && _fadeCurrent >= 1f && _fadePrevious >= 1f);
+
+    /// <summary>The minimap's opacity: it fades out with the screen going black after fainting and back in with it.</summary>
+    public float MinimapAlpha(float fraction) => MinimapVisible ? 1f - FaintFade(fraction) / FadeMaxAlpha : 0f;
+
+    /// <summary>The player's (x, z) between the last two ticks.</summary>
+    public Vector2 MinimapSpot(float fraction) => Vector2.Lerp(_spotPrevious, _spotCurrent, Math.Clamp(fraction, 0f, 1f));
+
+    /// <summary>
+    /// The part of the world the minimap shows: the whole zone (<see cref="MinimapPicture.Bounds"/>), or
+    /// on the Road a <see cref="RoadWindowMeters"/> square centered on the player.
+    /// </summary>
+    public AreaBounds MinimapWindow(float fraction)
+    {
+        if (Minimap == null)
+            return default;
+        if (MinimapArea != Area.Road)
+            return Minimap.Bounds;
+        var p = MinimapSpot(fraction);
+        const float half = RoadWindowMeters * 0.5f;
+        return new AreaBounds(p.X - half, p.Y - half, p.X + half, p.Y + half);
+    }
+
+    /// <summary>
+    /// Where the player's arrow sits on the minimap, 0..1 each way: (0, 0) the window's north-west
+    /// (top-left) corner, (1, 1) its south-east; always the middle on the Road.
+    /// </summary>
+    public Vector2 MinimapPlayer(float fraction)
+    {
+        var p = MinimapSpot(fraction);
+        var at = MinimapMath.ToWindow(MinimapWindow(fraction), p.X, p.Y);
+        return new Vector2(Math.Clamp(at.X, 0f, 1f), Math.Clamp(at.Y, 0f, 1f));
+    }
+
+    /// <summary>The arrow's rotation (radians clockwise from up, <see cref="MinimapMath.ArrowAngle"/>) from the player's facing between the last two ticks.</summary>
+    public float MinimapArrow(float fraction) =>
+        MinimapMath.ArrowAngle(_facingPrevious + MinimapMath.Wrap(_facingCurrent - _facingPrevious) * Math.Clamp(fraction, 0f, 1f));
 
     /// <summary>Seconds since an event at a fraction of the way from the last tick to the next.</summary>
     internal static float TimeAt(float elapsed, float step, float fraction) =>

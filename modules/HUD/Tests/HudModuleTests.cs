@@ -83,6 +83,28 @@ public class HudModuleTests
     }
 
     [Fact]
+    public void ScreenshotTeleportPublishesOnceAndCanShowUnderTheStartScreen()
+    {
+        var teleports = new List<TeleportPlayer>();
+        _bus.Subscribe<TeleportPlayer>(new Collect<TeleportPlayer>(teleports));
+        _hud.TeleportPlayerOnce(new Vector3(0f, 0f, -200f), 1f);
+        Tick(3);
+        var t = Assert.Single(teleports);
+        Assert.Equal(-200f, t.Position.Z);
+        Assert.Equal(1f, t.Facing);
+        _hud.ShowUnderStartScreen = true;
+        Send(new StartScreenState(true));
+        Assert.False(_hud.Hidden);
+    }
+
+    private sealed class Collect<T> : IMessageHandler<T> where T : struct
+    {
+        private readonly List<T> _into;
+        public Collect(List<T> into) => _into = into;
+        public void Handle(in T message) => _into.Add(message);
+    }
+
+    [Fact]
     public void TickBeforeStartThrows()
     {
         Assert.Throws<InvalidOperationException>(() => new HudModule().Tick(new TickContext(0, Step)));
@@ -757,5 +779,283 @@ public class HudModuleTests
         Send(new StartScreenState(false));
         Tick(30);
         Assert.False(_hud.Hidden);
+    }
+
+    // Minimap
+
+    private static PlayerState At(float x, float z, float facing = 0f, bool alive = true) =>
+        new(new Vector3(x, 0f, z), facing, Vector3.Zero, true, 10, 10, alive, CharacterKind.Girl);
+
+    private const float Near = 1e-4f;
+
+    [Theory]
+    [InlineData(0f, 215f, Area.Town)]
+    [InlineData(30f, 30f, Area.Forest)]
+    [InlineData(0f, -215f, Area.PetCity)]
+    [InlineData(-200f, 0f, Area.DeepForest)]
+    public void MinimapShowsTheWholeZoneOfPlayerStateArea(float x, float z, Area area)
+    {
+        Send(At(x, z));
+        Tick();
+        Assert.Equal(area, _hud.MinimapArea);
+        Assert.True(_hud.MinimapVisible);
+        var picture = _hud.Minimap!;
+        Assert.Equal(area, picture.Area);
+        var bounds = Areas.Bounds(area);
+        Assert.Equal(bounds.MinX, picture.Bounds.MinX);
+        Assert.Equal(bounds.MinZ, picture.Bounds.MinZ);
+        Assert.Equal(bounds.MaxX, picture.Bounds.MaxX);
+        Assert.Equal(bounds.MaxZ, picture.Bounds.MaxZ);
+        var window = _hud.MinimapWindow(1f);
+        Assert.Equal(bounds.MinX, window.MinX);
+        Assert.Equal(bounds.MaxZ, window.MaxZ);
+        // One 1 m cell per meter of the zone, built once and shared.
+        Assert.Equal((int)(bounds.MaxX - bounds.MinX), picture.Width);
+        Assert.Equal((int)(bounds.MaxZ - bounds.MinZ), picture.Height);
+        Assert.Equal(picture.Width * picture.Height, picture.Cells.Length);
+        Assert.Same(picture, MinimapPicture.For(area));
+    }
+
+    [Fact]
+    public void MinimapFollowsTheAreaFromZoneToRoadToZone()
+    {
+        Send(At(0f, 80f));
+        Tick();
+        Assert.Equal(Area.Forest, _hud.MinimapArea);
+        var forest = _hud.Minimap;
+        Send(At(3f, 125f)); // on the south road
+        Tick();
+        Assert.Equal(Area.Road, _hud.MinimapArea);
+        Assert.Equal(Area.Road, _hud.Minimap!.Area);
+        Send(At(0f, 200f));
+        Tick();
+        Assert.Equal(Area.Town, _hud.MinimapArea);
+        Send(At(0f, 80f));
+        Tick();
+        Assert.Same(forest, _hud.Minimap); // built once, shown again
+    }
+
+    [Fact]
+    public void OnTheRoadTheMinimapShowsA120MeterWindowAroundThePlayer()
+    {
+        Send(At(4f, 124f));
+        Tick();
+        Assert.Equal(Area.Road, _hud.MinimapArea);
+        var window = _hud.MinimapWindow(1f);
+        Assert.Equal(-56f, window.MinX, 3);
+        Assert.Equal(64f, window.MaxX, 3);
+        Assert.Equal(64f, window.MinZ, 3);
+        Assert.Equal(184f, window.MaxZ, 3);
+        Assert.Equal(HudModule.RoadWindowMeters, window.MaxX - window.MinX, 3);
+        Assert.Equal(new Vector2(0.5f, 0.5f), _hud.MinimapPlayer(1f));
+
+        // The window walks with the player; the road picture under it has the road, the forest's
+        // south edge and the town's north edge in it.
+        Send(At(0f, 140f));
+        Tick();
+        Assert.Equal(80f, _hud.MinimapWindow(1f).MinZ, 3);
+        var road = _hud.Minimap!;
+        Assert.Equal(MinimapCell.Path, road.CellAt(0.5f, 140.5f));
+        Assert.Equal(MinimapCell.Outside, road.CellAt(30f, 125f)); // cliffs beside the road
+        Assert.Equal(MinimapCell.Ground, road.CellAt(30f, 95f)); // the forest's south edge
+        Assert.Equal(MinimapCell.Ground, road.CellAt(30f, 160f)); // the town's north edge
+        Assert.Equal(MinimapCell.Outside, road.CellAt(30f, 130f));
+        Assert.Contains(road.Marks, m => m.Kind == MinimapMarkKind.Signpost && m.X == Places.SignpostTown.Position.X && m.Z == Places.SignpostTown.Position.Z);
+    }
+
+    [Fact]
+    public void PlayerMapsOntoTheMinimapNorthUpWithTheZoneCornersAtThePictureCorners()
+    {
+        var town = Areas.Town; // x -80..80, z 150..290
+        Send(At(town.MinX, town.MinZ)); // north-west corner
+        Tick();
+        Assert.Equal(Area.Town, _hud.MinimapArea);
+        Assert.Equal(new Vector2(0f, 0f), _hud.MinimapPlayer(1f));
+        Assert.Equal(new Vector2(0f, 0f), _hud.Minimap!.ToPicture(town.MinX, town.MinZ));
+        Assert.Equal(new Vector2(1f, 0f), _hud.Minimap.ToPicture(town.MaxX, town.MinZ)); // north-east: top right
+        Assert.Equal(new Vector2(0f, 1f), _hud.Minimap.ToPicture(town.MinX, town.MaxZ)); // south-west: bottom left
+        Send(At(town.MaxX, town.MaxZ)); // south-east corner
+        Tick();
+        Assert.Equal(new Vector2(1f, 1f), _hud.MinimapPlayer(1f));
+
+        // Mushroom Town's fountain: the middle across, 65 of 140 m down.
+        Send(At(0f, 215f));
+        Tick();
+        var p = _hud.MinimapPlayer(1f);
+        Assert.Equal(0.5f, p.X, 4);
+        Assert.Equal(65f / 140f, p.Y, 4);
+
+        // In the forest, a point north-east of the middle is up and right of the picture's middle.
+        Send(At(50f, -50f));
+        Tick();
+        p = _hud.MinimapPlayer(1f);
+        Assert.Equal(0.75f, p.X, 4);
+        Assert.Equal(0.25f, p.Y, 4);
+    }
+
+    [Fact]
+    public void MinimapArrowGlidesBetweenTicksAndJumpsOnATeleport()
+    {
+        Send(At(0f, 80f));
+        Tick();
+        Send(At(0f, 76f));
+        Tick();
+        Assert.Equal(80f, _hud.MinimapSpot(0f).Y, 3);
+        Assert.Equal(78f, _hud.MinimapSpot(0.5f).Y, 3);
+        Assert.Equal(76f, _hud.MinimapSpot(1f).Y, 3);
+        Send(At(0f, 215f)); // fast travel to town
+        Tick();
+        Assert.Equal(215f, _hud.MinimapSpot(0f).Y, 3);
+    }
+
+    [Theory]
+    [InlineData(0f, 0f)] // facing north: up
+    [InlineData(MathF.PI / 2f, -MathF.PI / 2f)] // facing west (-X): left
+    [InlineData(-MathF.PI / 2f, MathF.PI / 2f)] // facing east (+X): right
+    [InlineData(MathF.PI / 4f, -MathF.PI / 4f)] // north-west: up and left
+    [InlineData(5f * MathF.PI / 2f, -MathF.PI / 2f)] // a full turn more is the same
+    public void ArrowAngleFollowsFacing(float facing, float angle)
+    {
+        Send(At(0f, 80f, facing));
+        Tick(2);
+        Assert.Equal(angle, _hud.MinimapArrow(1f), 4);
+        Assert.Equal(angle, MinimapMath.ArrowAngle(facing), 4);
+        // The arrow's tip, (sin a, -cos a) on screen (y down), points the way the player faces (x, z).
+        var dir = new Vector2(-MathF.Sin(facing), -MathF.Cos(facing));
+        Assert.Equal(dir.X, MathF.Sin(angle), 4);
+        Assert.Equal(dir.Y, -MathF.Cos(angle), 4);
+    }
+
+    [Fact]
+    public void ArrowAngleFacingSouthTurnsTheShortWayBetweenTicks()
+    {
+        Send(At(0f, 80f, MathF.PI - 0.1f));
+        Tick();
+        Send(At(0f, 80f, -MathF.PI + 0.1f));
+        Tick();
+        Assert.Equal(MathF.PI, MathF.Abs(_hud.MinimapArrow(0.5f)), 3); // straight down, not through north
+    }
+
+    [Fact]
+    public void TownPictureMarksBuildingsPathsSignpostAndSpotsWhereTheMapSays()
+    {
+        var town = MinimapPicture.For(Area.Town)!;
+        int count = 0;
+        foreach (var b in Buildings.All)
+        {
+            if (b.Area != Area.Town)
+                continue;
+            count++;
+            var mark = Assert.Single(town.Buildings, m => m.Kind == b.Kind && m.Center == b.Center);
+            // Its corners are the footprint's, inside the picture.
+            for (int i = 0; i < 4; i++)
+            {
+                var c = mark.Corner(i);
+                Assert.True(b.Contains(c.X, c.Y, 0.01f));
+                Assert.False(b.Contains(c.X, c.Y, -0.01f));
+                var uv = town.ToPicture(c.X, c.Y);
+                Assert.InRange(uv.X, 0f, 1f);
+                Assert.InRange(uv.Y, 0f, 1f);
+            }
+        }
+        Assert.Equal(count, town.Buildings.Length);
+        Assert.Contains(town.Buildings, m => m.Kind == BuildingKind.PlayerHouse);
+        Assert.Contains(town.Buildings, m => m.Kind == BuildingKind.MillieHouse);
+        Assert.Contains(town.Buildings, m => m.Kind == BuildingKind.Clinic);
+        Assert.DoesNotContain(town.Buildings, m => m.Kind == BuildingKind.PetStore);
+
+        // Paths: the street from the entrance, the path to your door; grass beside them; cliffs beyond the town's corner.
+        Assert.Equal(MinimapCell.Path, town.CellAt(0.5f, 170.5f));
+        var door = Places.HomeDoor.Position;
+        Assert.Equal(MinimapCell.Path, town.CellAt(door.X, door.Z));
+        Assert.Equal(MinimapCell.Ground, town.CellAt(65.5f, 220.5f));
+        int path = 0, ground = 0;
+        for (int row = 0; row < town.Height; row++)
+            for (int col = 0; col < town.Width; col++)
+            {
+                float x = town.Bounds.MinX + col + 0.5f, z = town.Bounds.MinZ + row + 0.5f;
+                var cell = town.Cells[row * town.Width + col];
+                Assert.Equal(MinimapPicture.Sample(x, z), cell);
+                bool onPath = Areas.TownPathDistance(x, z) <= Areas.TownPathHalfWidth || Areas.RoadDistance(x, z) <= Areas.RoadHalfWidth;
+                Assert.Equal(onPath && Areas.Walkable(x, z), cell == MinimapCell.Path);
+                Assert.Equal(Areas.Walkable(x, z), cell != MinimapCell.Outside);
+                if (cell == MinimapCell.Path) path++;
+                if (cell == MinimapCell.Ground) ground++;
+            }
+        Assert.True(path > 300 && ground > path * 5);
+
+        // The signpost and the spots.
+        Assert.Contains(town.Marks, m => m.Kind == MinimapMarkKind.Signpost && m.X == Places.SignpostTown.Position.X && m.Z == Places.SignpostTown.Position.Z);
+        foreach (var spot in new[] { Places.HomeDoor, Places.ClinicDoor, Places.MillieSpot, Places.FurnitureShopSpot, Places.AbbySpot, Places.FoodSpot })
+            Assert.Contains(town.Marks, m => m.Kind == MinimapMarkKind.Spot && m.X == spot.Position.X && m.Z == spot.Position.Z);
+        Assert.DoesNotContain(town.Marks, m => m.X == Places.LucySpot.Position.X && m.Z == Places.LucySpot.Position.Z);
+    }
+
+    [Fact]
+    public void OtherZonesMarkTheirBuildingsPathsAndSignposts()
+    {
+        var city = MinimapPicture.For(Area.PetCity)!;
+        Assert.Contains(city.Buildings, m => m.Kind == BuildingKind.PetStore && m.Center == Buildings.First(BuildingKind.PetStore).Center);
+        Assert.Equal(11, city.Buildings.Length);
+        Assert.Equal(MinimapCell.Path, city.CellAt(0.5f, -200.5f)); // the avenue
+        Assert.Equal(MinimapCell.Paving, city.CellAt(20.5f, -200.5f));
+        Assert.Contains(city.Marks, m => m.Kind == MinimapMarkKind.Signpost && m.Z == Places.SignpostPetCity.Position.Z);
+        Assert.Contains(city.Marks, m => m.Kind == MinimapMarkKind.Spot && m.Z == Places.LucySpot.Position.Z);
+
+        var forest = MinimapPicture.For(Area.Forest)!;
+        Assert.Empty(forest.Buildings);
+        Assert.Equal(MinimapCell.Path, forest.CellAt(-14f, 2f)); // on the west-east path
+        Assert.Equal(MinimapCell.Path, forest.CellAt(0.5f, 97.5f)); // the road in the south gap
+        Assert.Equal(MinimapCell.Clearing, forest.CellAt(-56f, 30f)); // a clearing off the path
+        Assert.Equal(MinimapCell.Ground, forest.CellAt(70.5f, 20.5f));
+        Assert.Equal(2, forest.Marks.Length); // its south and north signposts
+        Assert.All(forest.Marks, m => Assert.Equal(MinimapMarkKind.Signpost, m.Kind));
+
+        var deep = MinimapPicture.For(Area.DeepForest)!;
+        Assert.Empty(deep.Buildings);
+        Assert.Equal(MinimapCell.Path, deep.CellAt(-110.5f, 0.5f)); // the overgrown path's end
+        Assert.Equal(MinimapCell.Moss, deep.CellAt(-200f, 0f));
+        var sign = Assert.Single(deep.Marks);
+        Assert.Equal(Places.SignpostDeepForest.Position.X, sign.X);
+    }
+
+    [Fact]
+    public void MinimapIsHiddenIndoorsOnTheStartScreenAndFadesWhenFainting()
+    {
+        Assert.False(_hud.MinimapVisible); // no player yet
+        Send(new StartScreenState(true));
+        Send(At(0f, 215f));
+        Tick();
+        Assert.False(_hud.MinimapVisible); // start screen
+        Send(new StartScreenState(false));
+        Tick();
+        Assert.True(_hud.MinimapVisible);
+
+        var inside = Places.HomeInterior.Position;
+        Send(At(inside.X, inside.Z));
+        Tick();
+        Assert.Equal(Area.Home, _hud.MinimapArea);
+        Assert.Null(_hud.Minimap);
+        Assert.False(_hud.MinimapVisible); // in the home interior
+        Assert.Null(MinimapPicture.For(Area.Home));
+        Send(At(Places.HomeDoor.Position.X, Places.HomeDoor.Position.Z));
+        Tick();
+        Assert.True(_hud.MinimapVisible);
+
+        Assert.Equal(1f, _hud.MinimapAlpha(1f));
+        Send(new PlayerDefeated(default));
+        Send(At(0f, 215f, alive: false));
+        Tick(10);
+        Assert.True(_hud.MinimapVisible); // fading out with the screen going black
+        Assert.InRange(_hud.MinimapAlpha(1f), 0.01f, 0.99f);
+        Tick(Ticks(HudModule.FadeInSeconds));
+        Assert.False(_hud.MinimapVisible); // fainted: black
+        Assert.Equal(0f, _hud.MinimapAlpha(1f));
+        Send(At(Places.ClinicDoor.Position.X, Places.ClinicDoor.Position.Z));
+        Tick();
+        Assert.True(_hud.MinimapVisible); // woken at the clinic: back with the screen
+        Assert.InRange(_hud.MinimapAlpha(1f), 0f, 0.1f);
+        Tick(Ticks(HudModule.FadeOutSeconds));
+        Assert.Equal(1f, _hud.MinimapAlpha(1f));
     }
 }
