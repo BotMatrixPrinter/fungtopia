@@ -35,14 +35,6 @@ public partial class ForestView : Node3D, IModuleView
 
     private static Color[] ToColors(System.Numerics.Vector3[] colors) => Array.ConvertAll(colors, ToColor);
 
-    // The mushrooms' vivid colors, from ForestPalette.
-    private static readonly Color[] CapColors = ToColors(ForestPalette.Caps);
-
-    private static readonly Color[] GlowColors = ToColors(ForestPalette.GlowCaps);
-
-    /// <summary>The Deep Forest's dark caps: deep purples, blues and dusky reds.</summary>
-    private static readonly Color[] DarkCapColors = ToColors(ForestPalette.DarkCaps);
-
     private ForestModule? _forest;
     private ShaderMaterial? _capMaterial;
     private float _glow = ForestPalette.DayGlow;
@@ -91,12 +83,15 @@ public partial class ForestView : Node3D, IModuleView
 
     private static Color GroundColor(float x, float z)
     {
-        var grass = new Color(0.5f, 0.74f, 0.33f);
-        var moss = new Color(0.3f, 0.56f, 0.32f);
-        var meadow = new Color(0.66f, 0.8f, 0.38f);
-        var dirt = new Color(0.7f, 0.52f, 0.36f);
+        // ForestPalette's lush greens, sunny yellow-green patches and golden paths.
+        var grass = ToColor(ForestPalette.Grass);
+        var moss = ToColor(ForestPalette.Moss);
+        var meadow = ToColor(ForestPalette.Meadow);
+        var dirt = ToColor(ForestPalette.Dirt);
         float mottle = 0.5f + 0.25f * MathF.Sin(x * 0.19f + MathF.Sin(z * 0.13f) * 2f) + 0.25f * MathF.Sin(z * 0.23f - x * 0.07f);
-        var color = grass.Lerp(moss, Mathf.SmoothStep(0.35f, 0.85f, mottle));
+        var color = grass.Lerp(moss, Mathf.SmoothStep(0.35f, 0.85f, mottle) * 0.8f);
+        float sunny = 0.5f + 0.5f * MathF.Sin(x * 0.11f - MathF.Sin(z * 0.17f) * 2.3f) * MathF.Sin(z * 0.09f + x * 0.05f);
+        color = color.Lerp(ToColor(ForestPalette.GrassLight), Mathf.SmoothStep(0.55f, 0.95f, sunny) * 0.6f);
         color = color.Lerp(meadow, Mathf.SmoothStep(-2f, 5f, ForestLayout.ClearingDepth(x, z)) * 0.8f);
         // Moss gathers outside the square and around trunk feet.
         float outside = MathF.Max(MathF.Abs(x), MathF.Abs(z)) - ForestBounds.HalfSize;
@@ -108,7 +103,7 @@ public partial class ForestView : Node3D, IModuleView
         float trail = 1f - Mathf.SmoothStep(ForestProps.TrailHalfWidth - 0.6f, ForestProps.TrailHalfWidth + 0.5f, ForestProps.TrailDistance(x, z));
         trail = MathF.Max(trail, Mathf.SmoothStep(-1f, 1.5f, Areas.DeepForestPath.Depth(x, z)));
         float patches = Mathf.SmoothStep(0.25f, 0.75f, 0.5f + 0.5f * MathF.Sin(x * 0.9f + MathF.Sin(z * 1.3f) * 1.5f) * MathF.Sin(z * 0.7f - x * 0.4f));
-        var soil = new Color(0.5f, 0.4f, 0.3f).Lerp(new Color(0.34f, 0.3f, 0.26f), Mathf.SmoothStep(-90f, -100f, x));
+        var soil = ToColor(ForestPalette.Soil).Lerp(ToColor(ForestPalette.SoilDark), Mathf.SmoothStep(-90f, -100f, x));
         color = color.Lerp(soil, trail * (0.35f + 0.5f * patches));
         return color.Lerp(moss * 0.8f, Mathf.SmoothStep(-88f, -100f, x) * Mathf.SmoothStep(14f, 4f, MathF.Abs(z)) * 0.35f);
     }
@@ -202,34 +197,51 @@ public partial class ForestView : Node3D, IModuleView
     private void BuildMushrooms()
     {
         var stems = new Instances();
-        var caps = new Instances();
-
         var skirts = new Instances();
+        var shelves = new Instances();
+        // One MultiMesh per cap shape, all with the one cap material.
+        var caps = new Instances[Enum.GetValues<CapShape>().Length];
+        for (int i = 0; i < caps.Length; i++)
+            caps[i] = new Instances();
 
         // Planted by ForestFooting: the stem's foot under the lowest ground around it, the cap
-        // Height above the ground at its center, big stems flaring into the ground.
+        // Height above the ground at its center, big stems flaring into the ground. Stems slim and
+        // lean in the stem shader (custom: slender, lean); the cap sits on the leaning top, tilted with it.
         void Mushroom(DrawnMushroom m, Color color, bool glow, float glowStrength)
         {
             int id = m.Id;
+            var look = ForestSpecies.Of(m.Species);
             var planted = ForestFooting.Plant(m);
             var foot = new Vector3(m.X, planted.BaseY, m.Z);
+            var pattern = new Color(Rand(id, 8), glow ? glowStrength : 0f, (int)look.Pattern / 8f, look.Underside);
+            if (look.Stemless)
+            {
+                // One body from below the ground up to its top.
+                float top = planted.CapY + m.CapHeight;
+                caps[(int)m.Shape].Add(Placed(foot, m.Yaw, new Vector3(m.CapRadius, top - planted.BaseY, m.CapRadius)), color, pattern);
+                return;
+            }
             var stemColor = ToColor(ForestPalette.StemLight).Lerp(ToColor(ForestPalette.StemShade), Rand(id, 2));
-            stems.Add(Placed(foot, m.Yaw, new Vector3(m.StemRadius, planted.StemHeight, m.StemRadius)), stemColor);
+            stems.Add(Placed(foot, m.Yaw, new Vector3(m.StemRadius, planted.StemHeight, m.StemRadius)), stemColor,
+                new Color(m.Slender, m.Lean * planted.StemHeight / m.StemRadius, 0f, 0f));
             if (planted.SkirtHeight > 0f)
-                skirts.Add(Placed(foot, m.Yaw, new Vector3(m.StemRadius, planted.SkirtHeight, m.StemRadius)), stemColor.Darkened(0.04f));
-            var tilt = new Basis(new Vector3(MathF.Cos(m.Yaw), 0f, MathF.Sin(m.Yaw)), 0.08f * (Rand(id, 7) - 0.5f));
+                skirts.Add(Placed(foot, m.Yaw, new Vector3(m.StemRadius, planted.SkirtHeight, m.StemRadius)), stemColor.Darkened(0.04f), new Color(1f, 0f, 0f, 0f));
+            var lean = ForestScenery.LeanOffset(m, planted.StemHeight, 1f);
+            float c = MathF.Cos(m.Yaw), sn = MathF.Sin(m.Yaw);
+            // Tilted toward the lean (up x the lean's direction), a touch of wobble on top.
+            var tilt = new Basis(new Vector3(-sn, 0f, -c), MathF.Atan(2f * m.Lean) * 0.8f + 0.06f * (Rand(id, 7) - 0.5f));
             var capBasis = tilt * new Basis(Vector3.Up, m.Yaw) * Basis.FromScale(new Vector3(m.CapRadius, m.CapHeight, m.CapRadius));
-            var capCustom = new Color(Rand(id, 8), glow ? glowStrength : 0f, 0f, 0f);
-            caps.Add(new Transform3D(capBasis, new Vector3(m.X, planted.CapY, m.Z)), color, capCustom);
+            caps[(int)m.Shape].Add(new Transform3D(capBasis, new Vector3(m.X + lean.X, planted.CapY, m.Z + lean.Y)), color, pattern);
         }
 
+        // Each kind takes its own colors (ForestSpecies.Colors, from ForestPalette); by the west
+        // gap the Deep Forest's dark caps (ForestPalette.DarkCaps), but glowing ones still glow.
         void Colored(DrawnMushroom m, bool dark = false)
         {
             int id = m.Id;
-            bool glow = Rand(id, 3) < 0.16f;
-            var color = glow ? GlowColors[(int)(Rand(id, 4) * GlowColors.Length)]
-                : dark ? DarkCapColors[(int)(Rand(id, 4) * DarkCapColors.Length)]
-                : CapColors[(int)(Rand(id, 4) * CapColors.Length)];
+            bool glow = ForestSpecies.Of(m.Species).Glows;
+            var colors = dark && !glow ? ForestPalette.DarkCaps : ForestSpecies.Colors(m.Species);
+            var color = ToColor(colors[(int)(Rand(id, 4) * colors.Length)]);
             Mushroom(m, color.Lightened(0.08f * (Rand(id, 5) - 0.5f)), glow, 0.9f + 0.6f * Rand(id, 9));
         }
 
@@ -237,7 +249,20 @@ public partial class ForestView : Node3D, IModuleView
         foreach (var m in ForestScenery.Giants)
             Colored(m);
 
-        // A medium mushroom on every Map prop of the forest, exactly where and as large as the Map says.
+        // Shelf fungi stacked up the side of some giant stems.
+        foreach (var shelf in ForestScenery.Shelves)
+        {
+            var g = ForestScenery.Giants[shelf.Giant];
+            var at = ForestScenery.StemPoint(g, ForestFooting.Plant(g), shelf.Along, shelf.Angle);
+            var into = new Vector3(MathF.Cos(shelf.Angle), 0f, MathF.Sin(shelf.Angle)) * (shelf.Radius * 0.15f);
+            var colors = ForestPalette.ShelfCaps;
+            shelves.Add(Placed(new Vector3(at.X, at.Y - shelf.Thickness * 0.5f, at.Z) - into, -shelf.Angle,
+                    new Vector3(shelf.Radius, shelf.Thickness, shelf.Radius * 1.25f)),
+                ToColor(colors[(int)(Rand(shelf.Id, 4) * colors.Length)]),
+                new Color(Rand(shelf.Id, 8), 0f, (int)CapPattern.Bands / 8f, 0.5f));
+        }
+
+        // The medium clusters on every Map prop of the forest, exactly where the Map says, each stem inside its circle.
         foreach (var m in ForestScenery.MediumMushrooms)
             Colored(m);
 
@@ -246,7 +271,7 @@ public partial class ForestView : Node3D, IModuleView
         for (int i = 0; i < ForestScenery.RingMushrooms.Length; i++)
             Colored(ForestScenery.RingMushrooms[i], ForestRing.Mushrooms[i].Dark);
 
-        // Tiny walkable mushrooms (decoration under the height limit), a few dark ones by the west gap.
+        // Tiny walkable fungi of every kind (decoration under the height limit), a few dark ones by the west gap.
         foreach (var d in ForestScenery.Decoration)
         {
             if (d.Kind != DecorKind.Mushroom && d.Kind != DecorKind.DarkMushroom)
@@ -255,6 +280,7 @@ public partial class ForestView : Node3D, IModuleView
         }
 
         var stemMaterial = Material("toon_color.gdshader", outline: true);
+        ((ShaderMaterial)stemMaterial.NextPass).SetShaderParameter("bend", true);
         AddChild(stems.Build("MushroomStems", ForestMeshes.Stem(), stemMaterial));
         AddChild(skirts.Build("MushroomSkirts", ForestMeshes.Skirt(), stemMaterial));
         _capMaterial = Material("mushroom_cap.gdshader", outline: true);
@@ -264,13 +290,13 @@ public partial class ForestView : Node3D, IModuleView
         _capMaterial.SetShaderParameter("rim", ForestPalette.CapRim);
         _capMaterial.SetShaderParameter("glow_emission", ForestPalette.GlowEmission);
         _capMaterial.SetShaderParameter("night_glow", _glow);
-        AddChild(caps.Build("MushroomCaps", ForestMeshes.Cap(), _capMaterial));
+        foreach (var shape in Enum.GetValues<CapShape>())
+            if (caps[(int)shape].Transforms.Count > 0)
+                AddChild(caps[(int)shape].Build("MushroomCaps" + shape, ForestMeshes.Cap(shape), _capMaterial));
+        AddChild(shelves.Build("ShelfFungi", ForestMeshes.Shelf(), _capMaterial));
     }
 
-    private static readonly Color[] FlowerColors =
-    {
-        new(1f, 0.96f, 0.9f), new(1f, 0.85f, 0.3f), new(0.95f, 0.55f, 0.75f), new(0.65f, 0.6f, 1f), new(1f, 0.6f, 0.45f),
-    };
+    private static readonly Color[] FlowerColors = ToColors(ForestPalette.Flowers);
 
     /// <summary>Where a piece of foliage stands: its root clump (0.4 of its radius) at or under the ground all around it.</summary>
     private static Vector3 Planted(in Decoration d) => new(d.X, ForestFooting.BaseY(d.X, d.Z, d.Radius * 0.4f, d.Height), d.Z);
@@ -288,7 +314,7 @@ public partial class ForestView : Node3D, IModuleView
             {
                 case DecorKind.Fern:
                     ferns.Add(Placed(Planted(d), d.Yaw, Vector3.One * (d.Height / ForestScenery.FernMeshHeight)),
-                        new Color(0.34f, 0.64f, 0.3f).Lerp(new Color(0.5f, 0.72f, 0.28f), Rand(id, 59)));
+                        ToColor(ForestPalette.FernDark).Lerp(ToColor(ForestPalette.FernLight), Rand(id, 59)));
                     break;
                 case DecorKind.Flower:
                     flowers.Add(Placed(Planted(d), d.Yaw, Vector3.One * (d.Height / ForestScenery.FlowerMeshHeight)),
@@ -296,12 +322,14 @@ public partial class ForestView : Node3D, IModuleView
                     break;
                 case DecorKind.Grass:
                     grass.Add(Placed(Planted(d), d.Yaw, Vector3.One * (d.Height / ForestScenery.GrassMeshHeight)),
-                        GroundColor(d.X, d.Z).Lightened(0.08f));
+                        GroundColor(d.X, d.Z).Lerp(ToColor(ForestPalette.GrassLight), 0.25f + 0.25f * Rand(id, 64)));
                     break;
             }
         }
         AddChild(ferns.Build("Ferns", ForestMeshes.Fern(), Material("foliage.gdshader")));
-        AddChild(flowers.Build("Flowers", ForestMeshes.Flower(), Material("flower.gdshader"), shadows: false));
+        var flowerMaterial = Material("flower.gdshader");
+        flowerMaterial.SetShaderParameter("stem_color", ToColor(ForestPalette.FlowerStem));
+        AddChild(flowers.Build("Flowers", ForestMeshes.Flower(), flowerMaterial, shadows: false));
         var grassMaterial = Material("foliage.gdshader");
         grassMaterial.SetShaderParameter("sway", 0.04f);
         AddChild(grass.Build("Grass", ForestMeshes.GrassTuft(), grassMaterial, shadows: false));

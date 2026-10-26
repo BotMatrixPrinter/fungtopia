@@ -4,8 +4,14 @@ render_mode unshaded, cull_front, shadows_disabled, fog_disabled;
 
 uniform vec4 ink : source_color = vec4(0.22, 0.12, 0.14, 1.0);
 uniform float width_px = 2.4;
+// Stems: bend the hull as the stem shader bends the stem.
+uniform bool bend = false;
+
+#include "res://modules/Forest/Godot/Shaders/stem_bend.gdshaderinc"
 
 void vertex() {
+	if (bend)
+		VERTEX = bend_stem(VERTEX, UV.y, INSTANCE_CUSTOM);
 	// Project a point a little along the normal with the same matrix as the vertex (so
 	// MultiMesh instance transforms count) to find which way "outward" is on screen.
 	vec4 clip = PROJECTION_MATRIX * (MODELVIEW_MATRIX * vec4(VERTEX, 1.0));

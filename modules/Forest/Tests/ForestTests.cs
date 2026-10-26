@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Numerics;
 using Fungtopia.DayNight;
 using Fungtopia.Map;
@@ -438,28 +439,83 @@ public class ForestTests
     // What the view draws
 
     [Fact]
-    public void DrawnMediumMushroomsAreExactlyTheMapsForestProps()
+    public void MediumClustersStandExactlyOnTheMapsForestProps()
     {
         var expected = new List<Prop>();
         foreach (var p in Props.All)
             if (p.Kind == PropKind.MediumMushroom && p.Area == Area.Forest)
                 expected.Add(p);
         Assert.True(expected.Count >= 50, $"only {expected.Count} medium mushrooms in the forest");
+        var clusters = ForestScenery.MediumClusters;
         var drawn = ForestScenery.MediumMushrooms;
-        Assert.Equal(expected.Count, drawn.Length);
-        for (int i = 0; i < drawn.Length; i++)
+        Assert.Equal(expected.Count, clusters.Length);
+        int next = 0;
+        for (int i = 0; i < clusters.Length; i++)
         {
             var p = expected[i];
-            var m = drawn[i];
-            Assert.Equal(p.X, m.X);
-            Assert.Equal(p.Z, m.Z);
-            Assert.Equal(p.Rotation, m.Yaw);
-            Assert.Equal(p.Radius, m.StemRadius);
-            Assert.Equal(p.Height, m.Height);
-            Assert.True(m.CapRadius >= m.StemRadius, "the cap is narrower than the stem");
-            Assert.InRange(m.CapHeight, 0.05f, m.Height * 0.5f);
+            var c = clusters[i];
+            Assert.Equal((p.X, p.Z, p.Radius, p.Height), (c.X, c.Z, c.Radius, c.Height));
+            Assert.Equal(next, c.Start);
+            Assert.InRange(c.Count, 1, 12);
+            next += c.Count;
             // Each stands on its own obstacle circle in the forest.
             Assert.Contains(Obstacles.All.ToArray(), o => o.X == p.X && o.Z == p.Z && o.Radius == p.Radius);
+            float tallest = 0f, reach = 0f;
+            for (int k = c.Start; k < c.Start + c.Count; k++)
+            {
+                var m = drawn[k];
+                bool stemless = ForestSpecies.Of(m.Species).Stemless;
+                Assert.Equal(c.Species, m.Species);
+                Assert.True(m.CapRadius >= m.StemRadius, "the cap is narrower than the stem");
+                Assert.InRange(m.CapHeight, 0.01f, m.Height * 0.5f);
+                Assert.True(m.Height <= p.Height + 1e-4f, $"a mushroom of the cluster at ({p.X}, {p.Z}) is taller than its prop");
+                // Every stem (a stemless fungus' whole body) stands inside the prop's circle, so what
+                // looks solid is where the Map's obstacle is.
+                float d = Vector2.Distance(new Vector2(m.X, m.Z), new Vector2(p.X, p.Z)) + (stemless ? m.CapRadius : m.StemRadius);
+                Assert.True(d <= p.Radius + 1e-3f, $"a mushroom of the cluster at ({p.X}, {p.Z}) stands outside its circle: {d} > {p.Radius}");
+                tallest = MathF.Max(tallest, m.Height);
+                reach = MathF.Max(reach, d);
+            }
+            // As tall as the prop (stemless balls and corals no taller than the circle allows, within the Map's 0.8..2.5 m) and filling most of its circle.
+            Assert.InRange(tallest, MathF.Min(p.Height, 0.8f) - 1e-4f, p.Height + 1e-4f);
+            Assert.True(reach >= 0.55f * p.Radius, $"the {c.Species} cluster ({c.Count}) at ({p.X}, {p.Z}) fills only {reach} of its {p.Radius} m circle");
+        }
+        Assert.Equal(drawn.Length, next);
+    }
+
+    [Fact]
+    public void MediumClustersMixSinglesPairsClustersAndTufts()
+    {
+        int singles = 0, pairs = 0, groups = 0, tufts = 0;
+        foreach (var c in ForestScenery.MediumClusters)
+        {
+            if (ForestSpecies.Of(c.Species).Habit == Habit.Tuft)
+            {
+                tufts++;
+                Assert.True(c.Count >= 7, "an enoki tuft of fewer than 7 stems");
+            }
+            else if (c.Count == 1)
+                singles++;
+            else if (c.Count == 2)
+                pairs++;
+            else
+                groups++;
+        }
+        int n = ForestScenery.MediumClusters.Length;
+        Assert.True(singles >= n / 10 && pairs >= n / 10 && groups >= n / 10 && tufts >= 5,
+            $"singles {singles}, pairs {pairs}, clusters {groups}, tufts {tufts} of {n}");
+        // In a cluster the mushrooms are of different heights.
+        foreach (var c in ForestScenery.MediumClusters)
+        {
+            if (c.Count < 2)
+                continue;
+            float low = float.MaxValue, high = 0f;
+            for (int k = c.Start; k < c.Start + c.Count; k++)
+            {
+                low = MathF.Min(low, ForestScenery.MediumMushrooms[k].Height);
+                high = MathF.Max(high, ForestScenery.MediumMushrooms[k].Height);
+            }
+            Assert.True(high - low >= 0.05f * high, $"the cluster at ({c.X}, {c.Z}) is all one height");
         }
     }
 
@@ -674,9 +730,12 @@ public class ForestTests
         var tall = new List<DrawnMushroom>();
         tall.AddRange(ForestScenery.Giants.ToArray());
         tall.AddRange(ForestScenery.MediumMushrooms.ToArray());
+        foreach (var g in ForestScenery.Giants)
+            Assert.True(g.Height > ForestScenery.DecorationMaxHeight);
+        foreach (var c in ForestScenery.MediumClusters)
+            Assert.True(c.Height > ForestScenery.DecorationMaxHeight);
         foreach (var m in tall)
         {
-            Assert.True(m.Height > ForestScenery.DecorationMaxHeight);
             bool inside = false;
             foreach (var o in Ground.Obstacles)
                 if (Vector2.Distance(new Vector2(o.X, o.Z), new Vector2(m.X, m.Z)) + m.StemRadius * ForestScenery.StemMeshMaxRadius <= o.Radius + 1e-4f)
@@ -828,7 +887,8 @@ public class ForestTests
             }
         }
         Compare(ForestPalette.Caps, OldCaps);
-        Compare(ForestPalette.GlowCaps, OldGlowCaps);
+        // The glowing caps that replaced old ones (the bioluminescent blue and green came after).
+        Compare(ForestPalette.GlowCaps.AsSpan(0, OldGlowCaps.Length).ToArray(), OldGlowCaps);
         Compare(ForestPalette.DarkCaps, OldDarkCaps);
     }
 
@@ -921,7 +981,7 @@ public class ForestTests
         string view = System.IO.File.ReadAllText(System.IO.Path.Combine(forest, "ForestView.cs"));
         foreach (string use in new[]
         {
-            "ForestPalette.Caps", "ForestPalette.GlowCaps", "ForestPalette.DarkCaps", "ForestPalette.StemLight",
+            "ForestSpecies.Colors", "ForestSpecies.Of", "ForestScenery.Shelves", "ForestPalette.ShelfCaps", "ForestPalette.DarkCaps", "ForestPalette.StemLight",
             "ForestPalette.StemShade", "ForestPalette.Spot", "ForestPalette.Gills", "ForestPalette.CapGloss",
             "ForestPalette.CapRim", "ForestPalette.GlowEmission", "ForestPalette.DayGlow", "ForestPalette.NightGlow",
         })
@@ -930,5 +990,302 @@ public class ForestTests
         foreach (string part in new[] { "uniform float gloss", "uniform float rim", "uniform float glow_emission", "SPECULAR_LIGHT", "glow_emission * night_glow" })
             Assert.Contains(part, cap);
         Assert.DoesNotContain("specular_disabled", cap);
+        // A pattern for every kind's CapPattern (the view passes it as INSTANCE_CUSTOM.z = pattern / 8).
+        Assert.Contains("(int)look.Pattern / 8f", view);
+        Assert.Contains("int(custom.z * 8.0 + 0.5)", cap);
+        foreach (var pattern in Enum.GetValues<CapPattern>())
+            if (pattern != CapPattern.Plain)
+                Assert.Contains($"mode == {(int)pattern}", cap);
+        // Stems and their ink outlines slim and lean as ForestScenery says.
+        foreach (string shader in new[] { "toon_color.gdshader", "outline.gdshader" })
+            Assert.Contains("bend_stem(VERTEX, UV.y, INSTANCE_CUSTOM)", System.IO.File.ReadAllText(System.IO.Path.Combine(forest, "Shaders", shader)));
+        string bend = System.IO.File.ReadAllText(System.IO.Path.Combine(forest, "Shaders", "stem_bend.gdshaderinc"));
+        Assert.Contains("(t - 0.1) / 0.5", bend);
+        Assert.Contains("custom.y * t * t", bend);
+        Assert.Contains("SetShaderParameter(\"bend\", true)", view);
+        // One MultiMesh per cap shape and one for the shelves, not one per mushroom.
+        Assert.Contains("ForestMeshes.Cap(shape)", view);
+        Assert.Contains("ForestMeshes.Shelf()", view);
+        // The ground and foliage take ForestPalette's vibrant colors.
+        foreach (string use in new[]
+        {
+            "ForestPalette.Grass", "ForestPalette.GrassLight", "ForestPalette.Moss", "ForestPalette.Meadow", "ForestPalette.Dirt",
+            "ForestPalette.Soil", "ForestPalette.SoilDark", "ForestPalette.FernDark", "ForestPalette.FernLight",
+            "ForestPalette.Flowers", "ForestPalette.FlowerStem",
+        })
+            Assert.Contains(use, view);
+    }
+
+    // Variety: many kinds of mushrooms and fungi
+
+    /// <summary>Every tall spot the view draws a mushroom on: the giants, the medium clusters and the ring, with its kind.</summary>
+    private static List<(Vector2 At, MushroomKind Kind)> TallSpots()
+    {
+        var spots = new List<(Vector2, MushroomKind)>();
+        foreach (var g in ForestScenery.Giants)
+            spots.Add((new Vector2(g.X, g.Z), g.Species));
+        foreach (var c in ForestScenery.MediumClusters)
+            spots.Add((new Vector2(c.X, c.Z), c.Species));
+        foreach (var r in ForestScenery.RingMushrooms)
+            spots.Add((new Vector2(r.X, r.Z), r.Species));
+        return spots;
+    }
+
+    /// <summary>Asserts no spot shares its kind with any of its <see cref="ForestScenery.Neighbors"/> nearest.</summary>
+    private static void AssertNeighborsDiffer(List<(Vector2 At, MushroomKind Kind)> spots, string what)
+    {
+        Assert.True(ForestScenery.Neighbors >= 2);
+        for (int i = 0; i < spots.Count; i++)
+        {
+            var nearest = new List<(float D, int J)>();
+            for (int j = 0; j < spots.Count; j++)
+                if (j != i)
+                    nearest.Add((Vector2.DistanceSquared(spots[i].At, spots[j].At), j));
+            nearest.Sort();
+            for (int k = 0; k < ForestScenery.Neighbors; k++)
+                Assert.True(spots[nearest[k].J].Kind != spots[i].Kind,
+                    $"{what} at {spots[i].At} and its neighbor at {spots[nearest[k].J].At} are both {spots[i].Kind}");
+        }
+    }
+
+    [Fact]
+    public void NoTwoNeighborsAreTheSameKind()
+    {
+        AssertNeighborsDiffer(TallSpots(), "tall mushroom");
+        var patches = new List<(Vector2, MushroomKind)>();
+        foreach (var p in ForestScenery.SmallPatches)
+            patches.Add((new Vector2(p.X, p.Z), p.Species));
+        AssertNeighborsDiffer(patches, "patch of tiny fungi");
+    }
+
+    [Fact]
+    public void ManyKindsGrowEverywhere()
+    {
+        static HashSet<MushroomKind> Kinds(IEnumerable<MushroomKind> kinds) => new(kinds);
+        var giants = ForestScenery.Giants.ToArray();
+        var giantKinds = Kinds(giants.Select(g => g.Species));
+        var mediumKinds = Kinds(ForestScenery.MediumClusters.ToArray().Select(c => c.Species));
+        var smallKinds = Kinds(ForestScenery.SmallPatches.ToArray().Select(c => c.Species));
+        Assert.True(giantKinds.Count >= 8, $"only {giantKinds.Count} kinds of giants");
+        Assert.True(mediumKinds.Count >= 10, $"only {mediumKinds.Count} kinds of medium mushrooms");
+        Assert.Equal(Enum.GetValues<MushroomKind>().Length, smallKinds.Count);
+        // Mixed, none taking over.
+        foreach (var kind in giantKinds)
+            Assert.True(giants.Count(g => g.Species == kind) <= giants.Length / 4, $"too many {kind} giants");
+        // Caps of many shapes: domes, flat, funnels, bells, wavy, conical, and among the small ones balls, cups and corals.
+        var giantShapes = new HashSet<CapShape>(giants.Select(g => g.Shape));
+        Assert.Superset(new HashSet<CapShape> { CapShape.Dome, CapShape.Flat, CapShape.Funnel, CapShape.Bell, CapShape.Cone, CapShape.Wavy }, giantShapes);
+        var smallShapes = new HashSet<CapShape>();
+        foreach (var d in ForestScenery.Decoration)
+            if (d.Kind == DecorKind.Mushroom)
+                smallShapes.Add(d.Shape);
+        Assert.Equal(Enum.GetValues<CapShape>().Length, smallShapes.Count);
+        // Every mushroom's shape is one its kind grows.
+        foreach (var m in AllDrawnMushrooms())
+            Assert.Contains(m.Shape, ForestSpecies.Of(m.Species).Shapes);
+        // Bioluminescent ones among the giants, the medium and the tiny ones.
+        Assert.Contains(MushroomKind.Glowing, giantKinds);
+        Assert.Contains(MushroomKind.Glowing, mediumKinds);
+    }
+
+    [Fact]
+    public void KindsLookLikeThemselves()
+    {
+        foreach (var kind in Enum.GetValues<MushroomKind>())
+        {
+            var look = ForestSpecies.Of(kind);
+            Assert.Equal(kind, look.Kind);
+            Assert.NotEmpty(look.Shapes);
+            Assert.NotEmpty(ForestSpecies.Colors(kind));
+            Assert.True(look.CapPerHeight.Min > 0f && look.CapPerHeight.Min <= look.CapPerHeight.Max);
+            Assert.True(look.Slender.Min > 0.5f && look.Slender.Max <= 1f);
+            // Fungi with no stem are never giants on a trunk.
+            if (look.Stemless)
+                Assert.Equal(Tier.None, look.Tiers & Tier.Giant);
+        }
+        Assert.Equal(CapPattern.Spots, ForestSpecies.Of(MushroomKind.FlyAgaric).Pattern);
+        Assert.Equal(new[] { CapShape.Funnel }, ForestSpecies.Of(MushroomKind.Chanterelle).Shapes);
+        Assert.Equal(new[] { CapShape.Bell }, ForestSpecies.Of(MushroomKind.InkCap).Shapes);
+        Assert.Equal(CapPattern.Honeycomb, ForestSpecies.Of(MushroomKind.Morel).Pattern);
+        Assert.Equal(Habit.Tuft, ForestSpecies.Of(MushroomKind.Enoki).Habit);
+        Assert.True(ForestSpecies.Of(MushroomKind.Glowing).Glows);
+        Assert.Single(ForestSpecies.All.ToArray(), l => l.Glows);
+        // Parasols are tall and thin with wide flat caps; boletes fat.
+        var parasol = ForestSpecies.Of(MushroomKind.Parasol);
+        var bolete = ForestSpecies.Of(MushroomKind.Bolete);
+        Assert.True(parasol.GiantHeight > bolete.GiantHeight && parasol.GiantCap.Min > bolete.GiantCap.Max && parasol.Slender.Max < bolete.Slender.Min);
+        Assert.True(parasol.CapDepth.Max < ForestSpecies.Of(MushroomKind.InkCap).CapDepth.Min);
+    }
+
+    [Fact]
+    public void GiantsVaryInHeightCapStemAndLean()
+    {
+        var giants = ForestScenery.Giants.ToArray();
+        Assert.True(giants.Max(g => g.Height) - giants.Min(g => g.Height) >= 8f, "giants are all about one height");
+        var ratios = giants.Select(g => g.CapRadius / g.StemRadius).ToArray();
+        Assert.True(ratios.Max() - ratios.Min() >= 1.5f, "giant caps are all about one size for their stems");
+        var depths = giants.Select(g => g.CapHeight / g.CapRadius).ToArray();
+        Assert.True(depths.Max() - depths.Min() >= 0.8f, "giant caps are all about one depth");
+        Assert.Contains(giants, g => g.Slender <= 0.75f);
+        Assert.Contains(giants, g => g.Slender >= 0.95f);
+        Assert.True(giants.Count(g => g.Lean > 0.01f) >= giants.Length / 4, "hardly any giant leans");
+        foreach (var g in giants)
+            Assert.InRange(g.Lean, 0f, ForestScenery.MaxGiantLean);
+        foreach (var m in AllDrawnMushrooms())
+        {
+            Assert.InRange(m.Lean, 0f, ForestScenery.MaxLean);
+            Assert.InRange(m.Slender, 0.5f, 1f);
+        }
+        // A slim stem keeps its full foot (its circle) and narrows only above it; never wider.
+        foreach (float slender in new[] { 0.55f, 0.7f, 1f })
+        {
+            Assert.Equal(ForestScenery.StemFootRadius, ForestScenery.StemRadiusAt(slender, 0f), 4);
+            for (float t = 0f; t <= 1f; t += 0.01f)
+                Assert.InRange(ForestScenery.StemRadiusAt(slender, t), 0.3f * slender, ForestScenery.StemProfile(t) + 1e-5f);
+        }
+        Assert.Equal(0.55f * ForestScenery.StemProfile(0.8f), ForestScenery.StemRadiusAt(0.55f, 0.8f), 4);
+        // A slim giant's root flare still hides its top inside the stem.
+        foreach (var m in AllDrawnMushrooms())
+        {
+            var p = ForestFooting.Plant(m);
+            if (p.SkirtHeight > 0f)
+                Assert.True(ForestFooting.SkirtTopRadius < ForestScenery.StemRadiusAt(m.Slender, p.SkirtHeight / p.StemHeight),
+                    $"the flare of the slim stem at ({m.X}, {m.Z}) pokes out above the stem");
+        }
+        // Leaning moves the top along the stem's local +X, more toward the top, not the foot.
+        var lean = new DrawnMushroom(DecorKind.Mushroom, 0f, 0f, 0f, 1f, 10f, 3f, 2f, 1, Lean: 0.05f);
+        Assert.Equal(Vector2.Zero, ForestScenery.LeanOffset(lean, 9f, 0f));
+        Assert.Equal(0.45f, ForestScenery.LeanOffset(lean, 9f, 1f).X, 4);
+        Assert.Equal(-0.45f, ForestScenery.LeanOffset(lean with { Yaw = MathF.PI / 2f }, 9f, 1f).Y, 4);
+    }
+
+    [Fact]
+    public void ShelfFungiGrowOnSomeGiantStems()
+    {
+        var giants = ForestScenery.Giants;
+        var with = new HashSet<int>();
+        foreach (var s in ForestScenery.Shelves)
+        {
+            Assert.InRange(s.Giant, 0, giants.Length - 1);
+            with.Add(s.Giant);
+            var g = giants[s.Giant];
+            var p = ForestFooting.Plant(g);
+            Assert.InRange(s.Along, 0.1f, 0.6f);
+            Assert.InRange(s.Radius, 0.1f * g.StemRadius, 0.8f * g.StemRadius);
+            Assert.InRange(s.Thickness, 0.1f * s.Radius, 0.4f * s.Radius);
+            // On the stem's surface, above the high side of the ground and under the cap.
+            var at = ForestScenery.StemPoint(g, p, s.Along, s.Angle);
+            var axis = ForestScenery.LeanOffset(g, p.StemHeight, s.Along);
+            float r = Vector2.Distance(new Vector2(at.X, at.Z), new Vector2(g.X + axis.X, g.Z + axis.Y));
+            Assert.Equal(g.StemRadius * ForestScenery.StemRadiusAt(g.Slender, s.Along), r, 3);
+            Assert.True(at.Y > DenseGround(g.X, g.Z, g.StemRadius).High + 0.5f, $"a shelf on the giant at ({g.X}, {g.Z}) in the ground");
+            Assert.True(at.Y + s.Thickness < p.CapY, $"a shelf on the giant at ({g.X}, {g.Z}) above its cap");
+        }
+        Assert.InRange(with.Count, giants.Length * 15 / 100, giants.Length * 60 / 100);
+    }
+
+    [Fact]
+    public void TinyFungiLineThePathsAndFillTheClearings()
+    {
+        int byPaths = 0, inClearings = 0;
+        var kindsByPaths = new HashSet<MushroomKind>();
+        foreach (var d in ForestScenery.Decoration)
+        {
+            if (d.Kind != DecorKind.Mushroom)
+                continue;
+            float path = ForestLayout.PathDistance(d.X, d.Z);
+            if (path <= ForestLayout.PathHalfWidth + 1.6f)
+            {
+                byPaths++;
+                kindsByPaths.Add(d.Species);
+            }
+            if (ForestLayout.ClearingDepth(d.X, d.Z) > 0f)
+                inClearings++;
+        }
+        Assert.True(byPaths >= 300, $"only {byPaths} tiny fungi along the paths");
+        Assert.True(inClearings >= 100, $"only {inClearings} tiny fungi in the clearings");
+        Assert.True(kindsByPaths.Count >= 10, $"only {kindsByPaths.Count} kinds along the paths");
+        // Each patch is one kind, near its spot, of varied heights when it has several.
+        var decoration = ForestScenery.Decoration;
+        foreach (var p in ForestScenery.SmallPatches)
+            for (int k = p.Start; k < p.Start + p.Count; k++)
+            {
+                Assert.Equal(p.Species, decoration[k].Species);
+                Assert.True(Vector2.Distance(new Vector2(decoration[k].X, decoration[k].Z), new Vector2(p.X, p.Z)) <= ForestScenery.PatchRadius);
+            }
+    }
+
+    // The vivid caps of every kind and the vibrant world
+
+    [Fact]
+    public void EveryKindsCapsAreVivid()
+    {
+        foreach (var kind in Enum.GetValues<MushroomKind>())
+            foreach (var c in ForestSpecies.Colors(kind))
+            {
+                AssertInRgb(c);
+                var (_, sat, val) = Hsv(c);
+                Assert.True(sat >= 0.5f && val >= 0.84f, $"{kind} cap {c} is not saturated and bright");
+            }
+        foreach (var c in ForestPalette.ShelfCaps)
+        {
+            var (_, sat, val) = Hsv(c);
+            Assert.True(sat >= 0.75f && val >= 0.85f, $"shelf {c} is dull");
+        }
+        // Glowing ones include bioluminescent blue and green.
+        Assert.Contains(ForestPalette.GlowCaps, c => Hsv(c).Hue is > 205f and < 240f);
+        Assert.Contains(ForestPalette.GlowCaps, c => Hsv(c).Hue is > 100f and < 150f);
+        // The kinds read apart: golden chanterelles, red fly agarics, purple amethysts, scarlet cups.
+        Assert.All(ForestPalette.ChanterelleCaps, c => Assert.InRange(Hsv(c).Hue, 35f, 55f));
+        Assert.All(ForestPalette.AmethystCaps, c => Assert.InRange(Hsv(c).Hue, 260f, 310f));
+        Assert.All(ForestPalette.CupCaps, c => Assert.True(Hsv(c).Hue < 10f || Hsv(c).Hue > 350f));
+    }
+
+    private static float Luminance(Vector3 c) => 0.2126f * c.X + 0.7152f * c.Y + 0.0722f * c.Z;
+
+    [Fact]
+    public void TheWorldIsLushBrightAndReadable()
+    {
+        // Greens (grass, sunny patches, moss, meadow, ferns): saturated, clearly more than the old
+        // grey-olive ones, bright but not neon or washed out.
+        var greens = new[] { ForestPalette.Grass, ForestPalette.GrassLight, ForestPalette.Moss, ForestPalette.Meadow, ForestPalette.FernDark, ForestPalette.FernLight, ForestPalette.FlowerStem };
+        foreach (var c in greens)
+        {
+            AssertInRgb(c);
+            var (hue, sat, val) = Hsv(c);
+            Assert.InRange(hue, 70f, 140f);
+            Assert.True(sat >= 0.7f, $"green {c} is greyish");
+            Assert.InRange(val, 0.55f, 0.92f);
+        }
+        var before = new[] { (ForestPalette.Grass, new Vector3(0.5f, 0.74f, 0.33f)), (ForestPalette.Moss, new Vector3(0.3f, 0.56f, 0.32f)), (ForestPalette.Meadow, new Vector3(0.66f, 0.8f, 0.38f)) };
+        foreach (var (now, old) in before)
+        {
+            Assert.True(Hsv(now).Sat >= Hsv(old).Sat + 0.15f, $"{now} is not clearly more saturated than {old}");
+            Assert.True(Hsv(now).Val >= Hsv(old).Val - 0.03f, $"{now} is darker than {old}");
+        }
+        // Yellow-green highlights: the sunny patches are yellower and lighter than the grass.
+        Assert.True(Hsv(ForestPalette.GrassLight).Hue < Hsv(ForestPalette.Grass).Hue - 10f);
+        Assert.True(Luminance(ForestPalette.GrassLight) > Luminance(ForestPalette.Grass));
+        // Warm golden paths that stand out from the grass.
+        var (dirtHue, dirtSat, dirtVal) = Hsv(ForestPalette.Dirt);
+        Assert.InRange(dirtHue, 30f, 48f);
+        Assert.InRange(dirtSat, 0.55f, 0.8f);
+        Assert.InRange(dirtVal, 0.85f, 1f);
+        Assert.True(dirtSat >= Hsv(new Vector3(0.7f, 0.52f, 0.36f)).Sat + 0.1f, "the paths are no more golden than before");
+        Assert.True(Luminance(ForestPalette.Dirt) >= Luminance(ForestPalette.Grass) + 0.15f, "paths do not stand out from the grass");
+        Assert.True(Luminance(ForestPalette.Dirt) >= Luminance(ForestPalette.Meadow) + 0.08f, "paths do not stand out from the meadows");
+        Assert.True(Luminance(ForestPalette.SoilDark) < Luminance(ForestPalette.Soil));
+        // Flowers in many clear hues (one white).
+        var hues = new HashSet<int>();
+        foreach (var c in ForestPalette.Flowers)
+        {
+            AssertInRgb(c);
+            var (hue, sat, val) = Hsv(c);
+            Assert.True(val >= 0.9f, $"flower {c} is dull");
+            if (sat >= 0.5f)
+                hues.Add((int)(hue / 30f));
+        }
+        Assert.True(hues.Count >= 7, $"flowers in only {hues.Count} hue families");
+        Assert.Single(ForestPalette.Flowers, c => Hsv(c).Sat < 0.5f);
     }
 }
