@@ -1508,15 +1508,41 @@ public class NPCsModuleTests
     [InlineData(2)]
     [InlineData(3)]
     [InlineData(4)]
-    public void EachOneIsDrawnAbout1point2To1point35MetersTallWithThePromptOverTheTopOfTheHead(int npc)
+    public void EachOneIsDrawnAbout1point25To1point35MetersTallMillieAbout1point17WithThePromptOverTheTopOfTheHead(int npc)
     {
         var glb = new Glb(NpcFiles[npc]);
         float lift = npc == NPCsModule.Pip ? StoolHeight : 0f;
         float scale = NPCsModule.FigureScales[npc];
-        Assert.InRange((Max(glb.Vertices("Head", "Skin")).Y - lift) * scale, 1.22f, 1.35f);
-        // HeadTops is the top of everything on the head (hair, ears, the bun, Pip's hat), where the view floats the prompt.
+        float drawn = (Max(glb.Vertices("Head", "Skin")).Y - lift) * scale;
+        if (npc == NPCsModule.Millie)
+            // Saria, 2026-10-26: about 10% shorter than the 1.30 m player, her whole figure scaled evenly.
+            Assert.InRange(drawn, 1.14f, 1.20f);
+        else
+            Assert.InRange(drawn, 1.22f, 1.35f);
+        // HeadTops is the top of everything on the head (hair, ears, the bun, Pip's hat) before the scale;
+        // the view floats the prompt over HeadTops * FigureScales, just over the drawn top.
         Assert.Equal(glb.VerticesUnder("Head").Max(v => v.Y), NPCsModule.HeadTops[npc], 2);
         Assert.Equal(npc == NPCsModule.Jeremy, NPCsModule.FigureScales.Max() == scale);
+    }
+
+    [Fact]
+    public void MillieIsAbout10PercentShorterThanTheOthersAndTheShortest()
+    {
+        Assert.Equal(0.9f, NPCsModule.FigureScales[NPCsModule.Millie], 3);
+        float Drawn(int npc)
+        {
+            float lift = npc == NPCsModule.Pip ? StoolHeight : 0f;
+            return (Max(new Glb(NpcFiles[npc]).Vertices("Head", "Skin")).Y - lift) * NPCsModule.FigureScales[npc];
+        }
+        float millie = Drawn(NPCsModule.Millie);
+        for (int npc = 0; npc < NpcFiles.Length; npc++)
+        {
+            if (npc == NPCsModule.Millie)
+                continue;
+            float other = Drawn(npc);
+            Assert.True(millie < other - 0.05f, $"Millie ({millie:0.00} m) is not clearly shorter than NPC {npc} ({other:0.00} m)");
+            Assert.InRange(millie / other, 0.84f, 0.95f);
+        }
     }
 
     /// <summary>Asserts that the node's mesh has each of the materials.</summary>

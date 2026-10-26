@@ -36,7 +36,8 @@ conversation in speech bubbles (the Dialogue module shows them).
   above, a rounded top: a triangle about 0.42 m wide for Millie's and Abby's dresses, an egg (about
   0.28 m wide near the top, 0.38 m at its widest) for the others; big oval hands, about half the
   head's width, floating well out beside the body at its middle with three finger marks, no arm
-  meshes; each one drawn about 1.25 to 1.35 m tall, Jeremy the tallest, with `HeadTops`, where the
+  meshes; each one drawn about 1.25 to 1.35 m tall, Jeremy the tallest, but Millie about 1.17 m,
+  clearly shorter than all the others (`FigureScales[1]` 0.9), with `HeadTops`, where the
   prompt floats, at the top of their head; and each one's look: Jeremy's coat, badge and
   stethoscope, Millie's ears and tail, Lucy's flower and "Pet Store" print, Abby's bun and dress,
   Pip's hat, muffin apron, spoon and the 0.63 m stool Pip still needs at the counter,
@@ -146,7 +147,8 @@ stays planted) with the free leg lifting in a little step now and then, and whil
 bounce on each step in place (the left and right foot in turn), nodding and a waving right hand.
 The arms are empty pivots (nothing draws them): turning an arm moves its hand along; the legs turn
 at the hip. Each is drawn at `NPCsModule.FigureScales` (about 1.25 to 1.35 m tall, Jeremy, a grown-up, the
-tallest) and the prompt floats over `NPCsModule.HeadTops` (the top of the hair, ears, bun or hat);
+tallest; Millie 0.9, about 10% shorter, about 1.17 m: Saria, 2026-10-26, her whole figure scaled
+evenly) and the prompt floats over `NPCsModule.HeadTops` (the top of the hair, ears, bun or hat, times the figure's scale);
 Millie is the liveliest, Abby nearly as lively, Lucy barely moves. Pip stirs the soup
 pot on the counter (the right hand up over its rim, circling, the spoon tipped into it), and when
 the player comes near (`Noticing`) waves with the left hand for 2.5 s, and while talking.
@@ -165,8 +167,8 @@ writes `jeremy.glb`, `millie.glb`, `lucy.glb`, `abby.glb` and `pip.glb` (`... np
 that one); commit them with the script. Folk built of a few clean simple shapes in the player
 characters' new style (Saria's drawing "you choose between these", see the Player README's Models;
 Tony, 2026-10-26: "too elongated, the torso should be somewhat shorter and more rounded at the
-base, and the legs should be further apart but still within the base of the torso"), about 1.30 m
-tall: a big plain round head, 0.38 m across, its center at about 1.11 m and its top at about 1.30 m,
+base, and the legs should be further apart but still within the base of the torso"), about 1.30 m tall
+as modelled (the view draws Millie at 0.9 of that, about 1.17 m): a big plain round head, 0.38 m across, its center at about 1.11 m and its top at about 1.30 m,
 floating a few cm over the body (no neck); the body short (0.36 to 0.88 m, 25% shorter than the old
 0.36 to 1.06 m) and round at the base, a smooth outline (`BODIES`, the player characters' shapes):
 for a dress a triangle from the front (narrow and round at the top, 0.42 m wide low down) with a

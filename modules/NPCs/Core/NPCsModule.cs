@@ -85,8 +85,9 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
     /// <summary>How far to the left of the counter's middle (as Pip sees it) Pip stands, beside the soup pot (meters).</summary>
     public const float PipBesidePot = 0.4f;
 
-    /// <summary>How big the view draws each model (by NPC index): all about 1.25 to 1.35 m tall, Jeremy the tallest.</summary>
-    public static readonly float[] FigureScales = { 1.02f, 1.0f, 0.97f, 0.99f, 0.96f };
+    /// <summary>How big the view draws each model (by NPC index): about 1.25 to 1.35 m tall, Jeremy the tallest,
+    /// but Millie about 10% shorter (about 1.17 m, Saria, 2026-10-26).</summary>
+    public static readonly float[] FigureScales = { 1.02f, 0.9f, 0.97f, 0.99f, 0.96f };
 
     /// <summary>
     /// The top of each model (hair, ears, bun or hat; meters above its origin, before <see cref="FigureScales"/>;
