@@ -70,6 +70,207 @@ public class DayNightModuleTests
         Assert.Equal(0f, VolumetricFog.GiInject);
     }
 
+    // ---- The light (Lighting's palette) ----
+
+    /// <summary>Every hour from 0 to 24 in quarter hours.</summary>
+    private static IEnumerable<float> QuarterHours()
+    {
+        for (int q = 0; q <= 96; q++)
+            yield return q / 4f;
+    }
+
+    private static IEnumerable<Rgb> Colors(Mood m)
+    {
+        yield return m.Top;
+        yield return m.Horizon;
+        yield return m.Ground;
+        yield return m.Light;
+        yield return m.Ambient;
+        yield return m.Fog;
+    }
+
+    [Fact]
+    public void MoodsRunFromMidnightToMidnightInOrder()
+    {
+        var moods = Lighting.Moods;
+        Assert.Equal(0f, moods[0].Hour);
+        Assert.Equal(24f, moods[^1].Hour);
+        for (int i = 1; i < moods.Length; i++)
+            Assert.True(moods[i].Hour > moods[i - 1].Hour);
+        Assert.Equal(moods[0].Top.Hue, Lighting.At(24f).Top.Hue, 3);
+    }
+
+    [Fact]
+    public void AtBlendsBetweenTheKeysAndHitsThemExactly()
+    {
+        var day = Lighting.Moods[Lighting.Day];
+        Assert.Equal(day.Top.B, Lighting.At(day.Hour).Top.B, 5);
+        Assert.Equal(day.FogDensity, Lighting.At(13f).FogDensity, 6);
+        // Halfway from evening to dusk lies between the two.
+        var evening = Lighting.Moods[Lighting.Evening];
+        var dusk = Lighting.Moods[Lighting.Dusk];
+        float g = Lighting.At((evening.Hour + dusk.Hour) / 2f).Horizon.G;
+        Assert.InRange(g, Math.Min(evening.Horizon.G, dusk.Horizon.G), Math.Max(evening.Horizon.G, dusk.Horizon.G));
+    }
+
+    [Fact]
+    public void DaySkyIsAClearSaturatedBlue()
+    {
+        foreach (float hour in new[] { 11f, 13f, 16f })
+        {
+            var m = Lighting.At(hour);
+            Assert.InRange(m.Top.Hue, 205f, 235f);
+            Assert.True(m.Top.Saturation >= 0.8f, $"top saturation {m.Top.Saturation} at {hour}");
+            Assert.True(m.Top.B >= 0.95f);
+            // The horizon is a lighter blue, not white.
+            Assert.InRange(m.Horizon.Hue, 195f, 230f);
+            Assert.InRange(m.Horizon.Saturation, 0.3f, 0.7f);
+        }
+    }
+
+    [Fact]
+    public void DaySunlightIsWarmAndBright()
+    {
+        var light = Lighting.At(13f).Light;
+        Assert.True(light.R >= light.G && light.G > light.B, "warm: red >= green > blue");
+        Assert.InRange(light.Hue, 35f, 55f);
+        Assert.InRange(light.Saturation, 0.15f, 0.35f); // warm, but not orange
+        Assert.True(light.Luminance >= 0.9f);
+        Assert.InRange(Lighting.SunEnergy, 1.15f, 1.4f);
+    }
+
+    [Fact]
+    public void AmbientIsColoredNeverGrey()
+    {
+        foreach (float hour in QuarterHours())
+        {
+            var ambient = Lighting.At(hour).Ambient;
+            Assert.True(ambient.Saturation >= 0.25f, $"ambient saturation {ambient.Saturation} at {hour}");
+        }
+        // By day it is a sky blue.
+        Assert.InRange(Lighting.At(13f).Ambient.Hue, 210f, 235f);
+    }
+
+    [Fact]
+    public void DayHazeIsThinAndBlueNotGrey()
+    {
+        foreach (float hour in new[] { 10f, 11f, 13f, 16f })
+            Assert.True(Lighting.At(hour).FogDensity <= 0.002f, $"fog {Lighting.At(hour).FogDensity} at {hour}");
+        Assert.True(Lighting.At(13f).FogDensity <= 0.0015f);
+        var fog = Lighting.At(13f).Fog;
+        Assert.True(fog.Saturation >= 0.35f);
+        Assert.InRange(fog.Hue, 200f, 230f);
+        // Day fog is thinner than at dawn, dusk and night.
+        foreach (int key in new[] { Lighting.Night, Lighting.Dawn, Lighting.Dusk })
+            Assert.True(Lighting.Moods[key].FogDensity > Lighting.At(13f).FogDensity * 3f);
+    }
+
+    [Fact]
+    public void EnvironmentGivesAGentleSaturationBoost()
+    {
+        Assert.InRange(Lighting.AdjustmentSaturation, 1.25f, 1.4f);
+        Assert.InRange(Lighting.AdjustmentContrast, 1f, 1.1f);
+        Assert.InRange(Lighting.AdjustmentBrightness, 1f, 1.05f);
+    }
+
+    [Fact]
+    public void EveningIsGolden()
+    {
+        var m = Lighting.Moods[Lighting.Evening];
+        Assert.InRange(m.Hour, 18f, 19.5f);
+        Assert.InRange(m.Light.Hue, 30f, 50f);
+        Assert.True(m.Light.Saturation >= 0.6f);
+        Assert.InRange(m.Horizon.Hue, 28f, 45f);
+        Assert.True(m.Horizon.Saturation >= 0.7f);
+        Assert.InRange(m.Fog.Hue, 28f, 45f);
+    }
+
+    [Fact]
+    public void DuskIsPinkPurple()
+    {
+        var m = Lighting.Moods[Lighting.Dusk];
+        Assert.Equal(TimeOfDay.NightStartHour, m.Hour);
+        Assert.InRange(m.Top.Hue, 255f, 300f); // purple overhead
+        Assert.InRange(m.Horizon.Hue, 310f, 345f); // pink at the horizon
+        Assert.InRange(m.Ambient.Hue, 260f, 300f);
+        Assert.True(m.Horizon.Saturation >= 0.5f && m.Top.Saturation >= 0.6f);
+    }
+
+    [Fact]
+    public void NightIsADeepBluePurpleInWhichGlowStandsOut()
+    {
+        foreach (float hour in new[] { 22f, 0f, 3f })
+        {
+            var m = Lighting.At(hour);
+            Assert.InRange(m.Top.Hue, 240f, 270f);
+            Assert.True(m.Top.Saturation >= 0.8f);
+            Assert.True(m.Top.Luminance <= 0.06f, "deep");
+            Assert.InRange(m.Horizon.Hue, 250f, 285f);
+            Assert.InRange(m.Ambient.Hue, 245f, 275f);
+            Assert.InRange(m.Fog.Hue, 245f, 280f);
+            // Dim ambient and strong glow, so glowing mushrooms stand out; the stars are out.
+            Assert.True(m.AmbientEnergy <= 0.5f);
+            Assert.True(m.Glow >= 1.1f && m.Glow > Lighting.At(13f).Glow * 2f);
+            Assert.Equal(1f, m.Stars);
+        }
+    }
+
+    [Fact]
+    public void NothingIsWashedOutOrGarish()
+    {
+        foreach (float hour in QuarterHours())
+        {
+            var m = Lighting.At(hour);
+            foreach (var c in Colors(m))
+            {
+                Assert.InRange(c.R, 0f, 1f);
+                Assert.InRange(c.G, 0f, 1f);
+                Assert.InRange(c.B, 0f, 1f);
+                // Never a grey or near-white wash: every color carries some hue.
+                Assert.True(c.Saturation >= 0.15f, $"saturation {c.Saturation} at {hour}");
+            }
+            Assert.InRange(m.AmbientEnergy, 0.4f, 0.8f); // shadows stay readable
+            Assert.InRange(m.Glow, 0.4f, 1.3f);
+            Assert.InRange(m.FogDensity, 0f, 0.012f);
+        }
+    }
+
+    [Fact]
+    public void ForestHazeIsAGreenGoldByDayAndTealByNight()
+    {
+        Assert.InRange(Lighting.ForestFogDay.Hue, 85f, 110f); // yellow-green
+        Assert.True(Lighting.ForestFogDay.Saturation >= 0.45f);
+        Assert.InRange(Lighting.ForestFogNight.Hue, 195f, 225f);
+        Assert.InRange(Lighting.ForestAmbient.Hue, 130f, 170f);
+    }
+
+    [Fact]
+    public void RgbHueAndSaturation()
+    {
+        Assert.Equal(0f, new Rgb(1f, 0f, 0f).Hue);
+        Assert.Equal(120f, new Rgb(0f, 1f, 0f).Hue);
+        Assert.Equal(240f, new Rgb(0f, 0f, 1f).Hue);
+        Assert.Equal(300f, new Rgb(1f, 0f, 1f).Hue);
+        Assert.Equal(0f, new Rgb(0.5f, 0.5f, 0.5f).Saturation);
+        Assert.Equal(0.5f, new Rgb(1f, 0.5f, 0.5f).Saturation, 5);
+        Assert.Equal(0f, new Rgb(0f, 0f, 0f).Saturation);
+    }
+
+    [Fact]
+    public void VividLerpPassesThroughNoGrey()
+    {
+        var peach = new Rgb(1f, 0.8f, 0.6f);
+        var blue = new Rgb(0.6f, 0.8f, 1f);
+        Assert.True(peach.Lerp(blue, 0.4f).Saturation < 0.1f); // a plain blend is almost grey
+        var mid = peach.VividLerp(blue, 0.4f);
+        Assert.Equal(peach.Saturation, mid.Saturation, 3);
+        Assert.Equal(peach.Lerp(blue, 0.4f).Value, mid.Value, 5);
+        Assert.Equal(peach.Lerp(blue, 0.4f).Hue, mid.Hue, 2);
+        // The ends are exact.
+        Assert.Equal(peach.R, peach.VividLerp(blue, 0f).R, 5);
+        Assert.Equal(blue.B, peach.VividLerp(blue, 1f).B, 5);
+    }
+
     private void Ticks(int count)
     {
         for (int i = 0; i < count; i++)
