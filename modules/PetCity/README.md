@@ -17,10 +17,10 @@ letters and hearts, the lamps and the bioluminescent fungi glow.
   lamps' caps and the cap roofs, chosen from a fixed seed).
 - `Godot/` — `Main.tscn` with `PetCityView`, `PetCityModels` (loads `petcity.glb` at run time, toon
   materials, night glow); `Preview.tscn` (`PetCityPreview`, for screenshots); `Shaders/` (toon
-  surface, ink outline).
+  surface, the little fungi's tinted toon surface, ink outline).
 - `Models/` — `petcity.py`, the Blender script that builds and exports `petcity.glb` next to it.
 - `Tests/` — `PetCityTests.cs`: xUnit tests of `PetCityLayout`, `PetCityLook`, `PetCityFungi` and
-  `PetCityModule` with a fake `IMessageBus`, and of `petcity.glb`'s materials and objects.
+  `PetCityModule` with a fake `IMessageBus`, and of `petcity.glb`'s materials and objects and which shaders read per-instance data.
 
 Test it with `./test.sh PetCity` from the repository root.
 
@@ -104,12 +104,16 @@ is `PetStore` and `PetStoreInside` scaled to its footprint, the `Counter` at
 beds, a bunny and a hamster in golden cages, the Mushroom Crow on its perch) breathing and bobbing a
 little. Each lamp gets its own cap (`PetCityFungi.LampCapOf`, recolored) over its post and bulb.
 The little fungi (`PetCityFungi.All`) are drawn as one MultiMesh per kind (no shadows), each
-instance scaled to its height and width, turned, leaning, and its cap tinted (`instance_tint` in the
-toon shader, from the instance's custom data). When `WindowsLit` changes, the shared window, lamp and sign
+instance scaled to its height and width, turned, leaning, and its cap tinted from the instance's custom data by its own shader (`Shaders/fungus.gdshader`, used
+only by these MultiMeshes' tinted materials; their MultiMeshes have custom data on). When `WindowsLit` changes, the shared window, lamp and sign
 materials switch between daylight glass and a warm glow (the city lamps' bulbs twice as bright as
-the store's lamps), the glow caps light up, and the store's light brightens. The toon shader (`Shaders/toon.gdshader`) gives
+the store's lamps), the glow caps light up, and the store's light brightens. The toon shader (`Shaders/toon.gdshader`, every ordinary mesh) and the
+fungi's shader share their look (`Shaders/toon.gdshaderinc`: uniforms and light), which gives
 the mushroom caps (`PetCityLook.CapMaterials`) a soft specular band (`gloss`) and a light rim
-(`rim_light`); every other surface has neither.
+(`rim_light`); every other surface has neither. Only `fungus.gdshader` reads per-instance data
+(`INSTANCE_CUSTOM`): on an ordinary `MeshInstance3D` it is undefined, and real GPU drivers (not
+lavapipe) turned everything Pet City drew black and speckled when `toon.gdshader` read it (the tests
+check that no other shader does).
 
 ## Models
 

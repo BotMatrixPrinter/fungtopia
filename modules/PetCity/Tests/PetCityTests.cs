@@ -483,6 +483,66 @@ public class PetCityTests
         Assert.Equal(2f * 1.6f, PetCityLook.LampGlowNight);
     }
 
+    [Fact]
+    public void OnlyTheFungiShaderReadsPerInstanceData()
+    {
+        // Real GPUs give ordinary meshes undefined INSTANCE_CUSTOM (Pet City drew black on Windows),
+        // so only fungus.gdshader, on the fungi's MultiMeshes (custom data on), may read it.
+        string shaders = ModuleFile("Godot", "Shaders");
+        var files = Directory.GetFiles(shaders);
+        Assert.Contains(Path.Combine(shaders, "toon.gdshader"), files);
+        Assert.Contains(Path.Combine(shaders, "fungus.gdshader"), files);
+        foreach (var file in files)
+        {
+            string code = ShaderCode(file);
+            if (Path.GetFileName(file) == "fungus.gdshader")
+                continue;
+            Assert.DoesNotContain("INSTANCE_CUSTOM", code);
+            Assert.DoesNotContain("instance_tint", code);
+            Assert.DoesNotContain("INSTANCE_ID", code);
+            Assert.DoesNotContain("varying", code);
+        }
+        // The fungi look like toon.gdshader (the same uniforms and light), their color times the
+        // instance's tint, the varying set on every path.
+        string toon = ShaderCode(Path.Combine(shaders, "toon.gdshader"));
+        string fungus = ShaderCode(Path.Combine(shaders, "fungus.gdshader"));
+        Assert.Contains("#include \"toon.gdshaderinc\"", toon);
+        Assert.Contains("#include \"toon.gdshaderinc\"", fungus);
+        Assert.Contains("ALBEDO = albedo;", toon);
+        Assert.Contains("void vertex() {\n\ttint = INSTANCE_CUSTOM.rgb;\n}", fungus);
+        Assert.Contains("ALBEDO = albedo * tint;", fungus);
+
+        string models = File.ReadAllText(ModuleFile("Godot", "PetCityModels.cs"));
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(models, "Shaders \\+ \"fungus\\.gdshader\""));
+        Assert.DoesNotContain("instance_tint", models);
+        Assert.Contains("UseCustomData = true", models);
+    }
+
+    /// <summary>A path under modules/PetCity/ of the repository.</summary>
+    private static string ModuleFile(params string[] parts)
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !Directory.Exists(Path.Combine(dir.FullName, "modules", "PetCity", "Godot")))
+            dir = dir.Parent;
+        Assert.NotNull(dir);
+        var path = new List<string> { dir!.FullName, "modules", "PetCity" };
+        path.AddRange(parts);
+        return Path.Combine(path.ToArray());
+    }
+
+    /// <summary>A shader's code without its // comments, with \n line ends.</summary>
+    private static string ShaderCode(string file)
+    {
+        var lines = File.ReadAllText(file).Replace("\r\n", "\n").Split('\n');
+        for (int i = 0; i < lines.Length; i++)
+        {
+            int comment = lines[i].IndexOf("//", StringComparison.Ordinal);
+            if (comment >= 0)
+                lines[i] = lines[i][..comment].TrimEnd();
+        }
+        return string.Join("\n", lines);
+    }
+
     /// <summary>The JSON chunk of Models/petcity.glb.</summary>
     private static JsonDocument ModelJson()
     {

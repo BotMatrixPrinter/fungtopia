@@ -24,6 +24,7 @@ public static class PetCityModels
     private static readonly Color WindowNight = new(1f, 0.84f, 0.5f);
 
     private static Shader? s_toon;
+    private static Shader? s_fungus;
     private static ShaderMaterial? s_outline;
     private static Node3D? s_scene;
     private static readonly Dictionary<string, ShaderMaterial> s_materials = new();
@@ -63,7 +64,8 @@ public static class PetCityModels
     /// <summary>
     /// A MultiMesh of <paramref name="count"/> copies of the object <paramref name="name"/> (or null
     /// when missing), toon-shaded with outlines; its tinted materials (<see cref="PetCityLook.TintedMaterials"/>)
-    /// take each instance's color from its custom data (<see cref="Tint"/>).
+    /// take each instance's color from its custom data (<see cref="Tint"/>) with fungus.gdshader, the
+    /// only shader that reads per-instance data (ordinary meshes have none: real GPUs give garbage).
     /// </summary>
     public static MultiMeshInstance3D? Batch(string name, int count)
     {
@@ -78,9 +80,7 @@ public static class PetCityModels
         {
             var original = source.Mesh.SurfaceGetMaterial(i);
             string material = original?.ResourceName ?? "";
-            var toon = ToonMaterial(original, null);
-            if (System.Array.IndexOf(PetCityLook.TintedMaterials, material) >= 0)
-                toon.SetShaderParameter("instance_tint", true);
+            var toon = ToonMaterial(original, null, System.Array.IndexOf(PetCityLook.TintedMaterials, material) >= 0);
             if (mesh is ArrayMesh array)
                 array.SurfaceSetMaterial(i, toon);
         }
@@ -135,8 +135,20 @@ public static class PetCityModels
     public static ShaderMaterial Toon(Color color, bool outline = true, float glow = 0f)
     {
         s_toon ??= GD.Load<Shader>(Shaders + "toon.gdshader");
+        return Surface(s_toon, color, outline, glow);
+    }
+
+    /// <summary>A toon material tinted per instance (a MultiMesh with custom data only).</summary>
+    private static ShaderMaterial Fungus(Color color, bool outline, float glow)
+    {
+        s_fungus ??= GD.Load<Shader>(Shaders + "fungus.gdshader");
+        return Surface(s_fungus, color, outline, glow);
+    }
+
+    private static ShaderMaterial Surface(Shader shader, Color color, bool outline, float glow)
+    {
         s_outline ??= new ShaderMaterial { Shader = GD.Load<Shader>(Shaders + "outline.gdshader") };
-        var material = new ShaderMaterial { Shader = s_toon };
+        var material = new ShaderMaterial { Shader = shader };
         material.SetShaderParameter("albedo", color);
         material.SetShaderParameter("self_light", glow);
         if (outline)
@@ -175,16 +187,16 @@ public static class PetCityModels
         return document.GenerateScene(state) as Node3D;
     }
 
-    private static ShaderMaterial ToonMaterial(Material? source, Color? recolor)
+    private static ShaderMaterial ToonMaterial(Material? source, Color? recolor, bool tinted = false)
     {
         string name = source?.ResourceName ?? "";
         // Darkened like the other modules' glTF colors, so the city's swatches match theirs.
         var color = (recolor ?? (source is BaseMaterial3D standard ? standard.AlbedoColor : Colors.White)).SrgbToLinear();
-        string key = name + "#" + color.ToHtml();
+        string key = name + "#" + color.ToHtml() + (tinted ? "#tinted" : "");
         if (s_materials.TryGetValue(key, out var cached))
             return cached;
         float glow = name is "EyeShine" ? 0.6f : name is "Glow" or "LampGlow" ? PetCityLook.GlowDay : name is "Window" ? 0.12f : name is "Water" ? 0.25f : 0f;
-        var material = Toon(color, !NoOutline.Contains(name), glow);
+        var material = tinted ? Fungus(color, !NoOutline.Contains(name), glow) : Toon(color, !NoOutline.Contains(name), glow);
         if (PetCityLook.IsCap(name))
         {
             material.SetShaderParameter("gloss", PetCityLook.CapGloss);
