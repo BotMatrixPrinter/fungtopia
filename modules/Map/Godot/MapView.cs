@@ -19,10 +19,8 @@ public partial class MapView : Node3D, IModuleView
 {
     private const string Shaders = "res://modules/Map/Godot/Shaders/";
 
-    private static readonly Color[] CapColors = Array.ConvertAll(MushroomPalette.CapColors, ToColor);
-    private static readonly Color[] LampColors = Array.ConvertAll(MushroomPalette.LampColors, ToColor);
-
     private static Color ToColor(System.Numerics.Vector3 c) => new(c.X, c.Y, c.Z);
+    private static Vector3 ToGodot(System.Numerics.Vector3 v) => new(v.X, v.Y, v.Z);
 
     private MapModule? _map;
     private Camera3D? _preview;
@@ -82,14 +80,7 @@ public partial class MapView : Node3D, IModuleView
     }
 
     /// <summary>A fixed pseudo-random value in [0, 1) for (i, k): the same scene every run.</summary>
-    private static float Rand(int i, int k)
-    {
-        uint h = unchecked((uint)i * 2654435761u ^ (uint)k * 2246822519u ^ 0x7f4a7c15u);
-        h = (h ^ (h >> 15)) * 2246822519u;
-        h = (h ^ (h >> 13)) * 3266489917u;
-        h ^= h >> 16;
-        return (h >> 8) * (1f / 16777216f);
-    }
+    private static float Rand(int i, int k) => Fungi.Hash(i, k);
 
     private static Vector3 OnGround(float x, float z) => new(x, Map.Ground.HeightAt(x, z), z);
 
@@ -120,20 +111,24 @@ public partial class MapView : Node3D, IModuleView
 
     private static Color GroundColor(float x, float z, Vector3 normal)
     {
-        var grass = new Color(0.5f, 0.74f, 0.33f);
-        var moss = new Color(0.3f, 0.56f, 0.32f);
-        var meadow = new Color(0.62f, 0.82f, 0.38f);
-        var dirt = new Color(0.7f, 0.52f, 0.36f);
-        var rock = new Color(0.66f, 0.55f, 0.5f);
-        var stone = new Color(0.7f, 0.64f, 0.56f);
-        var paving = new Color(0.5f, 0.46f, 0.58f);
-        var tiles = new Color(0.8f, 0.42f, 0.5f);
+        // The Forest module's own grass and moss right at the seam, so its edge does not show;
+        // from there out the vibrant world's (WorldPalette).
+        var forestGrass = new Color(0.5f, 0.74f, 0.33f);
+        var forestMoss = new Color(0.3f, 0.56f, 0.32f);
+        var grass = ToColor(WorldPalette.Grass);
+        var moss = ToColor(WorldPalette.Moss);
+        var meadow = ToColor(WorldPalette.Meadow);
+        var dirt = ToColor(WorldPalette.Dirt);
+        var rock = ToColor(WorldPalette.Rock);
+        var stone = ToColor(WorldPalette.Stone);
+        var paving = ToColor(WorldPalette.Paving);
+        var tiles = ToColor(WorldPalette.Tiles);
 
-        // The forest's own grass and moss mottle, so the seam at its edge does not show.
         float mottle = 0.5f + 0.25f * MathF.Sin(x * 0.19f + MathF.Sin(z * 0.13f) * 2f) + 0.25f * MathF.Sin(z * 0.23f - x * 0.07f);
-        var color = grass.Lerp(moss, Mathf.SmoothStep(0.35f, 0.85f, mottle));
         float outside = MathF.Max(MathF.Abs(x), MathF.Abs(z)) - Areas.ForestHalfSize;
-        color = color.Lerp(moss * 0.85f, Mathf.SmoothStep(-4f, 6f, outside));
+        float vibrant = Mathf.SmoothStep(0f, 6f, outside);
+        var color = forestGrass.Lerp(grass, vibrant).Lerp(forestMoss.Lerp(moss, vibrant), Mathf.SmoothStep(0.35f, 0.85f, mottle));
+        color = color.Lerp(moss.Lerp(grass, 0.3f), Mathf.SmoothStep(-4f, 6f, outside) * 0.6f);
 
         // Brighter meadow in the towns and along the roads.
         float depth = Areas.Depth(x, z);
@@ -170,7 +165,7 @@ public partial class MapView : Node3D, IModuleView
         if (deep > 0f)
         {
             var soil = new Color(0.3f, 0.22f, 0.17f);
-            var deepMoss = new Color(0.17f, 0.32f, 0.2f);
+            var deepMoss = new Color(0.14f, 0.36f, 0.2f);
             var root = new Color(0.46f, 0.34f, 0.25f);
             var floor = soil.Lerp(deepMoss, Mathf.SmoothStep(0.3f, 0.75f, mottle + 0.15f * MathF.Sin(x * 0.41f + z * 0.37f)));
             float roots = MathF.Abs(MathF.Sin(0.5f * x + 0.8f * MathF.Sin(0.21f * z)));
@@ -183,7 +178,14 @@ public partial class MapView : Node3D, IModuleView
         }
 
         // Cliff faces are rock; their tops are mossy.
-        color = color.Lerp(rock, Mathf.SmoothStep(0.92f, 0.75f, normal.Y));
+        float cliff = Mathf.SmoothStep(0.92f, 0.75f, normal.Y);
+        color = color.Lerp(rock, cliff);
+        // Alpha: how much of it is meadow grass, for the ground shader's sunny patches and flowers
+        // (none on the roads, paths, paving, the Deep Forest's floor or rock, nor at the forest's seam).
+        float paths = town.Depth(x, z) > -2f ? Mathf.SmoothStep(1.5f, 2.5f, Areas.TownPathDistance(x, z)) : 1f;
+        float fromSquare = new System.Numerics.Vector2(x - Buildings.TownSquare.X, z - Buildings.TownSquare.Y).Length();
+        color.A = vibrant * (1f - road) * (1f - deep) * (1f - cliff) * paths * Mathf.SmoothStep(13f, 14f, fromSquare)
+            * (1f - Mathf.SmoothStep(-2f, 0f, Areas.PetCity.Depth(x, z)));
         return color;
     }
 
@@ -252,7 +254,14 @@ public partial class MapView : Node3D, IModuleView
         // And west around the Deep Forest.
         ground.Patch(-336f, -144f, -160f, 144f, 2f, (_, _) => false);
         var mesh = ground.Commit();
-        mesh.SurfaceSetMaterial(0, Material("ground.gdshader"));
+        var material = Material("ground.gdshader");
+        material.SetShaderParameter("highlight", ToColor(WorldPalette.GrassHighlight));
+        material.SetShaderParameter("flowers", Array.ConvertAll(WorldPalette.Flowers, c =>
+        {
+            var linear = ToColor(c).SrgbToLinear();
+            return new Vector3(linear.R, linear.G, linear.B);
+        }));
+        mesh.SurfaceSetMaterial(0, material);
         AddChild(new MeshInstance3D { Name = "Ground", Mesh = mesh });
     }
 
@@ -318,7 +327,7 @@ public partial class MapView : Node3D, IModuleView
             if (Areas.Forest.Depth(x, z) > -2f && Areas.RoadDistance(x, z) > Areas.RoadHalfWidth + 2.5f)
                 continue;
             float size = 0.85f + 0.4f * Rand(id, 3);
-            var color = new Color(0.3f, 0.6f, 0.3f).Lerp(new Color(0.42f, 0.7f, 0.32f), Rand(id, 4));
+            var color = ToColor(WorldPalette.HedgeDark).Lerp(ToColor(WorldPalette.HedgeLight), Rand(id, 4));
             if (DeepForestDepth(x, z) > -4f && x < -Areas.ForestHalfSize)
                 color = color.Darkened(0.4f); // the Deep Forest's hedges are darker
             hedges.Add(Placed(OnGround(x, z) + Vector3.Down * 0.2f, Rand(id, 5) * MathF.Tau, new Vector3(size, size * 0.85f, size)), color);
@@ -328,56 +337,83 @@ public partial class MapView : Node3D, IModuleView
 
     private void BuildMushrooms()
     {
+        // One MultiMesh for every stem and one per cap shape (Fungi picks each mushroom's kind,
+        // shape, size, tilt and colors from a fixed seed per spot).
         var stems = new Instances();
-        var caps = new Instances();
+        var caps = new Instances[Enum.GetValues<CapShape>().Length];
+        for (int i = 0; i < caps.Length; i++)
+            caps[i] = new Instances();
         int seed = 0;
         Color stemLight = ToColor(MushroomPalette.StemLight), stemDark = ToColor(MushroomPalette.StemDark);
 
-        void Mushroom(float x, float z, float stemRadius, float height, float capRadius, Color color, float glow)
+        // The foot of a mushroom standing at spot + (f.X, f.Z), sunk a little into the ground.
+        static Vector3 Foot(Vector3 spot, in Fungus f) => new(spot.X + f.X,
+            Map.Ground.HeightAt(spot.X + f.X, spot.Z + f.Z) - MathF.Min(0.4f, MathF.Max(f.StemHeight, f.CapHeight) * 0.08f), spot.Z + f.Z);
+
+        // A bracket (Lift > 0) grows on its group's main stem, from mainFoot along its lean.
+        void Draw(Vector3 spot, in Fungus f, Vector3 mainFoot = default, in Fungus main = default)
         {
             int id = seed++;
-            float yaw = Rand(id, 1) * MathF.Tau;
-            var foot = OnGround(x, z) + Vector3.Down * MathF.Min(0.4f, height * 0.08f);
-            var stemColor = stemLight.Lerp(stemDark, Rand(id, 2));
-            stems.Add(Placed(foot, yaw, new Vector3(stemRadius, height, stemRadius)), stemColor);
-            float capHeight = capRadius * (0.5f + 0.3f * Rand(id, 6));
-            caps.Add(Placed(foot + Vector3.Up * (height - capHeight * 0.18f), yaw, new Vector3(capRadius, capHeight, capRadius)),
-                color, new Color(Rand(id, 8), glow, 0f, 0f));
+            var foot = f.Lift == 0f ? Foot(spot, f) : mainFoot + ToGodot(Fungi.OnStem(main, f));
+            // Lean toward TiltYaw: rotate about the horizontal axis across it.
+            var lean = new Basis(new Vector3(MathF.Cos(f.TiltYaw), 0f, -MathF.Sin(f.TiltYaw)), f.Tilt);
+            var top = foot;
+            if (f.StemHeight > 0f)
+            {
+                var stemColor = stemLight.Lerp(stemDark, Rand(id, 2));
+                stems.Add(new Transform3D(lean * new Basis(Vector3.Up, f.Yaw) * Basis.FromScale(new Vector3(f.StemRadius, f.StemHeight, f.StemRadius)), foot), stemColor);
+                top = foot + lean * Vector3.Up * (f.StemHeight - f.CapHeight * 0.18f);
+            }
+            var basis = lean * new Basis(Vector3.Up, f.Yaw) * Basis.FromScale(new Vector3(f.CapRadius, f.CapHeight, f.CapRadius));
+            if (f.Shape == CapShape.Shelf)
+                basis = new Basis(Vector3.Up, f.Yaw) * Basis.FromScale(new Vector3(f.CapRadius, f.CapHeight, f.CapRadius)) * new Basis(Vector3.Right, -0.15f);
+            caps[(int)f.Shape].Add(new Transform3D(basis, top), ToColor(f.Color), new Color(Rand(id, 8), f.Glow, f.Spots, f.Pattern));
         }
 
-        // Giant mushrooms on the cliffs (not in the forest's ring, which the Forest module fills).
-        const float cell = 8f;
+        // Giant mushrooms and fungi on the cliffs (not in the forest's ring, which the Forest module
+        // fills): one group per 8 m cell, no two neighboring cells of the same kind.
+        const float cell = 8f, x0 = -336f, x1 = 160f, z0 = -336f, z1 = 336f;
+        int rows = (int)((z1 - z0) / cell);
+        var kinds = Fungi.CliffKinds((int)((x1 - x0) / cell), rows);
+        Span<Fungus> group = stackalloc Fungus[Fungi.MaxGroup];
         int k = 0;
-        for (float gx = -336f; gx < 160f; gx += cell)
-        for (float gz = -336f; gz < 336f; gz += cell, k++)
+        for (float gx = x0; gx < x1; gx += cell)
+        for (float gz = z0; gz < z1; gz += cell, k++)
         {
             if (gx < -160f && MathF.Abs(gz) > 144f)
                 continue; // past the ground mesh
             float x = gx + cell * (0.15f + 0.7f * Rand(k, 10)), z = gz + cell * (0.15f + 0.7f * Rand(k, 11));
             if (MathF.Abs(x) < 128f && MathF.Abs(z) < 128f && Areas.RoadDistance(x, z) > 14f)
                 continue;
-            float r = 0.9f + 1.4f * Rand(k, 12);
+            float size = 0.9f + 1.4f * Rand(k, 12);
             float beyond = -Areas.Depth(x, z);
-            if (beyond < 3.5f + r || beyond > 45f || Rand(k, 13) < 0.25f)
+            if (beyond < 3.5f + size || beyond > 45f || Rand(k, 13) < 0.25f)
                 continue;
-            var color = CapColors[(int)(Rand(k, 15) * CapColors.Length)];
-            Mushroom(x, z, r, 6f + r * 2.6f + 5f * Rand(k, 16), r * (2.4f + 1.2f * Rand(k, 17)), color, Rand(k, 18) < 0.12f ? MushroomPalette.GiantGlow : 0f);
+            int n = Fungi.CliffGroup(kinds[k], k, size, group);
+            var spot = new Vector3(x, 0f, z);
+            var mainFoot = Foot(spot, group[0]);
+            for (int i = 0; i < n; i++)
+                Draw(spot, group[i], mainFoot, group[0]);
         }
 
         // Little glowing mushroom lamps beside the roads: the Map's road props, solid, exactly where
-        // and as tall as Props says (the towns' and forests' props are their modules' to draw).
+        // and as tall as Props says (the towns' and forests' props are their modules' to draw);
+        // their caps vary in shape and color (MushroomPalette.LampColors), never wider than the prop.
         int lamp = 0;
         foreach (var p in Props.All)
         {
             if (p.Area != Area.Road || p.Kind != PropKind.Lamp)
                 continue;
-            Mushroom(p.X, p.Z, 0.1f, p.Height, p.Radius, LampColors[lamp++ % LampColors.Length], MushroomPalette.LampGlow);
+            var f = Fungi.Lamp(lamp++, p.Height, p.Radius);
+            Draw(new Vector3(p.X, 0f, p.Z), f with { Glow = MushroomPalette.LampGlow });
         }
 
         AddChild(stems.Build("MushroomStems", MapMeshes.Stem(), Material("toon_color.gdshader", outline: true)));
         var capMaterial = Material("mushroom_cap.gdshader", outline: true);
         capMaterial.SetShaderParameter("spot_color", ToColor(MushroomPalette.SpotColor));
-        AddChild(caps.Build("MushroomCaps", MapMeshes.Cap(), capMaterial));
+        foreach (var shape in Enum.GetValues<CapShape>())
+            if (caps[(int)shape].Transforms.Count > 0)
+                AddChild(caps[(int)shape].Build("MushroomCaps" + shape, MapMeshes.Cap(shape), capMaterial));
     }
 
     private void BuildRoots()

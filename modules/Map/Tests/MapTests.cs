@@ -1006,19 +1006,7 @@ public class MapTests
         }
     }
 
-    // Mushroom colors ("vivid", Tony 2026-10-25)
-
-    /// <summary>The cap colors MapView drew before they were made vivid.</summary>
-    private static readonly Vector3[] OldCapColors =
-    {
-        new(0.88f, 0.24f, 0.22f), new(0.93f, 0.36f, 0.26f), new(0.62f, 0.4f, 0.24f),
-        new(0.72f, 0.5f, 0.3f), new(0.6f, 0.36f, 0.72f), new(0.72f, 0.42f, 0.78f),
-    };
-
-    private static readonly Vector3[] OldLampColors =
-    {
-        new(1.0f, 0.82f, 0.4f), new(1.0f, 0.6f, 0.7f), new(0.55f, 0.85f, 0.95f),
-    };
+    // Mushroom colors ("vivid", Tony 2026-10-25) and variety (Tony 2026-10-26)
 
     /// <summary>Hue in degrees (0..360), saturation and value (0..1) of an sRGB color.</summary>
     private static (float Hue, float Saturation, float Value) Hsv(Vector3 c)
@@ -1034,39 +1022,51 @@ public class MapTests
 
     private static float HueDistance(float a, float b) => MathF.Min(MathF.Abs(a - b), 360f - MathF.Abs(a - b));
 
+    private static readonly FungusKind[] AllKinds = Enum.GetValues<FungusKind>();
+
     [Fact]
-    public void MushroomCapsAreSaturatedAndBrightAndRicherThanBefore()
+    public void EveryKindsCapsAreSaturatedAndBright()
     {
-        Assert.Equal(OldCapColors.Length, MushroomPalette.CapColors.Length);
-        Assert.Equal(OldLampColors.Length, MushroomPalette.LampColors.Length);
-        void Check(Vector3 color, Vector3 old)
+        // Puffballs are the one pale kind: soft cream, still bright.
+        foreach (var kind in AllKinds)
         {
-            var (hue, saturation, value) = Hsv(color);
-            var (oldHue, oldSaturation, oldValue) = Hsv(old);
-            Assert.InRange(saturation, 0.8f, 1f);
-            Assert.InRange(value, 0.85f, 1f);
-            Assert.True(saturation >= oldSaturation + 0.15f, $"{color} is not clearly more saturated than {old}");
-            Assert.True(value >= oldValue - 0.001f, $"{color} is darker than {old}");
-            // The same family of color as before (a red stays red, a purple purple).
-            Assert.True(HueDistance(hue, oldHue) <= 30f, $"{color} changed hue from {old}");
+            Assert.NotEmpty(MushroomPalette.Colors(kind));
+            foreach (var color in MushroomPalette.Colors(kind))
+            {
+                var (_, saturation, value) = Hsv(color);
+                Assert.InRange(value, kind == FungusKind.Puffball ? 0.97f : 0.84f, 1f);
+                Assert.InRange(saturation, kind == FungusKind.Puffball ? 0.1f : 0.6f, kind == FungusKind.Puffball ? 0.25f : 1f);
+            }
         }
-        for (int i = 0; i < OldCapColors.Length; i++)
-            Check(MushroomPalette.CapColors[i], OldCapColors[i]);
-        for (int i = 0; i < OldLampColors.Length; i++)
-            Check(MushroomPalette.LampColors[i], OldLampColors[i]);
+        foreach (var color in MushroomPalette.LampColors)
+        {
+            var (_, saturation, value) = Hsv(color);
+            Assert.InRange(saturation, 0.8f, 1f);
+            Assert.InRange(value, 0.95f, 1f);
+        }
     }
 
     [Fact]
-    public void RedCapsArePureCherryAndTomatoRed()
+    public void KindsHaveTheirRecognizableColors()
     {
-        // The two red caps: a pure red hue (no brownish orange, no dull pink), nearly fully saturated.
-        for (int i = 0; i < 2; i++)
-        {
-            var (hue, saturation, value) = Hsv(MushroomPalette.CapColors[i]);
-            Assert.True(HueDistance(hue, 0f) <= 12f, $"red cap {i} has hue {hue}");
-            Assert.InRange(saturation, 0.88f, 1f);
-            Assert.InRange(value, 0.9f, 1f);
-        }
+        float Hue(Vector3 c) => Hsv(c).Hue;
+        foreach (var c in MushroomPalette.FlyAgaric)
+            Assert.True(HueDistance(Hue(c), 0f) <= 12f && Hsv(c).Saturation >= 0.88f, $"fly agaric {c} is not a pure red");
+        foreach (var c in MushroomPalette.Chanterelle)
+            Assert.InRange(Hue(c), 30f, 50f); // golden
+        foreach (var c in MushroomPalette.Porcini)
+            Assert.InRange(Hue(c), 20f, 35f); // warm brown
+        foreach (var c in MushroomPalette.Amethyst)
+            Assert.InRange(Hue(c), 265f, 300f); // purple
+        foreach (var c in MushroomPalette.ScarletCup)
+            Assert.True(HueDistance(Hue(c), 355f) <= 15f, $"scarlet cup {c}");
+        foreach (var c in MushroomPalette.GlowCap)
+            Assert.InRange(Hue(c), 120f, 200f); // blue to green
+        // Every spot kind looks different from every other: no two share a color.
+        var seen = new HashSet<Vector3>();
+        foreach (var kind in AllKinds)
+            foreach (var c in MushroomPalette.Colors(kind))
+                Assert.True(seen.Add(c), $"{kind} repeats color {c}");
     }
 
     [Fact]
@@ -1090,6 +1090,293 @@ public class MapTests
         Assert.InRange(MushroomPalette.LampGlow, 1.4f * 1.9f, 1.4f * 2.2f);
     }
 
+    /// <summary>Every group of the cliffs' grid (as MapView lays it: 62 x 84 cells of 8 m), with its cell's kind.</summary>
+    private static List<(FungusKind Spot, Fungus[] Group)> CliffGroups()
+    {
+        var kinds = Fungi.CliffKinds(62, 84);
+        var all = new List<(FungusKind, Fungus[])>();
+        var group = new Fungus[Fungi.MaxGroup];
+        for (int k = 0; k < kinds.Length; k++)
+        {
+            float size = 0.9f + 1.4f * Fungi.Hash(k, 12);
+            int n = Fungi.CliffGroup(kinds[k], k, size, group);
+            all.Add((kinds[k], group[..n]));
+        }
+        return all;
+    }
+
+    [Fact]
+    public void CliffsMixManyKindsInAllShapes()
+    {
+        var groups = CliffGroups();
+        var kinds = new HashSet<FungusKind>();
+        var shapes = new HashSet<CapShape>();
+        foreach (var (_, group) in groups)
+            foreach (var f in group)
+            {
+                kinds.Add(f.Kind);
+                shapes.Add(f.Shape);
+            }
+        // Every kind (fly agarics ... glowing ones, brackets on the big stems) and every cap shape.
+        Assert.Equal(AllKinds.Length, kinds.Count);
+        Assert.Equal(Enum.GetValues<CapShape>().Length, shapes.Count);
+        // No kind takes over: each spot kind is between 4% and 12% of the spots.
+        foreach (var kind in AllKinds)
+        {
+            if (kind == FungusKind.Bracket)
+                continue;
+            int count = groups.FindAll(g => g.Spot == kind).Count;
+            Assert.InRange(count, groups.Count * 0.04f, groups.Count * 0.12f);
+        }
+        // Singles, pairs and clusters (of different heights) are all common.
+        int singles = 0, pairs = 0, clusters = 0, varied = 0;
+        foreach (var (spot, group) in groups)
+        {
+            int standing = Array.FindAll(group, f => f.Kind != FungusKind.Bracket).Length;
+            if (standing == 1) singles++;
+            else if (standing == 2) pairs++;
+            else clusters++;
+            float min = float.MaxValue, max = 0f;
+            foreach (var f in group)
+                if (f.Kind != FungusKind.Bracket)
+                {
+                    min = MathF.Min(min, f.StemHeight + f.CapHeight);
+                    max = MathF.Max(max, f.StemHeight + f.CapHeight);
+                }
+            if (standing > 1 && max > min * 1.2f)
+                varied++;
+        }
+        // Nearly every pair or cluster has mushrooms of clearly different heights.
+        Assert.True(varied >= (pairs + clusters) * 0.85f, $"{varied} of {pairs + clusters} groups vary in height");
+        Assert.True(singles > groups.Count / 5 && pairs > groups.Count / 6 && clusters > groups.Count / 6, $"{singles} {pairs} {clusters}");
+        // Every enoki spot is a bunch of thin stems with tiny caps.
+        foreach (var (spot, group) in groups)
+            if (spot == FungusKind.Enoki)
+            {
+                Assert.InRange(group.Length, 5, 9);
+                foreach (var f in group)
+                    Assert.True(f.CapRadius < f.StemHeight * 0.45f && f.StemRadius < f.CapRadius * 0.6f, "enoki stems are tall and thin, caps tiny");
+            }
+    }
+
+    [Fact]
+    public void SizesProportionsAndTiltsVaryWithinAKind()
+    {
+        var groups = CliffGroups();
+        foreach (var kind in new[] { FungusKind.FlyAgaric, FungusKind.Porcini, FungusKind.Parasol, FungusKind.InkCap, FungusKind.GlowCap })
+        {
+            float minH = float.MaxValue, maxH = 0f, minRatio = float.MaxValue, maxRatio = 0f, maxTilt = 0f;
+            foreach (var (_, group) in groups)
+                foreach (var f in group)
+                    if (f.Kind == kind)
+                    {
+                        float h = f.StemHeight + f.CapHeight;
+                        minH = MathF.Min(minH, h);
+                        maxH = MathF.Max(maxH, h);
+                        minRatio = MathF.Min(minRatio, f.CapHeight / f.CapRadius);
+                        maxRatio = MathF.Max(maxRatio, f.CapHeight / f.CapRadius);
+                        maxTilt = MathF.Max(maxTilt, f.Tilt);
+                        Assert.InRange(f.Tilt, 0f, 0.35f); // leaning, never toppling
+                    }
+            Assert.True(maxH > minH * 2f, $"{kind} heights {minH}..{maxH}");
+            Assert.True(maxRatio > minRatio * 1.15f, $"{kind} cap proportions {minRatio}..{maxRatio}");
+            Assert.True(maxTilt > 0.15f, $"{kind} never leans");
+        }
+        // Each kind keeps its silhouette: parasols wide and flat on tall thin stems, ink caps tall
+        // bells, porcini fat, morels honeycomb cones, puffballs, coral and jelly sit on the ground.
+        foreach (var (_, group) in groups)
+            foreach (var f in group)
+            {
+                switch (f.Kind)
+                {
+                    case FungusKind.Parasol:
+                        Assert.Equal(CapShape.Flat, f.Shape);
+                        Assert.True(f.CapRadius > f.StemRadius * 6f && f.CapHeight < f.CapRadius * 0.5f);
+                        break;
+                    case FungusKind.InkCap:
+                        Assert.Equal(CapShape.Bell, f.Shape);
+                        Assert.True(f.CapHeight > f.CapRadius * 1.5f);
+                        break;
+                    case FungusKind.Porcini:
+                        Assert.True(f.StemHeight < f.StemRadius * 8f, "porcini stems are fat");
+                        break;
+                    case FungusKind.Morel:
+                        Assert.Equal(CapShape.Cone, f.Shape);
+                        Assert.Equal(1, f.Pattern);
+                        break;
+                    case FungusKind.Chanterelle:
+                        Assert.Contains(f.Shape, new[] { CapShape.Funnel, CapShape.Wavy });
+                        break;
+                    case FungusKind.Puffball:
+                    case FungusKind.Coral:
+                    case FungusKind.Jelly:
+                        Assert.Equal(0f, f.StemHeight);
+                        break;
+                    case FungusKind.Bracket:
+                        Assert.Equal(CapShape.Shelf, f.Shape);
+                        Assert.True(f.Lift > 0f, "brackets grow on a stem, above the ground");
+                        break;
+                }
+                Assert.Equal(f.Kind == FungusKind.FlyAgaric ? 1f : f.Spots, f.Spots); // fly agarics fully spotted
+                Assert.Contains(f.Color, MushroomPalette.Colors(f.Kind));
+                // Only the bioluminescent kind glows on the cliffs, and clearly.
+                Assert.Equal(f.Kind == FungusKind.GlowCap ? MushroomPalette.GiantGlow : 0f, f.Glow);
+            }
+    }
+
+    [Fact]
+    public void BracketsGrowOnTheirMainStem()
+    {
+        int brackets = 0, leaning = 0;
+        foreach (var (_, group) in CliffGroups())
+        {
+            var main = group[0];
+            var axis = Vector3.Transform(Vector3.UnitY,
+                Quaternion.CreateFromAxisAngle(new Vector3(MathF.Cos(main.TiltYaw), 0f, -MathF.Sin(main.TiltYaw)), main.Tilt));
+            foreach (var f in group)
+            {
+                if (f.Kind != FungusKind.Bracket)
+                    continue;
+                brackets++;
+                if (main.Tilt > 0.05f)
+                    leaning++;
+                Assert.NotEqual(FungusKind.Bracket, main.Kind);
+                // The offset from the main foot: up the leaned stem axis, and a stem radius out from it.
+                var at = Fungi.OnStem(main, f);
+                float along = Vector3.Dot(at, axis);
+                Assert.InRange(along, 0.01f, main.StemHeight);
+                // Horizontally, from the leaned axis at the bracket's height.
+                float t = at.Y / axis.Y;
+                var off = at - axis * t;
+                float out_ = new Vector2(off.X, off.Z).Length();
+                Assert.InRange(out_, main.StemRadius * 0.85f, main.StemRadius * 1.1f);
+            }
+        }
+        Assert.True(brackets > 20 && leaning > 5, $"{brackets} brackets, {leaning} on leaning stems");
+        // Upright stem: straight up from the foot.
+        var upright = new Fungus(FungusKind.Porcini, CapShape.Dome, 0f, 0f, 0f, 0f, 0f, 0f, 1f, 6f, 2f, 1f, Vector3.One, 0f, 0, 0f);
+        var shelf = upright with { Kind = FungusKind.Bracket, Shape = CapShape.Shelf, X = 0.95f, Lift = 3f };
+        Assert.Equal(new Vector3(0.95f, 3f, 0f), Fungi.OnStem(upright, shelf));
+    }
+
+    [Fact]
+    public void NoTwoNeighboringSpotsAreTheSameKindAndTheChoiceIsFixed()
+    {
+        var kinds = Fungi.CliffKinds(62, 84);
+        for (int c = 0; c < 62; c++)
+        for (int r = 0; r < 84; r++)
+        for (int dc = -1; dc <= 1; dc++)
+        for (int dr = -1; dr <= 1; dr++)
+        {
+            int nc = c + dc, nr = r + dr;
+            if ((dc != 0 || dr != 0) && nc >= 0 && nc < 62 && nr >= 0 && nr < 84)
+                Assert.NotEqual(kinds[c * 84 + r], kinds[nc * 84 + nr]);
+        }
+        // The same world every run.
+        Assert.Equal(kinds, Fungi.CliffKinds(62, 84));
+        var a = new Fungus[Fungi.MaxGroup];
+        var b = new Fungus[Fungi.MaxGroup];
+        for (int k = 0; k < 200; k++)
+        {
+            int n = Fungi.CliffGroup(kinds[k], k, 1.5f, a);
+            Assert.Equal(n, Fungi.CliffGroup(kinds[k], k, 1.5f, b));
+            Assert.Equal(a[..n], b[..n]);
+        }
+        Assert.Throws<ArgumentException>(() => Fungi.CliffGroup(FungusKind.FlyAgaric, 0, 1f, new Fungus[3]));
+    }
+
+    [Fact]
+    public void RoadLampsStayExactlyTheirPropsAndVaryInShapeAndColor()
+    {
+        var shapes = new HashSet<CapShape>();
+        var colors = new HashSet<Vector3>();
+        int lamp = 0;
+        Fungus previous = default;
+        foreach (var p in Props.All)
+        {
+            if (p.Area != Area.Road || p.Kind != PropKind.Lamp)
+                continue;
+            var f = Fungi.Lamp(lamp, p.Height, p.Radius);
+            Assert.Equal(f, Fungi.Lamp(lamp, p.Height, p.Radius));
+            // Exactly where and as tall as the prop, never wider than its footprint, nearly upright.
+            Assert.Equal((0f, 0f, 0f), (f.X, f.Z, f.Lift));
+            Assert.Equal(p.Height, f.StemHeight);
+            Assert.InRange(f.CapRadius, p.Radius * 0.75f, p.Radius);
+            Assert.True(f.StemRadius < f.CapRadius);
+            Assert.InRange(f.Tilt, 0f, 0.06f);
+            // Each still a clear glowing lamp: a cap on a stem, glowing at LampGlow.
+            Assert.Contains(f.Shape, Fungi.LampShapes);
+            Assert.Equal(MushroomPalette.LampGlow, f.Glow);
+            Assert.Contains(f.Color, MushroomPalette.LampColors);
+            if (lamp > 0)
+                Assert.NotEqual(previous.Color, f.Color);
+            shapes.Add(f.Shape);
+            colors.Add(f.Color);
+            previous = f;
+            lamp++;
+        }
+        Assert.True(lamp >= 6, $"{lamp} road lamps");
+        Assert.True(shapes.Count >= 4, $"lamps in {shapes.Count} shapes");
+        Assert.True(colors.Count >= 6, $"lamps in {colors.Count} colors");
+    }
+
+    // The vibrant world (Tony, 2026-10-26)
+
+    [Fact]
+    public void GroundIsLushBrightAndRicherThanBeforeButNeverNeon()
+    {
+        // Before: grass (0.5, 0.74, 0.33), meadow (0.62, 0.82, 0.38), dirt (0.7, 0.52, 0.36).
+        void Richer(Vector3 color, Vector3 old)
+        {
+            var (_, s, v) = Hsv(color);
+            var (_, oldS, oldV) = Hsv(old);
+            Assert.True(s >= oldS + 0.1f, $"{color} is not clearly more saturated than {old}");
+            Assert.True(v >= oldV, $"{color} is darker than {old}");
+        }
+        Richer(WorldPalette.Grass, new(0.5f, 0.74f, 0.33f));
+        Richer(WorldPalette.Meadow, new(0.62f, 0.82f, 0.38f));
+        Richer(WorldPalette.Dirt, new(0.7f, 0.52f, 0.36f));
+        Richer(WorldPalette.Moss, new(0.3f, 0.56f, 0.32f));
+        // Lush greens (not grey-olive), a yellow-green highlight, warm golden dirt.
+        foreach (var green in new[] { WorldPalette.Grass, WorldPalette.Meadow, WorldPalette.Moss, WorldPalette.HedgeDark, WorldPalette.HedgeLight })
+        {
+            var (hue, s, _) = Hsv(green);
+            Assert.InRange(hue, 85f, 145f);
+            Assert.InRange(s, 0.6f, 0.85f);
+        }
+        Assert.InRange(Hsv(WorldPalette.GrassHighlight).Hue, 65f, 85f);
+        Assert.InRange(Hsv(WorldPalette.Dirt).Hue, 30f, 45f);
+        // Never neon nor washed out to white: no channel pinned at both ends for the ground, values below white.
+        foreach (var c in new[] { WorldPalette.Grass, WorldPalette.Meadow, WorldPalette.Moss, WorldPalette.GrassHighlight, WorldPalette.Dirt, WorldPalette.Rock, WorldPalette.Stone, WorldPalette.Paving })
+        {
+            var (_, s, v) = Hsv(c);
+            Assert.True(v <= 0.95f && s <= 0.85f, $"{c} is garish or washed out");
+        }
+        // Clean bright stone and paving, brighter than before ((0.7, 0.64, 0.56), (0.5, 0.46, 0.58)).
+        Assert.True(Hsv(WorldPalette.Stone).Value >= 0.88f && Hsv(WorldPalette.Paving).Value >= 0.8f);
+        // Paths still stand out from the grass: a clearly different hue and color.
+        foreach (var green in new[] { WorldPalette.Grass, WorldPalette.Meadow, WorldPalette.GrassHighlight })
+        {
+            Assert.True(HueDistance(Hsv(WorldPalette.Dirt).Hue, Hsv(green).Hue) >= 35f, $"dirt too like {green}");
+            Assert.True(Vector3.Distance(WorldPalette.Dirt, green) >= 0.3f, $"dirt too like {green}");
+        }
+    }
+
+    [Fact]
+    public void FlowersComeInManyHues()
+    {
+        Assert.True(WorldPalette.Flowers.Length >= 5);
+        var hues = new List<float>();
+        foreach (var c in WorldPalette.Flowers)
+        {
+            var (hue, s, v) = Hsv(c);
+            Assert.True(s >= 0.6f && v >= 0.9f, $"flower {c} is dull");
+            foreach (var other in hues)
+                Assert.True(HueDistance(hue, other) >= 25f, $"flower {c} is too like another");
+            hues.Add(hue);
+        }
+    }
+
     /// <summary>A file of this module, found by walking up from the test's output folder.</summary>
     private static string ModuleFile(string relative)
     {
@@ -1106,18 +1393,34 @@ public class MapTests
     public void ViewDrawsMushroomsFromThePaletteWithGlossRimAndNoEyes()
     {
         string view = ModuleFile("Godot/MapView.cs");
-        foreach (string member in new[] { "CapColors", "LampColors", "StemLight", "StemDark", "SpotColor", "GiantGlow", "LampGlow" })
+        foreach (string member in new[] { "LampColors", "StemLight", "StemDark", "SpotColor", "LampGlow" })
             Assert.Contains("MushroomPalette." + member, view);
+        // The mushrooms come from Fungi (kinds, groups, lamps), one cap MultiMesh per shape.
+        foreach (string call in new[] { "Fungi.CliffKinds(", "Fungi.CliffGroup(", "Fungi.Lamp(", "MapMeshes.Cap(shape)" })
+            Assert.Contains(call, view);
+        string meshes = ModuleFile("Godot/MapMeshes.cs");
+        foreach (var shape in Enum.GetValues<CapShape>())
+            Assert.Contains("CapShape." + shape + " =>", meshes);
+        // The ground from WorldPalette, with highlights and flowers in its shader.
+        foreach (string member in new[] { "Grass", "Moss", "Meadow", "Dirt", "Rock", "Stone", "Paving", "Tiles", "GrassHighlight", "Flowers", "HedgeDark", "HedgeLight" })
+            Assert.Contains("WorldPalette." + member, view);
+        string ground = ModuleFile("Godot/Shaders/ground.gdshader");
+        Assert.Contains("uniform vec3 flowers[6]", ground);
+        Assert.Contains("uniform vec3 highlight", ground);
         // No eyes or faces on mushrooms (the designer's rule).
         Assert.DoesNotContain("Eye", view);
         Assert.DoesNotContain("eye", view);
-        Assert.DoesNotContain("Eye()", ModuleFile("Godot/MapMeshes.cs"));
+        Assert.DoesNotContain("Eye", meshes);
+        Assert.DoesNotContain("face", ModuleFile("Core/Fungi.cs"));
         Assert.Throws<System.IO.FileNotFoundException>(() => ModuleFile("Godot/Shaders/eye.gdshader"));
-        // The caps' toon shading has a soft specular band and a rim light along the edge.
+        // The caps' toon shading has a soft specular band and a rim light along the edge, spots
+        // per mushroom and the morels' honeycomb.
         string cap = ModuleFile("Godot/Shaders/mushroom_cap.gdshader");
         Assert.Contains("uniform float gloss", cap);
         Assert.Contains("uniform float rim", cap);
         Assert.Contains("SPECULAR_LIGHT +=", cap);
+        Assert.Contains("custom.z", cap);
+        Assert.Contains("pits", cap);
         Assert.DoesNotContain("specular_disabled", cap);
     }
 

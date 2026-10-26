@@ -10,9 +10,9 @@ mushrooms close off everything else, and solid props (medium mushrooms, lamps, b
 nothing per tick.
 
 - `Contract/` — `Fungtopia.Map.Contract` (namespace `Fungtopia.Map`), see below.
-- `Core/` — `Fungtopia.Map.Core`: `MapModule`, the module's one `IModule` (no work per tick), and `MushroomPalette`, the colors and glow of the mushrooms the view draws.
+- `Core/` — `Fungtopia.Map.Core`: `MapModule`, the module's one `IModule` (no work per tick); `Fungi`, which picks the kind, shape, size, proportions, tilt and colors of every mushroom the view draws from a fixed seed per spot; `MushroomPalette`, the mushrooms' colors (per kind) and glow; and `WorldPalette`, the ground's colors.
 - `Godot/` — `Main.tscn` with `MapView`, which draws the ground from the Contract.
-- `Tests/` — `MapTests.cs`: xUnit tests of the Contract (including `Props`) and of `MapModule` with a fake `IMessageBus`.
+- `Tests/` — `MapTests.cs`: xUnit tests of the Contract (including `Props`), of `Fungi` and the palettes, and of `MapModule` with a fake `IMessageBus`.
 
 Test it with `./test.sh Map` from the repository root.
 
@@ -126,20 +126,42 @@ headless), using its own copies of the forest's toon shaders (`Godot/Shaders/`):
 
 - one ground mesh from `Ground.HeightAt` for everything except the forest square: a 1 m grid
   next to the square (the Forest's own grid and heights, so the seam matches) and a 2 m grid out
-  to the cliffs; vertex-colored grass and moss (the forest's mottle at the seam), dirt roads, dirt
-  paths from the town square to each door, a stone town square, Pet City's lilac paving with a
-  pink tiled plaza, the Deep Forest's dark soil and deep moss streaked with roots (and its
-  trodden overgrown path), rock on cliff faces;
+  to the cliffs; vertex-colored grass and moss (the forest's own colors at the seam, blending into
+  the vibrant ones over the first 6 m), golden dirt roads, dirt paths from the town square to each
+  door, a clean bright stone town square, Pet City's lilac paving with a pink tiled plaza, the Deep
+  Forest's dark soil and deep moss streaked with roots (and its trodden overgrown path), rock on
+  cliff faces. The ground shader (`ground.gdshader`) adds a soft mottle and, on meadow grass only
+  (the vertex alpha; not on roads, paths, paving, rock or the Deep Forest), sunny yellow-green
+  patches and little flowers painted into the ground (flat dots, nothing to walk around);
+- "vibrant world" (Tony, 2026-10-26; `WorldPalette`): lush saturated greens (grass, moss, meadow,
+  hedges) with a yellow-green highlight, warm golden dirt, flowers in six hues, clean bright stone
+  and paving; richer than before but never neon or washed out, the paths still clearly apart from
+  the grass;
 - low roots spreading from the foot of each Deep Forest mushroom and a few loose ones between
   (one MultiMesh); the DeepForest module draws those mushrooms themselves and the gloom and fog;
 - hedges of round blobs just past every walkable edge (darker around the Deep Forest; not along the forest's own edge, where
-  the Forest module's mushroom ring stands), giant spotted mushrooms on the cliffs (no eyes or faces), and little glowing mushroom lamps beside both roads
-  (the `Area.Road` lamps of `Props.All`, exactly there and that tall) — each kind one MultiMesh;
-- the mushrooms are "vivid" (Tony, 2026-10-25; `MushroomPalette`): caps in saturated, bright
-  cherry and tomato red, orange, caramel brown, violet and orchid pink; lamps golden, candy pink and
-  sky blue; crisp pure white spots, clean light cream stems and gills. The caps' toon shading
-  (`mushroom_cap.gdshader`) adds a small glossy specular band (`gloss`) and a light rim along the
-  edge (`rim`). About 1 in 8 cliff caps glows (emission 2.2), the lamps glow at 2.8;
+  the Forest module's mushroom ring stands), one MultiMesh;
+- giant mushrooms and fungi on the cliffs (no eyes or faces), one group per 8 m cell: `Fungi`
+  gives each cell a kind, never the same as any of its eight neighbors — fly agarics (red domes,
+  white spots), fat porcini, golden chanterelle funnels, tall thin parasols with wide flat caps,
+  shaggy ink cap bells, honeycomb morel cones, enoki bunches (tall thin stems, tiny caps), purple
+  amethyst caps, puffballs, scarlet cups, branching coral, jelly fungi and bioluminescent glowing
+  caps — and makes it a single mushroom, a pair or a cluster of different heights (sometimes with a
+  little one of another kind at its foot, and shelf fungi on big stems, placed by `Fungi.OnStem` from the main stem's foot along its lean), each varied in size,
+  proportions, tilt and color by a fixed seed. Cliffs are not walkable, so these are scenery, not props;
+- little glowing mushroom lamps beside both roads (the `Area.Road` lamps of `Props.All`, exactly
+  there and that tall, the cap never wider than the prop's radius): `Fungi.Lamp` varies their cap
+  shape (dome, bell, flat, funnel, wavy, cone) and color, neighbors never the same color;
+- all mushrooms share one stem MultiMesh and one cap MultiMesh per `CapShape` (`MapMeshes.Cap`:
+  dome, flat, funnel, bell, wavy, cone, ball, cup, coral, jelly, shelf), colored per instance;
+- the mushrooms are "vivid" (Tony, 2026-10-25; `MushroomPalette`): each kind's caps in its own
+  saturated, bright colors (cherry and tomato red fly agarics, caramel porcini, golden chanterelles,
+  violet and orchid amethysts, cyan and mint glowing caps, ...; puffballs the one soft cream kind);
+  lamps golden, candy pink, sky blue, mint, violet and tangerine; crisp pure white spots, clean
+  light cream stems and gills. The caps' toon shading (`mushroom_cap.gdshader`) adds a small
+  glossy specular band (`gloss`) and a light rim along the edge (`rim`); per instance how spotted
+  a cap is (fly agarics fully, parasols and ink caps lightly scaled, most kinds plain) and the
+  morels' honeycomb pits. The glowing kind glows at 2.2, the lamps at 2.8;
 - the home interior: wood plank floor, cream walls with wooden skirting, four round windows, a
   door with a knob in the south wall, a ceiling seen only from inside, and a warm light.
 
