@@ -240,38 +240,34 @@ public class BowModuleTests
     public void TheHoldPointIsOnTheRightClearOfTheHead()
     {
         Assert.Equal(new Vector3(BowGeometry.HoldRight, BowGeometry.HoldUp, BowGeometry.HoldForward), BowGeometry.HoldOffset);
-        // About chest height of the 1.80 m character, on its right, ahead of it.
-        Assert.Equal(0.40f, BowGeometry.HoldRight, 3);
-        Assert.Equal(1.30f, BowGeometry.HoldUp, 3);
-        Assert.Equal(0.55f, BowGeometry.HoldForward, 3);
-        Assert.InRange(BowGeometry.FullDrawPull, 0.25f, 0.5f);
-        // Clear of the round head (0.27 m wide and 0.30 m tall, centered 1.64 m above the feet).
+        Assert.Equal(0.45f, BowGeometry.HoldRight, 3); // 0.45 m to the right
+        Assert.Equal(0.80f, BowGeometry.HoldUp, 3);
+        Assert.Equal(0.45f, BowGeometry.HoldForward, 3);
+        Assert.InRange(BowGeometry.FullDrawPull, 0.15f, 0.4f);
+        // Clear of the chibi head (about 0.86 m wide, centered about 1.09 m above the feet).
         var head = new Vector3(0f, BowGeometry.HeadUp, 0f);
-        Assert.Equal(1.64f, BowGeometry.HeadUp, 2);
-        Assert.Equal(0.15f, BowGeometry.HeadRadius, 3);
-        Assert.Equal(0.45f, BowGeometry.MinHeadClearance, 3);
-        Assert.True(BowGeometry.MinHeadClearance > BowGeometry.HeadRadius + 0.25f);
+        Assert.Equal(1.09f, BowGeometry.HeadUp, 2);
+        Assert.Equal(0.6f, BowGeometry.MinHeadClearance, 3);
         Assert.True(Vector3.Distance(BowGeometry.HoldOffset, head) >= BowGeometry.MinHeadClearance);
-        // Below the head's bottom (the chin, about 1.49 m), and seen from straight behind outside its outline.
-        Assert.True(BowGeometry.HoldUp < BowGeometry.HeadUp - BowGeometry.HeadRadius - 0.1f);
-        Assert.True(MathF.Abs(BowGeometry.HoldRight) > BowGeometry.HeadRadius + 0.2f);
+        // Seen from straight behind, the hand is outside the head's outline (half width 0.43 m).
+        Assert.True(MathF.Abs(BowGeometry.HoldRight) > 0.43f || BowGeometry.HoldUp < BowGeometry.HeadUp - 0.43f);
         // In the world, for any facing, it is right of the facing and ahead of the feet.
         foreach (float facing in new[] { 0f, 1f, MathF.PI / 2, -2.5f })
         {
             var feet = new Vector3(3f, 2f, -7f);
             var right = new Vector3(MathF.Cos(facing), 0f, -MathF.Sin(facing));
             var forward = new Vector3(-MathF.Sin(facing), 0f, -MathF.Cos(facing));
-            Assert.Equal(0.40f, Vector3.Dot(BowGeometry.HoldPoint(feet, facing) - feet, right), 4);
-            Assert.Equal(0.55f, Vector3.Dot(BowGeometry.HoldPoint(feet, facing) - feet, forward), 4);
+            Assert.Equal(0.45f, Vector3.Dot(BowGeometry.HoldPoint(feet, facing) - feet, right), 4);
+            Assert.Equal(0.45f, Vector3.Dot(BowGeometry.HoldPoint(feet, facing) - feet, forward), 4);
             Assert.True(Vector3.Distance(BowGeometry.HoldPoint(feet, facing), feet + head) >= BowGeometry.MinHeadClearance);
         }
     }
 
     [Theory]
-    [InlineData(0f, 0.40f, -0.55f)]            // facing -Z: right +X
-    [InlineData(MathF.PI / 2, -0.55f, -0.40f)] // facing -X: right -Z
-    [InlineData(MathF.PI, -0.40f, 0.55f)]      // facing +Z: right -X
-    [InlineData(-MathF.PI / 2, 0.55f, 0.40f)]  // facing +X: right +Z
+    [InlineData(0f, 0.45f, -0.45f)]            // facing -Z: right +X
+    [InlineData(MathF.PI / 2, -0.45f, -0.45f)] // facing -X: right -Z
+    [InlineData(MathF.PI, -0.45f, 0.45f)]      // facing +Z: right -X
+    [InlineData(-MathF.PI / 2, 0.45f, 0.45f)]  // facing +X: right +Z
     public void TheHoldPointTurnsWithTheFacing(float facing, float dx, float dz)
     {
         var feet = new Vector3(3f, 2f, -7f);

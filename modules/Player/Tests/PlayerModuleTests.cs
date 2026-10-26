@@ -1485,29 +1485,20 @@ public class PlayerModuleTests
             foreach (var s in PoseStates())
             {
                 var f = ArcheryPose.Solve(s, 0.2f, pitch);
-                foreach (var (shoulder, turn, hand, elbow, side) in new[] { (f.ShoulderL, f.ArmL, f.HandL, f.ElbowL, -1f), (f.ShoulderR, f.ArmR, f.HandR, f.ElbowR, 1f) })
+                foreach (var (shoulder, turn, hand, side) in new[] { (f.ShoulderL, f.ArmL, f.HandL, -1f), (f.ShoulderR, f.ArmR, f.HandR, 1f) })
                 {
                     Assert.Equal(1f, turn.Length(), 4); // a pure rotation, no scale
-                    float reach = Vector3.Distance(shoulder, hand);
-                    // The bow arm is straight; the drawing arm bends at the elbow, never stretched.
-                    if (side < 0)
-                        Assert.Equal(ArcheryPose.ArmLength, reach, 4);
-                    else
-                        Assert.InRange(reach, ArcheryPose.MinDrawReach - 1e-4f, ArcheryPose.ArmLength + 1e-4f);
-                    AssertNear(shoulder + Vector3.Transform(ArcheryPose.ArmRestDirection(side), turn) * reach, hand);
+                    Assert.Equal(ArcheryPose.ArmLength, Vector3.Distance(shoulder, hand), 4);
+                    AssertNear(shoulder + Vector3.Transform(ArcheryPose.ArmRestDirection(side), turn) * ArcheryPose.ArmLength, hand);
                     AssertNear(ArcheryPose.Shoulder(f.Body, f.Hips, side), shoulder);
-                    // Upper arm and forearm are each half the arm.
-                    Assert.Equal(ArcheryPose.ArmLength / 2, Vector3.Distance(shoulder, elbow), 3);
-                    Assert.Equal(ArcheryPose.ArmLength / 2, Vector3.Distance(elbow, hand), 3);
                 }
                 Assert.Equal(1f, f.Body.Length(), 4);
                 Assert.Equal(1f, f.Head.Length(), 4);
                 Assert.Equal(1f, f.Bow.Length(), 4);
             }
-        // At rest the arms hang down past the hips, the hands beside the thighs.
+        // At rest the arms hang down to the hips.
         var restHand = ArcheryPose.ShoulderLRest + ArcheryPose.ArmLRestDirection * ArcheryPose.ArmLength;
-        Assert.InRange(restHand.Y, 0.7f, 0.8f);
-        Assert.InRange(restHand.X, -0.34f, -0.27f);
+        Assert.InRange(restHand.Y, 0.2f, 0.35f);
     }
 
     [Theory]
@@ -1527,7 +1518,7 @@ public class PlayerModuleTests
             Assert.True(Vector3.Dot(flatChest, flatAim) > 0.05f, $"draw {s.Draw}: chest {flatChest}, aim {flatAim}");
             Assert.True(Vector3.Cross(flatChest, flatAim).Y > 0f, $"draw {s.Draw}: chest {flatChest} not right of the aim {flatAim}");
             // So the left shoulder comes forward, toward the target, for the left arm to reach across.
-            Assert.True(Vector3.Dot(f.ShoulderL - f.ShoulderR, flatAim) > 0.1f, $"draw {s.Draw}: shoulders {f.ShoulderL} {f.ShoulderR}");
+            Assert.True(Vector3.Dot(f.ShoulderL - f.ShoulderR, flatAim) > 0.2f, $"draw {s.Draw}: shoulders {f.ShoulderL} {f.ShoulderR}");
             // Upright enough: the body leans less than about 45 degrees; the hips slide at most a little.
             Assert.True(Vector3.Transform(Vector3.UnitY, f.Body).Y > 0.7f, $"body up {Vector3.Transform(Vector3.UnitY, f.Body)}");
             Assert.Equal(ArcheryPose.BodyPivot.Y, f.Hips.Y, 4);
@@ -1543,7 +1534,7 @@ public class PlayerModuleTests
     [Fact]
     public void TheLeftHandHoldsTheBowOnTheRightReachingAcrossInFrontOfTheChest()
     {
-        Assert.True(ArcheryPose.HoldLocal.X > 0.35f); // the hold point is on the right
+        Assert.True(ArcheryPose.HoldLocal.X > 0.4f); // the hold point is on the right
         Assert.Equal(1f, ArcheryPose.HoldSide);
         foreach (float pitch in s_pitches)
             foreach (float yaw in s_aimYaws)
@@ -1571,13 +1562,11 @@ public class PlayerModuleTests
                     var back = f.Hips + Vector3.Transform(new Vector3(0f, 0f, ArcheryPose.TorsoBack), f.Body);
                     var flatAim = Vector3.Normalize(new Vector3(f.Forward.X, 0f, f.Forward.Z));
                     var head = ArcheryPose.HeadCenter(f);
-                    // The bow arm is straight (its elbow the middle of it); the drawing arm's elbow points out to the right.
-                    AssertNear((f.ShoulderL + f.HandL) * 0.5f, f.ElbowL);
-                    Assert.True(Vector3.Dot(f.ElbowR - (f.ShoulderR + f.HandR) * 0.5f, ArcheryPose.DrawElbowPole) > -1e-3f,
-                        $"right elbow {f.ElbowR} points in");
+                    // The arms never bend: an elbow is the middle of its arm.
                     var points = new[]
                     {
-                        ("left hand", f.HandL), ("right hand", f.HandR), ("left elbow", f.ElbowL), ("right elbow", f.ElbowR),
+                        ("left hand", f.HandL), ("right hand", f.HandR),
+                        ("left elbow", (f.ShoulderL + f.HandL) * 0.5f), ("right elbow", (f.ShoulderR + f.HandR) * 0.5f),
                     };
                     foreach (var (name, p) in points)
                     {
@@ -1585,12 +1574,12 @@ public class PlayerModuleTests
                         float front = Vector3.Dot(p - back, chest);
                         Assert.True(front > 0.1f, $"{at} is {front} m in front of the back");
                         Assert.Equal(front, ArcheryPose.InFrontOfBack(f, p), 4);
-                        // Not round behind the neck or the head (along the arrow: no further back than the turned shoulders).
+                        // Not behind the neck or the head (along the arrow; the back of the head is 0.4 m behind its middle).
                         Assert.True(Vector3.Dot(p - f.Neck, flatAim) > -0.35f, $"{at} is behind the neck {f.Neck}");
-                        Assert.True(Vector3.Dot(p - head, flatAim) > -0.35f, $"{at} is behind the head {head}");
+                        Assert.True(Vector3.Dot(p - head, flatAim) > -(ArcheryPose.HeadRadius - 0.05f), $"{at} is behind the head {head}");
                     }
                     // The right arm stays on the right, never reaching round behind the head to the left.
-                    Assert.True(f.HandR.X > head.X + 0.1f && (f.ShoulderR.X + f.HandR.X) * 0.5f > head.X, $"right hand {f.HandR}, head {head}");
+                    Assert.True(f.HandR.X > head.X + 0.2f && (f.ShoulderR.X + f.HandR.X) * 0.5f > head.X, $"right hand {f.HandR}, head {head}");
                 }
     }
 
@@ -1598,8 +1587,7 @@ public class PlayerModuleTests
     public void AtFullDrawTheRightHandAnchorsBesideTheRightCheek()
     {
         var full = DrawFor(ArcheryState.Relaxed, 1.0);
-        // Down and level (aiming up, the nock comes down below the grip at the hold point, to the chest).
-        foreach (float pitch in new[] { ArcheryPose.MinAimPitch, 0f })
+        foreach (float pitch in new[] { ArcheryPose.MinAimPitch, 0f, 0.35f }) // down, level, 20 degrees up
             foreach (float yaw in s_aimYaws)
             {
                 var f = ArcheryPose.Solve(full, yaw, pitch);
@@ -1608,7 +1596,7 @@ public class PlayerModuleTests
                 string at = $"pitch {pitch} yaw {yaw}: right hand {f.HandR}, head {head}";
                 Assert.True(Vector3.Distance(f.HandR, f.Nock) < 0.03f, at);
                 // Beside the head on its right, below its middle (the cheek and chin), just off its surface.
-                Assert.True(Vector3.Dot(f.HandR - head, right) > 0.1f, at);
+                Assert.True(Vector3.Dot(f.HandR - head, right) > 0.25f, at);
                 Assert.True(f.HandR.Y < head.Y, at);
                 float d = Vector3.Distance(f.HandR, head);
                 Assert.True(d > ArcheryPose.HeadRadius && d < ArcheryPose.HeadRadius + 0.3f, $"{at}: {d} m from the head's middle");
@@ -1629,10 +1617,8 @@ public class PlayerModuleTests
                 var head = ArcheryPose.HeadCenter(f);
                 Assert.True(Vector3.Distance(head, f.Grip) > ArcheryPose.HeadRadius + 0.1f, $"pitch {pitch}: grip {f.Grip}, head {head}");
                 Assert.True(Vector3.Distance(head, f.HandR) > ArcheryPose.HeadRadius, $"pitch {pitch} draw {s.Draw}: hand {f.HandR}, head {head}");
-                // Seen from the aim camera (behind and right of the head) the bow is out in front of it and to its right.
-                var flatAim = Vector3.Normalize(new Vector3(f.Forward.X, 0f, f.Forward.Z));
-                Assert.True(Vector3.Dot(f.Grip - head, flatAim) > 0.3f, $"grip {f.Grip}, head {head}");
-                Assert.True(ArcheryPose.HoldSide * (f.Grip.X - head.X) > 0.05f, $"grip {f.Grip}, head {head}");
+                // Seen from the aim camera (right of the head) the bow is out beside it.
+                Assert.True(ArcheryPose.HoldSide * (f.Grip.X - head.X) > 0.35f, $"grip {f.Grip}, head {head}");
             }
     }
 
@@ -1750,7 +1736,7 @@ public class PlayerModuleTests
     public void TheBowHandIsAtBowGeometrysHoldPointForAnyFacing(float facing)
     {
         var feet = new Vector3(3f, 0.4f, -7f);
-        var back = new Vector3(0f, 1.16f, 0.17f);
+        var back = new Vector3(0f, 0.55f, 0.25f);
         var grip = ArcheryPose.BowGrip(1f, back);
         Assert.Equal(ArcheryPose.HoldLocal, grip);
         AssertNear(BowGeometry.HoldPoint(feet, facing), ArcheryPose.ToWorld(feet, facing, grip));
@@ -1762,7 +1748,7 @@ public class PlayerModuleTests
     [Fact]
     public void TheBowMovesSmoothlyFromTheBackToTheHoldPoint()
     {
-        var back = new Vector3(0f, 1.16f, 0.17f);
+        var back = new Vector3(0f, 0.55f, 0.25f);
         AssertNear(back, ArcheryPose.BowGrip(0f, back));
         var previous = back;
         for (int i = 1; i <= 100; i++)
@@ -2130,9 +2116,8 @@ public class PlayerModuleTests
         foreach (var (leg, side) in new[] { ("LegL", -1f), ("LegR", 1f) })
         {
             var hip = glb.Origin(leg);
-            Assert.Equal(0.9f, hip.Y, 3);
-            Assert.Equal(0.1f, hip.X * side, 3);
-            Assert.Equal(0f, hip.Z, 3);
+            Assert.InRange(hip.Y, 0.28f, 0.36f);
+            Assert.InRange(hip.X * side, 0.08f, 0.16f);
         }
         foreach (var (arm, hand, side) in new[] { ("ArmL", "HandL", 1f), ("ArmR", "HandR", -1f) })
         {
@@ -2144,149 +2129,115 @@ public class PlayerModuleTests
         Assert.Equal("HandBow", glb.ParentOf("HandBowLimbTop"));
         Assert.Equal("HandBow", glb.ParentOf("HandBowLimbBottom"));
 
-        // The built-in pieces on their parts: exactly those Rig.Pieces lists; no sleeves. The shoes
-        // and the Boy's trouser legs are on the legs, so they swing with them.
+        // The built-in pieces on their parts: exactly those Rig.Pieces lists; no sleeves or trouser legs any more.
         Assert.Equal("Head", glb.ParentOf("Hair"));
         Assert.Equal("Body", glb.ParentOf("DefaultTop"));
         Assert.Equal("LegL", glb.ParentOf("DefaultShoesLegL"));
         Assert.Equal("LegR", glb.ParentOf("DefaultShoesLegR"));
         foreach (var piece in new[] { BuiltinPieces.Hair, BuiltinPieces.Top, BuiltinPieces.Bottom, BuiltinPieces.Shoes, BuiltinPieces.Head })
             Assert.Equal((Rig.Pieces(kind) & piece) != 0, glb.Nodes.Any(n => n.Name.StartsWith(Rig.NodePrefix(piece), StringComparison.Ordinal)));
-        if (kind == CharacterKind.Girl)
-            Assert.Equal("Head", glb.ParentOf("DefaultHead"));
-        else
-        {
-            Assert.Equal("Body", glb.ParentOf("DefaultBottom"));
-            Assert.Equal("LegL", glb.ParentOf("DefaultBottomLegL"));
-            Assert.Equal("LegR", glb.ParentOf("DefaultBottomLegR"));
-        }
-        Assert.DoesNotContain(glb.Nodes, n => n.Name.StartsWith("DefaultTopArm", StringComparison.Ordinal));
+        Assert.Equal(kind == CharacterKind.Girl ? "Head" : "Body",
+            glb.ParentOf(kind == CharacterKind.Girl ? "DefaultHead" : "DefaultBottom"));
+        Assert.DoesNotContain(glb.Nodes, n => n.Name.StartsWith("DefaultTopArm", StringComparison.Ordinal) ||
+            n.Name.StartsWith("DefaultBottomLeg", StringComparison.Ordinal));
     }
-
-    /// <summary>The vertices' (min, max) corners.</summary>
-    private static (Vector3 Low, Vector3 High) Bounds(List<Vector3> v) => (v.Aggregate(Vector3.Min), v.Aggregate(Vector3.Max));
 
     [Theory]
     [InlineData("girl")]
     [InlineData("boy")]
-    public void TheModelsAreNormalProportionedPeopleOfOnePointEightMeters(string file)
+    public void TheModelsAreARoundHeadFloatingOverATriangleBody(string file)
     {
         var glb = new Glb(file);
-        // 1.80 m: feet on the ground, the top of the head (with its hair) at about 1.80 m.
-        var person = new[] { "Body", "Head", "LegL", "LegR", "HandL", "HandR" }.SelectMany(glb.VerticesUnder).ToList();
-        Assert.InRange(person.Min(v => v.Y), -0.005f, 0.005f);
-        Assert.InRange(glb.Vertices("Head", "Skin").Max(v => v.Y), 1.78f, 1.81f);
-        Assert.InRange(person.Max(v => v.Y), 1.79f, 1.86f);
+        // The big round head, at the same place and size as before (the cameras frame it).
+        var head = glb.Vertices("Head", "Skin");
+        var min = head.Aggregate(Vector3.Min);
+        var max = head.Aggregate(Vector3.Max);
+        Assert.Equal(1.088f, (min.Y + max.Y) / 2, 2);
+        Assert.Equal(0f, (min.X + max.X) / 2, 2);
+        Assert.Equal(0.8f, max.X - min.X, 2);
+        Assert.Contains("Eye", glb.Materials("Head"));
+        Assert.Contains("EyeShine", glb.Materials("Head"));
+        Assert.Contains("Blush", glb.Materials("Head"));
+        Assert.Contains("Mouth", glb.Materials("Head"));
 
-        // The round head: 0.27 m wide and 0.30 m tall, centered at BowGeometry.HeadUp (1.64 m),
-        // with the same cute face.
-        var (min, max) = Bounds(glb.Vertices("Head", "Skin"));
-        Assert.Equal(BowGeometry.HeadUp, (min.Y + max.Y) / 2, 2);
-        Assert.Equal(0f, (min.X + max.X) / 2, 3);
-        Assert.Equal(0.27f, max.X - min.X, 2);
-        Assert.Equal(0.30f, max.Y - min.Y, 2);
-        Assert.Equal(ArcheryPose.NeckRest.Y + ArcheryPose.HeadAboveNeck, (min.Y + max.Y) / 2, 2);
-        foreach (var m in new[] { "Eye", "EyeShine", "Blush", "Mouth" })
-            Assert.Contains(m, glb.Materials("Head"));
-        // The eyes are big: each about a quarter of the face's width, on its front.
-        var eyes = Bounds(glb.Vertices("Head", "Eye"));
-        Assert.InRange(eyes.High.X - eyes.Low.X, 0.12f, 0.2f);
-        Assert.True(eyes.Low.Z < min.Z + 0.03f, "the eyes are on the front of the head");
+        // A gap of a few cm between everything on the head (hair, ribbon) and the top of the body
+        // and its clothes: no neck.
+        var body = glb.VerticesUnder("Body");
+        float bodyTop = body.Max(v => v.Y);
+        float headBottom = glb.VerticesUnder("Head").Min(v => v.Y);
+        Assert.InRange(headBottom - bodyTop, 0.03f, 0.12f);
 
-        // The head floats about 5 cm above the torso and its clothes (no neck); everything on the
-        // head (hair, ribbon) clears them too.
-        float bodyTop = glb.VerticesUnder("Body").Max(v => v.Y);
-        Assert.InRange(min.Y - bodyTop, 0.03f, 0.08f);
-        Assert.True(glb.VerticesUnder("Head").Min(v => v.Y) > bodyTop + 0.02f);
-
-        // The torso: a smooth tapered shape from the hips (0.88 m) to the shoulders (1.44 m), oval:
-        // shoulders about 0.40 m wide, waist 0.30, hips 0.34, about 0.22 m deep.
-        var torso = glb.Vertices("Body", "Skin");
-        Assert.True(torso.Count > 500, "a smooth torso");
-        Assert.InRange(torso.Min(v => v.Y), 0.87f, 0.89f);
-        Assert.InRange(torso.Max(v => v.Y), 1.43f, 1.45f);
-        float Width(float y0, float y1) => 2 * torso.Where(v => v.Y >= y0 && v.Y <= y1).Max(v => MathF.Abs(v.X));
-        Assert.InRange(Width(1.25f, 1.40f), 0.38f, 0.42f);
-        Assert.InRange(Width(1.08f, 1.12f), 0.28f, 0.32f);
-        Assert.InRange(Width(0.93f, 0.97f), 0.32f, 0.36f);
-        Assert.True(Width(1.08f, 1.12f) < Width(0.93f, 0.97f) - 0.02f && Width(1.08f, 1.12f) < Width(1.25f, 1.4f) - 0.06f, "tapered");
-        float depth = 2 * torso.Max(v => MathF.Abs(v.Z));
-        Assert.InRange(depth, 0.2f, 0.26f);
-        Assert.True(depth < Width(1.25f, 1.4f) - 0.12f, "flatter front to back than across");
-
-        // Real legs: rounded skin tubes (about 0.065 m radius) from the hip pivots down into the shoes.
-        foreach (var (leg, side) in new[] { ("LegL", -1f), ("LegR", 1f) })
+        // The body is a smooth cone: a triangle from the front, wide at the bottom, narrowing
+        // steadily to a rounded top, round all the way round.
+        var skin = glb.Vertices("Body", "Skin");
+        float bottom = skin.Min(v => v.Y), top = skin.Max(v => v.Y), h = top - bottom;
+        Assert.InRange(bottom, 0.08f, 0.2f);
+        float last = float.MaxValue;
+        for (int i = 0; i < 5; i++)
         {
-            Assert.Equal(new[] { "Skin" }, glb.Materials(leg));
-            var skin = glb.Vertices(leg, "Skin");
-            var axis = glb.Origin(leg);
-            foreach (var v in skin.Where(v => v.Y > 0.2f && v.Y < 0.8f))
-                Assert.InRange(MathF.Sqrt((v.X - axis.X) * (v.X - axis.X) + v.Z * v.Z), 0.06f, 0.07f);
-            Assert.True(skin.Max(v => v.Y) >= 0.9f, $"{leg} reaches the hip");
-            var shoe = Bounds(glb.Vertices("DefaultShoes" + leg));
-            // Rounded shoes on the ground, about 0.12 m tall and 0.24 m long, the leg's end inside.
-            Assert.InRange(shoe.Low.Y, -0.005f, 0.005f);
-            Assert.InRange(shoe.High.Y - shoe.Low.Y, 0.1f, 0.14f);
-            Assert.InRange(shoe.High.Z - shoe.Low.Z, 0.22f, 0.27f);
-            Assert.True(shoe.Low.Z < -0.1f, "the toe points forward");
-            Assert.True(skin.Min(v => v.Y) > shoe.Low.Y && skin.Min(v => v.Y) < shoe.High.Y - 0.05f, $"{leg} ends inside its shoe");
-            Assert.Equal(side * 0.1f, (shoe.Low.X + shoe.High.X) / 2, 2);
+            float widest = WidestBetween(skin, bottom + h * i / 5f, bottom + h * (i + 1) / 5f);
+            Assert.True(widest < last - 0.02f, $"slice {i}: {widest} not narrower than {last}");
+            last = widest;
         }
+        Assert.True(WidestBetween(skin, bottom + h * 0.8f, top) < 0.5f * WidestBetween(skin, bottom, bottom + h * 0.2f));
+        Assert.True(skin.Count > 500, "a smooth cone");
+        var rim = skin.Where(v => v.Y > bottom + h * 0.3f && v.Y < bottom + h * 0.35f).Select(Radius).ToList();
+        Assert.True(rim.Max() - rim.Min() < 0.02f, "round");
 
-        // The outfit covers the torso; it is the old look on the new body.
-        var top = glb.VerticesUnder("DefaultTop");
-        Assert.True(top.Max(v => v.Y) >= torso.Max(v => v.Y), "the top covers the shoulders");
-        if (file == "girl")
+        // The outfit colors the triangle: it covers the body from its top down to its bottom.
+        var clothes = glb.VerticesUnder("DefaultTop").Concat(glb.Has("DefaultBottom") ? glb.VerticesUnder("DefaultBottom") : new List<Vector3>()).ToList();
+        Assert.True(clothes.Min(v => v.Y) <= bottom + 0.01f);
+        Assert.True(clothes.Max(v => v.Y) >= top - 0.01f);
+        if (glb.Has("DefaultBottom"))
         {
-            // The pink dress flares below the hips over the legs' tops to a hem about at the knees.
-            Assert.InRange(top.Min(v => v.Y), 0.55f, 0.7f);
-            float hem = top.Where(v => v.Y < top.Min(p => p.Y) + 0.03f).Max(v => MathF.Abs(v.X));
-            Assert.True(hem > Width(0.93f, 0.97f) / 2 + 0.06f, $"the dress's hem {hem} does not flare");
-            Assert.Contains("Spots", glb.Materials("DefaultTop"));
-        }
-        else
-        {
-            // The shirt down over the trousers' waist band; the trousers cover the legs to the shoes.
-            Assert.InRange(top.Min(v => v.Y), 0.92f, 1.0f);
-            Assert.True(glb.Vertices("DefaultBottom").Max(v => v.Y) > top.Min(v => v.Y) + 0.02f);
-            foreach (var leg in new[] { "LegL", "LegR" })
-            {
-                var trousers = glb.Vertices("DefaultBottom" + leg);
-                Assert.True(trousers.Min(v => v.Y) < 0.2f && trousers.Max(v => v.Y) > 0.9f, $"{leg}'s trouser leg");
-                var axis = glb.Origin(leg);
-                Assert.True(trousers.Where(v => v.Y > 0.25f && v.Y < 0.8f).All(v =>
-                    MathF.Sqrt((v.X - axis.X) * (v.X - axis.X) + v.Z * v.Z) > 0.07f), $"{leg} pokes through its trousers");
-            }
-            Assert.Contains("Ribbon", glb.Materials("DefaultTop")); // the bow tie
+            // The Boy's trousers: a band round the bottom of the triangle.
+            var trousers = glb.Vertices("DefaultBottom");
+            Assert.True(trousers.Max(v => v.Y) < bottom + h * 0.4f);
+            Assert.True(trousers.Max(Radius) > WidestBetween(skin, bottom, bottom + h * 0.2f));
         }
     }
 
     [Theory]
     [InlineData("girl")]
     [InlineData("boy")]
-    public void TheModelsHaveFloatingRoundHandsButNoArmsOrNeck(string file)
+    public void TheModelsHaveFloatingRoundHandsAndLittleFeetButNoArmsOrLegs(string file)
     {
         var glb = new Glb(file);
-        // No arm meshes: the arms are only pivots, and the only skin is the head, the torso, the
-        // legs and the hands.
-        foreach (var limb in new[] { "ArmL", "ArmR" })
+        // No arm or leg meshes: the arms and legs are only pivots, and the only skin is the head,
+        // the body and the hands.
+        foreach (var limb in new[] { "ArmL", "ArmR", "LegL", "LegR" })
             Assert.Equal(-1, glb.Node(limb).Mesh);
-        Assert.Equal(new[] { "Body", "HandL", "HandR", "Head", "LegL", "LegR" },
+        Assert.Equal(new[] { "Body", "HandL", "HandR", "Head" },
             glb.Nodes.Where(n => glb.Materials(n.Name).Contains("Skin")).Select(n => n.Name).OrderBy(n => n, StringComparer.Ordinal));
 
-        foreach (var (hand, leg, side) in new[] { ("HandL", "LegL", -1f), ("HandR", "LegR", 1f) })
+        var skin = glb.Vertices("Body", "Skin");
+        float bottom = skin.Min(v => v.Y), top = skin.Max(v => v.Y), h = top - bottom;
+        foreach (var (hand, side) in new[] { ("HandL", -1f), ("HandR", 1f) })
         {
-            // Round (about 0.055 m radius), hanging beside the thighs with air between them and the legs.
+            // Round, beside the body about its middle, with air between them and the body.
             var v = glb.Vertices(hand);
             var size = v.Aggregate(Vector3.Max) - v.Aggregate(Vector3.Min);
-            Assert.InRange(size.X, 0.1f, 0.12f);
+            Assert.InRange(size.X, 0.12f, 0.2f);
             Assert.InRange(size.Y / size.X, 0.9f, 1.1f);
             Assert.InRange(size.Z / size.X, 0.9f, 1.1f);
             var center = glb.Origin(hand);
             Assert.True(center.X * side > 0, hand);
-            Assert.InRange(center.Y, 0.7f, 0.8f);
-            float legOuter = glb.VerticesUnder(leg).Where(p => MathF.Abs(p.Y - center.Y) < 0.1f).Max(p => p.X * side);
-            Assert.True(v.Min(p => p.X * side) > legOuter + 0.03f, $"{hand} touches the leg");
+            Assert.InRange(center.Y, bottom + h * 0.2f, top - h * 0.2f);
+            float inner = v.Min(p => p.X * side);
+            Assert.True(inner > WidestBetween(skin, center.Y - 0.1f, center.Y + 0.1f) + 0.03f, $"{hand} touches the body");
+        }
+        foreach (var (foot, side) in new[] { ("DefaultShoesLegL", -1f), ("DefaultShoesLegR", 1f) })
+        {
+            // Little round shoes on the ground under the triangle (hanging from the legs' pivots).
+            var v = glb.Vertices(foot);
+            var low = v.Aggregate(Vector3.Min);
+            var high = v.Aggregate(Vector3.Max);
+            Assert.InRange(low.Y, -0.01f, 0.02f);
+            Assert.True(high.Y <= bottom + 0.005f, $"{foot} reaches into the body");
+            Assert.InRange(high.Y - low.Y, 0.08f, 0.16f);
+            Assert.InRange(high.X - low.X, 0.12f, 0.24f);
+            Assert.True((low.X + high.X) / 2 * side > 0.05f, foot);
+            Assert.True(Math.Max(MathF.Abs(low.X), MathF.Abs(high.X)) < WidestBetween(skin, bottom, bottom + 0.05f), $"{foot} sticks out sideways");
         }
     }
 

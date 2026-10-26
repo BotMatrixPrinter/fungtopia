@@ -1,4 +1,4 @@
-# Jeans (Bottom, shop): blue jeans, a waist band round the torso's bottom with a brown belt and a gold buckle, and a leg round each leg down to the ankle with gold seams and a rolled cuff.
+# Jeans (Bottom, shop): blue jeans, the band round the lower triangle down to its bottom edge, with gold seams and a brown belt.
 # Run from the repository root (writes jeans.glb next to this script):
 #   blender -b --factory-startup --python modules/Wardrobe/Models/Clothes/jeans.py
 # Shapes and rig sizes: ../kit.py.
@@ -16,16 +16,10 @@ seam = material("Stitch", (0.95, 0.75, 0.35))
 belt = material("Belt", (0.5, 0.3, 0.18))
 buckle = material("Buckle", (1.0, 0.82, 0.33))
 body = Part("Body")
-waist_band(body, denim)
-ring(body, belt, BAND_TOP - 0.016, 0.016, out=BOTTOM_OUT)
-body.box(buckle, body_point(0, BAND_TOP - 0.016, BOTTOM_OUT + 0.034)[0], (0.032, 0.024, 0.01),
-         rotation=body_frame(0, BAND_TOP - 0.016))
+cloth(body, denim, BODY_BOTTOM, BAND_TOP, out=BOTTOM_OUT)
+ring(body, belt, BAND_TOP - 0.012, 0.018, out=BOTTOM_OUT)
+body.box(buckle, body_point(0, BAND_TOP - 0.012, BOTTOM_OUT + 0.036)[0], (0.035, 0.025, 0.012), rotation=body_frame(0, BAND_TOP - 0.012))
+for a in (-90, 90):
+    on_body(body, seam, [(a, BAND_TOP - 0.04), (a, 0.2), (a, BODY_BOTTOM + 0.035)], 0.006, out=BOTTOM_OUT)
 body.build()
-for name in ("LegL", "LegR"):
-    leg = Part(name)
-    side = 1 if leg.pivot.x > 0 else -1
-    leg_tube(leg, denim, TROUSER_HEM, 0.95)
-    leg_cuff(leg, denim, TROUSER_HEM + 0.022, 0.018)
-    leg_seam(leg, seam, side * 90, TROUSER_HEM + 0.05, 0.9, 0.005)
-    leg.build()
 export(__file__)

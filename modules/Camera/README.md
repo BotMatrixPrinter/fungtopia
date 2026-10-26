@@ -13,7 +13,7 @@ and publishes one `CameraPose` per fixed tick.
 - `Core/`: `Fungtopia.Camera.Core`, `CameraModule`. It reads `Fungtopia.Player.PlayerState`
   (the feet) and `Fungtopia.Input.PlayerInput.Look` (x turns the yaw right, y the pitch up), and
   `Fungtopia.Bow.BowState.Draw` for the aim camera.
-  - The orbit point is `PivotHeight` (2.1 m, a little above the 1.80 m character's head) above the feet, moved `ShoulderOffset` (0.5 m) to
+  - The orbit point is `PivotHeight` (1.6 m) above the feet, moved `ShoulderOffset` (0.5 m) to
     the right; the camera sits `Distance` (5 m) behind it along the view direction.
   - Pitch is the view's elevation, clamped to `MinPitch`..`MaxPitch` (-35..+60 degrees); it starts
     at -12 degrees (looking slightly down). Yaw starts at 0 (looking north, -Z) and wraps.
@@ -25,10 +25,10 @@ and publishes one `CameraPose` per fixed tick.
     second) once the view clears.
   - **Aim camera.** While `BowState.Draw` > 0, and for `AimHoldSeconds` (0.4 s) after the shot,
     the camera eases (`AimTransitionSeconds`, 0.25 s, `Aiming` 0..1) to an orbit point
-    (`AimPivot`) `AimSide` (0.7 m) to the side of the head's center (`BowGeometry.HeadUp`) and
+    (`AimPivot`) `AimSide` (0.9 m) to the side of the head's center (`BowGeometry.HeadUp`) and
     `AimRaise` (0.25 m) above it, `AimDistance` (2.75 m) behind it (`AimView`). The side is the
     hold point's (`AimSideSign`, from the sign of `BowGeometry.HoldRight`): the right, so the view
-    is over the right shoulder and the bow held on the right shows beside the head instead of
+    is over the right shoulder and the bow held on the right shows beside the big head instead of
     behind it.
     It blends only the orbit point and the arm's length: the view direction (yaw, pitch) stays
     the normal camera's, it never swings sideways (the character faces the aim while drawing).
@@ -41,8 +41,8 @@ and publishes one `CameraPose` per fixed tick.
   - **Front view.** While `Fungtopia.Wardrobe.WardrobeState.Open` (the wardrobe or Abby's shop)
     or `Fungtopia.StartScreen.StartScreenState.Open`, the camera swings round to the player's
     front (`FrontView`), like the character creation screen: `FrontDistance` (2.75 m) from the
-    chest, level at `ChestHeight` (1.15 m above the feet, the 1.80 m character's chest), turned right by `FrameAngle` so the
-    whole 1.80 m player (head to feet) stands in the middle of the screen's left half (`FrameScreenX`
+    chest, level at `ChestHeight` (0.6 m above the feet), turned right by `FrameAngle` so the
+    whole player (head to feet) stands in the middle of the screen's left half (`FrameScreenX`
     -0.5 at the 70 degree `FieldOfView`, 16:9), clear of a panel on the right. The side it looks
     from (`FrontYaw`, the arm's yaw) is fixed when the view begins (again after a teleport),
     from the player's facing (`Facing` + π), and the camera then holds still: no orbit, and
@@ -63,6 +63,6 @@ and publishes one `CameraPose` per fixed tick.
   following, ground, trunk and wall pull-in, the front view's framing (left half, inside the home
   room), holding still and transitions, the aim camera (right of and above the head, on the hold point's side, the head not
   hiding the hold point at level and ±20 degree aims, the same view direction, smooth easing in and out,
-  pull-in), the character-based heights for the 1.80 m character, determinism.
+  pull-in), determinism.
 
 Test it with `./test.sh Camera` from the repository root.

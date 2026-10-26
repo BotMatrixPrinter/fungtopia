@@ -19,14 +19,14 @@ namespace Fungtopia.Camera;
 /// of the player standing in the left half of the screen (kept inside the walls at home), and
 /// swings back when they close. While the bow is drawn it eases to an aim camera beside the head
 /// on the bow's side (over the right shoulder), looking the same way, so the bow held on the right
-/// shows beside the head.
+/// shows beside the big head.
 /// Publishes <see cref="CameraPose"/> every tick.
 /// </summary>
 public sealed class CameraModule : IModule, IMessageHandler<PlayerState>, IMessageHandler<PlayerInput>,
     IMessageHandler<WardrobeState>, IMessageHandler<StartScreenState>, IMessageHandler<BowState>
 {
     /// <summary>Height of the orbit point above the player's feet, meters.</summary>
-    public const float PivotHeight = 2.1f;
+    public const float PivotHeight = 1.6f;
     /// <summary>Orbit distance when nothing is in the way, meters.</summary>
     public const float Distance = 5f;
     /// <summary>How far the orbit point sits to the right of the player's head, meters.</summary>
@@ -48,8 +48,8 @@ public sealed class CameraModule : IModule, IMessageHandler<PlayerState>, IMessa
 
     /// <summary>Front view: distance from the player's chest to the camera, meters.</summary>
     public const float FrontDistance = 2.75f;
-    /// <summary>Front view: height of the camera (and the point it looks at) above the feet, meters: the 1.80 m character's chest.</summary>
-    public const float ChestHeight = 1.15f;
+    /// <summary>Front view: height of the camera (and the point it looks at) above the feet, meters.</summary>
+    public const float ChestHeight = 0.6f;
     /// <summary>The camera's vertical field of view (the view's <c>Camera3D.Fov</c>), radians: 70 degrees.</summary>
     public const float FieldOfView = CameraPose.DefaultFieldOfView;
     /// <summary>The screen's width over its height the front view is framed for (1920 x 1080).</summary>
@@ -76,7 +76,7 @@ public sealed class CameraModule : IModule, IMessageHandler<PlayerState>, IMessa
     /// Aim camera: how far its orbit point sits to the side of the head's center
     /// (<see cref="BowGeometry.HeadUp"/>), meters, on <see cref="AimSideSign"/>'s side: the bow's.
     /// </summary>
-    public const float AimSide = 0.7f;
+    public const float AimSide = 0.9f;
     /// <summary>
     /// Aim camera: which side of the head its orbit point is on, 1 right, -1 left: the side of
     /// <see cref="BowGeometry"/>'s hold point (<see cref="BowGeometry.HoldRight"/>), so it looks over that shoulder.

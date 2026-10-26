@@ -389,7 +389,7 @@ public class CameraModuleTests
     }
 
     /// <summary>
-    /// The whole character (feet to the top of the head and a hat, 1.85 m, and 0.45 m to each
+    /// The whole character (feet to the top of the big head and hat, 1.7 m, and 0.45 m to each
     /// side across the view) shows in the left half of the screen, top to bottom, the chest near
     /// the middle of that half.
     /// </summary>
@@ -399,7 +399,7 @@ public class CameraModuleTests
         Assert.InRange(chest.X, -0.65f, -0.35f);
         Vector3 across = Vector3.Transform(Vector3.UnitX, pose.Orientation);
         across = Vector3.Normalize(new Vector3(across.X, 0f, across.Z)) * 0.45f;
-        foreach (float h in new[] { 0f, CameraModule.ChestHeight, 1.85f })
+        foreach (float h in new[] { 0f, CameraModule.ChestHeight, 1.7f })
         {
             foreach (float side in new[] { -1f, 1f })
             {
@@ -660,8 +660,8 @@ public class CameraModuleTests
     private static readonly int AimTicks = (int)MathF.Ceiling(CameraModule.AimTransitionSeconds * 60f);
     private static readonly int HoldTicks = (int)MathF.Ceiling(CameraModule.AimHoldSeconds * 60f);
 
-    /// <summary>The head seen as a ball: 0.27 m wide and 0.30 m tall, plus its hair and ink outline.</summary>
-    private const float HeadOutlineRadius = 0.18f;
+    /// <summary>The chibi head seen as a ball: about 0.86 m wide, plus its ink outline.</summary>
+    private const float HeadOutlineRadius = 0.45f;
 
     /// <summary>Ticks with the player standing at <paramref name="feet"/> facing the camera's way (as while drawing) and the bow drawn <paramref name="draw"/>.</summary>
     private static void RunBow(CameraModule camera, FakeBus bus, Vector3 feet, float draw, int ticks)
@@ -680,20 +680,6 @@ public class CameraModuleTests
         MathF.Acos(Math.Clamp(Vector3.Dot(Vector3.Normalize(a), Vector3.Normalize(b)), -1f, 1f));
 
     [Fact]
-    public void TheCharacterBasedHeightsFitTheOnePointEightMeterCharacter()
-    {
-        // The orbit point a little above the 1.80 m character's head (its center BowGeometry.HeadUp, 1.64 m).
-        Assert.Equal(2.1f, CameraModule.PivotHeight, 3);
-        Assert.True(CameraModule.PivotHeight > BowGeometry.HeadUp + 0.3f);
-        // The front view looks level at the chest: between the hips (0.90 m) and the shoulders (1.40 m).
-        Assert.Equal(1.15f, CameraModule.ChestHeight, 3);
-        // The aim camera's orbit point is over the head's center, wherever the orbit point is.
-        var feet = ForestBounds.PlayerStart;
-        Assert.Equal(feet.Y + BowGeometry.HeadUp + CameraModule.AimRaise,
-            CameraModule.AimPivot(feet + new Vector3(0f, CameraModule.PivotHeight, 0f), 0.4f).Y, 4);
-    }
-
-    [Fact]
     public void TheAimOffsetIsRightOfAndAboveTheHeadOnTheHoldPointsSide()
     {
         var feet = ForestBounds.PlayerStart;
@@ -705,7 +691,7 @@ public class CameraModuleTests
         {
             Vector3 pivot = CameraModule.AimPivot(feet + new Vector3(0f, CameraModule.PivotHeight, 0f), yaw);
             Vector3 offset = pivot - head;
-            Assert.Equal(0.7f, Vector3.Dot(offset, CameraModule.Right(yaw)), 2);    // 0.7 m right
+            Assert.Equal(0.9f, Vector3.Dot(offset, CameraModule.Right(yaw)), 2);    // 0.9 m right
             // On the hold point's side of the head.
             Vector3 hold = BowGeometry.HoldPoint(feet, yaw) - head;
             Assert.True(Vector3.Dot(offset, CameraModule.Right(yaw)) * Vector3.Dot(hold, CameraModule.Right(yaw)) > 0f);
@@ -721,7 +707,7 @@ public class CameraModuleTests
         var pose = bus.Poses[^1];
         Vector3 fromHead = pose.Position - head;
         Assert.Equal(1f, camera.Aiming, 4);
-        Assert.InRange(Vector3.Dot(fromHead, CameraModule.Right(camera.Yaw)), 0.65f, 0.75f);
+        Assert.InRange(Vector3.Dot(fromHead, CameraModule.Right(camera.Yaw)), 0.85f, 0.95f);
         Assert.InRange(fromHead.Y, 0.2f, 0.3f);
         Assert.InRange(-Vector3.Dot(fromHead, CameraModule.Forward(camera.Yaw)), 2.5f, 3f);
         Assert.True(Vector3.Distance(CameraModule.AimView(feet, camera.Yaw, 0f).Position, pose.Position) < 0.02f);

@@ -66,15 +66,15 @@ public static class ArcheryPose
 
     /// <summary>
     /// The held bow's string at rest is this far behind the grip, and its tips this far above and
-    /// below it, meters (the HandBow in characters.py, 1.3 times the slung bow: arc radius 0.6006 over ±0.34π).
+    /// below it, meters (the HandBow in characters.py, 1.3 times the slung bow: arc radius 0.546 over ±0.34π).
     /// </summary>
-    public const float StringRest = 0.311f;
+    public const float StringRest = 0.283f;
 
     /// <inheritdoc cref="StringRest"/>
-    public const float TipHalfSpan = 0.526f;
+    public const float TipHalfSpan = 0.478f;
 
     /// <summary>The nocked arrow from nock to tip, meters (NockArrow in characters.py).</summary>
-    public const float ArrowLength = 0.95f;
+    public const float ArrowLength = 0.78f;
 
     /// <summary>"Never released": larger than any pose time.</summary>
     public const float LongAgo = 1000f;
@@ -198,34 +198,34 @@ public static class ArcheryPose
         if (w >= 1f)
             return HoldLocal;
         float arc = MathF.Sin(MathF.PI * w);
-        return Vector3.Lerp(backGrip, HoldLocal, Eased(w)) + new Vector3(HoldSide * 0.3f, 0.3f, 0f) * arc;
+        return Vector3.Lerp(backGrip, HoldLocal, Eased(w)) + new Vector3(HoldSide * 0.25f, 0.2f, 0f) * arc;
     }
 
     // ---- The full pose: body, head, arms and bow (the rig as characters.py builds it) ----
 
     /// <summary>The body's pivot (the hips): it turns and leans about it, the legs stay below.</summary>
-    public static readonly Vector3 BodyPivot = new(0f, 0.90f, 0f);
+    public static readonly Vector3 BodyPivot = new(0f, 0.30f, 0f);
 
     /// <summary>The head's pivot (the neck) at rest; it rides on the body.</summary>
-    public static readonly Vector3 NeckRest = new(0f, 1.48f, 0f);
+    public static readonly Vector3 NeckRest = new(0f, 0.72f, 0f);
 
-    /// <summary>The head's middle above the neck (the head is 0.27 m wide and 0.30 m tall, centered at <see cref="BowGeometry.HeadUp"/>).</summary>
-    public const float HeadAboveNeck = BowGeometry.HeadUp - 1.48f;
+    /// <summary>The head's middle above the neck (a 0.4 m ball).</summary>
+    public const float HeadAboveNeck = 0.368f;
 
-    /// <summary>The head's radius (about: half its height).</summary>
-    public const float HeadRadius = BowGeometry.HeadRadius;
+    /// <summary>The head's radius.</summary>
+    public const float HeadRadius = 0.4f;
 
     /// <summary>The left shoulder (ArmL's pivot) at rest; the right one is its mirror.</summary>
-    public static readonly Vector3 ShoulderLRest = new(-0.22f, 1.40f, 0f);
+    public static readonly Vector3 ShoulderLRest = new(-0.23f, 0.65f, 0f);
 
     /// <summary>
     /// The arms' length, shoulder to hand center (ArmL / ArmR in characters.py: hanging, the
-    /// hands reach below the hips, beside the thighs). Arms are only ever turned at the shoulder, never stretched.
+    /// hands reach the hips). Arms are only ever turned at the shoulder, never stretched.
     /// </summary>
-    public const float ArmLength = 0.66f;
+    public const float ArmLength = 0.42f;
 
     /// <summary>The left arm's direction at rest, shoulder to hand (down and a little out); the right one is its mirror.</summary>
-    public static readonly Vector3 ArmLRestDirection = Vector3.Normalize(new Vector3(-0.08f, -0.64f, -0.03f));
+    public static readonly Vector3 ArmLRestDirection = Vector3.Normalize(new Vector3(-0.13f, -0.22f, -0.02f));
 
     /// <summary>
     /// How far the body turns to the right of the aim in the full pose (the left shoulder coming
@@ -247,7 +247,7 @@ public static class ArcheryPose
     public const float MaxHipShift = 0.15f;
 
     /// <summary>The torso's back is this far behind its middle (the body's axis), meters: its back plane.</summary>
-    public const float TorsoBack = 0.12f;
+    public const float TorsoBack = 0.17f;
 
     /// <summary>The held bow's top tilts this far away from the head (radians about its forward), like a cute archer's.</summary>
     public const float BowCant = 0.15f;
@@ -255,11 +255,8 @@ public static class ArcheryPose
     /// <summary>How far each limb of the held bow bends back toward the string at a full draw, radians.</summary>
     public const float MaxLimbFlex = 0.1f;
 
-    /// <summary>
-    /// Where the head's middle goes sideways while aiming (X, meters): a little toward the arrow
-    /// on the hold point's side, tilting to sight along it with the right cheek toward the string hand.
-    /// </summary>
-    public static float HeadMiddle => HoldSide * 0.1f;
+    /// <summary>Where the head's middle stays sideways while aiming (X, meters): about over the feet, away from the bow.</summary>
+    public static float HeadMiddle => -HoldSide * 0.1f;
 
     /// <summary>The head tilts at most this much on the neck (roll, radians).</summary>
     public const float MaxHeadRoll = 0.5f;
@@ -283,13 +280,8 @@ public static class ArcheryPose
         public Vector3 ShoulderL, ShoulderR;
         /// <summary>The arms' turns about their shoulders.</summary>
         public Quaternion ArmL, ArmR;
-        /// <summary>
-        /// The hand centers: the left (bow) arm is straight, its hand always <see cref="ArmLength"/>
-        /// from its shoulder; the right (drawing) arm bends at its elbow, its hand at most that far.
-        /// </summary>
+        /// <summary>The hand centers: always <see cref="ArmLength"/> from their shoulders.</summary>
         public Vector3 HandL, HandR;
-        /// <summary>The elbows: the left one the middle of its straight arm, the right one where its bent arm's two halves meet.</summary>
-        public Vector3 ElbowL, ElbowR;
         /// <summary>The bow's grip (<see cref="HoldLocal"/>) and its turn: its Y up the limbs, -Z <see cref="Forward"/>.</summary>
         public Vector3 Grip;
         public Quaternion Bow;
@@ -331,31 +323,8 @@ public static class ArcheryPose
     public static float InFrontOfBack(in Frame f, Vector3 point) =>
         Vector3.Dot(point - (f.Hips + Vector3.Transform(new Vector3(0f, 0f, TorsoBack), f.Body)), Chest(f.Body));
 
-    /// <summary>
-    /// The arm's elbow for its shoulder and hand: the upper arm and the forearm are each half of
-    /// <see cref="ArmLength"/> (never stretched), so a straight arm's elbow is its middle; a bent
-    /// one's points along <paramref name="pole"/> (the drawing arm's: out to the body's right and down).
-    /// </summary>
-    public static Vector3 Elbow(Vector3 shoulder, Vector3 hand, Vector3 pole = default)
-    {
-        var mid = (shoulder + hand) * 0.5f;
-        var along = hand - shoulder;
-        float half = 0.5f * along.Length();
-        float rise = MathF.Sqrt(MathF.Max(0f, 0.25f * ArmLength * ArmLength - half * half));
-        if (rise < 1e-5f || along.LengthSquared() < 1e-10f)
-            return mid;
-        var axis = Vector3.Normalize(along);
-        var side = pole - axis * Vector3.Dot(pole, axis);
-        if (side.LengthSquared() < 1e-8f)
-            return mid;
-        return mid + Vector3.Normalize(side) * rise;
-    }
-
-    /// <summary>The drawing arm's hand comes no closer to its shoulder than this, meters (its elbow folds no further).</summary>
-    public const float MinDrawReach = 0.22f;
-
-    /// <summary>Where the drawing (right) arm's elbow points: out to the hold point's side (the right) and down, never back.</summary>
-    public static readonly Vector3 DrawElbowPole = Vector3.Normalize(new Vector3(HoldSide, -0.6f, 0f));
+    /// <summary>The arm's elbow (it never bends: the middle of the arm) for its shoulder and hand.</summary>
+    public static Vector3 Elbow(Vector3 shoulder, Vector3 hand) => (shoulder + hand) * 0.5f;
 
     /// <summary>The arm's rest direction, shoulder to hand, for the left (-1) or right (1) arm.</summary>
     public static Vector3 ArmRestDirection(float side) => new(-side * ArmLRestDirection.X, ArmLRestDirection.Y, ArmLRestDirection.Z);
@@ -370,16 +339,15 @@ public static class ArcheryPose
     /// turn from its rest direction), and where its hand is: <see cref="ArmLength"/> from the
     /// shoulder toward the target, exactly on it when the target is that far.
     /// </summary>
-    public static (Quaternion Turn, Vector3 Hand) ReachArm(Vector3 shoulder, float side, Vector3 target, bool bend = false)
+    public static (Quaternion Turn, Vector3 Hand) ReachArm(Vector3 shoulder, float side, Vector3 target)
     {
         var rest = ArmRestDirection(side);
         var to = target - shoulder;
         if (to.LengthSquared() < 1e-8f)
             return (Quaternion.Identity, shoulder + rest * ArmLength);
-        float reach = bend ? Math.Clamp(to.Length(), MinDrawReach, ArmLength) : ArmLength;
         to = Vector3.Normalize(to);
         var turn = FromTo(rest, to);
-        return (turn, shoulder + Vector3.Transform(rest, turn) * reach);
+        return (turn, shoulder + Vector3.Transform(rest, turn) * ArmLength);
     }
 
     /// <summary>The shortest rotation taking unit vector <paramref name="from"/> to unit vector <paramref name="to"/>.</summary>
@@ -423,17 +391,17 @@ public static class ArcheryPose
     /// The full archery pose for the state and the arrow's aim (<see cref="ArrowAim"/>): the bow
     /// at the hold point (on the right) along the arrow, the left hand on its grip, the right hand
     /// on the string (or following through), the body turned right of the aim (never more than
-    /// <see cref="MaxTurn"/>), leaning and sliding its hips just enough that the straight bow arm,
-    /// turned only at the shoulder, reaches the grip exactly and the bending drawing arm reaches the
-    /// nock; where the right arm still cannot reach, the visible pull is shortened instead. The head on the neck looks along the arrow.
+    /// <see cref="MaxTurn"/>), leaning and sliding its hips just enough that both arms, turned only
+    /// at the shoulders, reach exactly; where the right arm still cannot reach, the visible pull
+    /// is shortened instead. The head on the neck looks along the arrow.
     /// </summary>
     public static Frame Solve(in ArcheryState s, float aimYaw, float aimPitch)
     {
         var f = new Frame { Grip = HoldLocal, Forward = AimLocal(aimYaw, aimPitch) };
         f.Bow = BowTurn(f.Forward);
 
-        // Levenberg-Marquardt on (yaw, roll, pitch, hips x, hips z, pull): the bow arm exactly long
-        // enough (first), the drawing arm within its reach, the neck toward the string as it is pulled, the body near its turn and upright, the hips near their
+        // Levenberg-Marquardt on (yaw, roll, pitch, hips x, hips z, pull): both arms exactly long
+        // enough (the bow hand first), the body near its turn and upright, the hips near their
         // rest, the pull as drawn. Starts from the usual answer.
         float yaw0 = aimYaw - SideOn * (0.6f + 0.4f * Math.Clamp((s.Draw > 0f ? s.Draw : s.ReleasedDraw), 0f, 1f));
         Span<float> p = stackalloc float[Unknowns] { yaw0, 0f, 0.1f, 0f, 0f, 0.5f * BowGeometry.FullDrawPull };
@@ -454,9 +422,7 @@ public static class ArcheryPose
         f.ShoulderL = Shoulder(f.Body, f.Hips, -1f);
         f.ShoulderR = Shoulder(f.Body, f.Hips, 1f);
         (f.ArmL, f.HandL) = ReachArm(f.ShoulderL, -1f, f.Grip);
-        (f.ArmR, f.HandR) = ReachArm(f.ShoulderR, 1f, right, bend: true);
-        f.ElbowL = Elbow(f.ShoulderL, f.HandL);
-        f.ElbowR = Elbow(f.ShoulderR, f.HandR, DrawElbowPole);
+        (f.ArmR, f.HandR) = ReachArm(f.ShoulderR, 1f, right);
         f.Neck = f.Hips + Vector3.Transform(NeckRest - BodyPivot, f.Body);
         // The head looks along the arrow; it rides on the leaning neck but tilts back over the feet
         // (HeadMiddle), clear of the bow and the string hand.
@@ -466,13 +432,10 @@ public static class ArcheryPose
         return f;
     }
 
-    /// <summary>At full draw the head's middle is about this far beside the nock (on the side away from the bow), meters.</summary>
-    public const float AnchorBeside = 0.2f;
-
     /// <summary>The solver keeps the body's lean (roll and pitch) within this, radians.</summary>
     public const float MaxLean = 0.6f;
 
-    private const int Unknowns = 6, Residual = 10;
+    private const int Unknowns = 6, Residual = 8;
 
     /// <summary>Levenberg-Marquardt from <paramref name="p"/> (yaw, roll, pitch, hips x, hips z, pull) on <see cref="Residuals"/>.</summary>
     private static void Fit(Span<float> p, float aimYaw, float yaw0, Vector3 grip, Vector3 forward, float pull)
@@ -574,22 +537,13 @@ public static class ArcheryPose
         var body = BodyTurn(p[0], p[1], p[2]);
         var hips = BodyPivot + new Vector3(p[3], 0f, p[4]);
         r[0] = 6f * (Vector3.Distance(Shoulder(body, hips, -1f), grip) - ArmLength); // the bow hand first
-        // The drawing arm bends: its hand reaches anywhere between MinDrawReach and ArmLength.
-        float draw = Vector3.Distance(Shoulder(body, hips, 1f), Nock(grip, forward, p[5]));
-        r[1] = 5f * (MathF.Max(0f, draw - ArmLength) + MathF.Min(0f, draw - MinDrawReach - 0.03f));
+        r[1] = 5f * (Vector3.Distance(Shoulder(body, hips, 1f), Nock(grip, forward, p[5])) - ArmLength);
         r[2] = 0.04f * (p[0] - yaw0);
         r[3] = 0.1f * p[1];
         r[4] = 0.1f * p[2];
         r[5] = 0.15f * p[3];
         r[6] = 0.15f * p[4];
         r[7] = 1f * (p[5] - pull); // shorten the pull only when the right arm cannot reach
-        // The neck leans toward the string, so the head sits beside the nock (the right cheek to the string hand).
-        var neck = hips + Vector3.Transform(NeckRest - BodyPivot, body) - Nock(grip, forward, p[5]);
-        var side = HoldSide * Vector3.Normalize(Vector3.Cross(forward, Vector3.UnitY));
-        var off = neck + side * AnchorBeside;
-        float anchor = 0.4f * Math.Clamp(p[5] / BowGeometry.FullDrawPull, 0f, 1f);
-        r[8] = anchor * (off.X - forward.X * Vector3.Dot(off, forward));
-        r[9] = anchor * (off.Z - forward.Z * Vector3.Dot(off, forward));
         float cost = 0f;
         for (int i = 0; i < Residual; i++)
             cost += r[i] * r[i];
