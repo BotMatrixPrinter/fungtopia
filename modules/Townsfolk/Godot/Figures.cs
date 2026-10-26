@@ -130,13 +130,13 @@ public static class Figures
 
     public static Part Find(Node root, string name) => new(root.FindChild(name, true, false) as Node3D);
 
-    /// <summary>Keeps a floating hand at the end of its invisible arm as the arm turns; <paramref name="reach"/> below 1 bends the elbow (the hand comes in toward the shoulder).</summary>
-    public static void FollowArm(in Part arm, in Part hand, float reach = 1f)
+    /// <summary>Keeps a floating hand at the end of its invisible arm as the arm turns.</summary>
+    public static void FollowArm(in Part arm, in Part hand)
     {
         if (arm.Node == null || hand.Node == null)
             return;
         var local = arm.Home.AffineInverse() * hand.Home.Origin;
-        hand.Node.Position = arm.Node.Transform * (local * reach);
+        hand.Node.Position = arm.Node.Transform * local;
     }
 
     public static float LerpAngle(float a, float b, float t)

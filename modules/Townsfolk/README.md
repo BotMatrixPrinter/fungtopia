@@ -9,18 +9,16 @@ cannot be talked to, are not obstacles and never push or block the player: they 
 - `Contract/` — `Fungtopia.Townsfolk.Contract`: empty; the module publishes nothing other modules need.
 - `Core/` — `Fungtopia.Townsfolk.Core`: `TownsfolkModule`, the module's one `IModule`; `CityLife`
   (where life happens, from the Map's data); `Looks` (the palettes and the seeded mix of looks);
-  `Body` (the 1.80 m rig's measures and how it walks, sits and looks); `Life.cs` (`Folk`,
-  `Critter`, `Butterfly` and their states).
+  `Life.cs` (`Folk`, `Critter`, `Butterfly` and their states).
 - `Godot/` — `Main.tscn` with `TownsfolkView`; `Figures` (loads the models, toon materials, tints);
   `Preview.tscn` (`TownsfolkPreview`, for screenshots); `Shaders/` (toon surface, ink outline).
 - `Models/` — `townsfolk.py`, the Blender script that builds and exports `folk.glb`, `cat.glb`,
   `dog.glb`, `crow.glb` and `butterfly.glb` next to it.
 - `Tests/` — `TownsfolkModuleTests.cs`: xUnit tests of `TownsfolkModule` and `CityLife` with a
-  fake `IMessageBus` (looks and heights, spots, ten minutes of life staying in Pet City off
-  obstacles and clear of the player, chats facing each other at their own heights, stepping aside,
-  night and morning, nothing run far away, pets, butterflies, the same run every time; `Body`'s
-  strides, bench sitting and looking up or down); `TownsfolkModelsTests.cs`: the `.glb` models read
-  back (the folk's rig and proportions against `Body`).
+  fake `IMessageBus` (looks, spots, ten minutes of life staying in Pet City off obstacles and
+  clear of the player, chats facing each other, stepping aside, night and morning, nothing run far
+  away, pets, butterflies, the same run every time); `TownsfolkModelsTests.cs`: the `.glb` models
+  read back.
 
 Test it with `./test.sh Townsfolk` from the repository root.
 
@@ -48,8 +46,7 @@ walkable and clear for a `FolkRadius` (0.35 m) walker):
 
 **Folk** (`Folk`, 25; `Look` from `Looks.Mix`: skin tone, `HairStyle` (Short, Bob, Buns, Spiky,
 Long) and hair color, outfit and trim colors, a dress or trousers, a mushroom-cap `HatStyle`
-(Dome, Flat, Tall, or none for about 3 in 10) and its color, and a `Height`, 1.65..1.95 m (evenly,
-so about 1.80 on average; `Scale` = `Height / 1.80`, how big folk.glb is drawn)). Each decides
+(Dome, Flat, Tall, or none for about 3 in 10) and its color, and a size 0.94..1.14). Each decides
 in turn, after standing a moment (`Waiting`): meet someone strolling within 22 m for a chat (both
 walk to either side of their midpoint, then `Chatting` 7..16 s facing each other, taking turns
 `Speaking`), sit on a free bench seat (`Sitting` 10..30 s), walk to a door and go in (`Inside`
@@ -80,17 +77,6 @@ a jittery zigzag), now and then moving on to another within `MaxFlowerHop` (14 m
 
 Each tick stores `Previous` positions and yaws so the view draws between ticks.
 
-**Body** (`Body`): the rig's measures (the same numbers as townsfolk.py: hips 0.90, knees 0.48,
-shoulders 1.40, neck 1.48, head 1.64 m, `SeatHeight` 0.52 m, the top of PetCity's bench seat) and
-the pose math the view uses. `Legs(cycle, speed)`: half of each leg's cycle planted (straight, its
-foot moving back at an even pace), half swinging forward with a bent knee, the right half a cycle
-behind, and `Drop` lowers the body so the lower foot is always on the ground; `CycleRate` turns the
-cycle so the planted foot moves back exactly as fast as the body goes forward (steps of about
-0.6 m, scaled with height). `Sit(scale)`: the hips down on the seat, a little back toward the
-backrest, the thighs forward over the seat's edge (tipped down for the short, whose shins would not
-reach) and the knees bent so the feet stand on the ground. `LookPitch`: chatting, how far to tip
-the head up or down to the other's eyes.
-
 ## View
 
 `TownsfolkView` (hidden, and doing nothing, while the Core is not `Active`) makes a figure per
@@ -99,15 +85,11 @@ run time from the file's bytes once, makes copies, draws them with the toon shad
 outline, and tints by material name (`Skin`, `Hair`, `Outfit`, `Trim`, `Trousers`, `Hat`; `Fur`,
 `FurDark`, `Feather`; `Wing`); the folk show only their `Look`'s hair and hat, and the `Trousers`
 band only with trousers. Each frame every figure is placed between its previous and current tick
-(`Engine.GetPhysicsInterpolationFraction`), drawn `Look.Scale` times folk.glb, its `Legs` tinted
-the trousers' color or skin (under a dress, whose `Skirt` shows instead of `Trousers`), and
-animated with `Body`: folk walk with real strides (thighs on the hips, shins on the knees), the
-body sinking a little as the legs spread, sway, swing their floating hands against the legs (the
-arms are empty pivots, the hands follow them), breathe, look about; chatting, they look each other
-in the eyes, up or down to the other's height, the one speaking nods and gestures (the elbows
-bending the hands up in front) while the other nods along; browsing, they tilt their heads to the
-window; sitting, the hips and knees bend to fit the bench, feet on the ground, hands in the lap,
-a skirt drawn up over the lap. Cats and dogs trot (diagonal legs together), sniff with the head down,
+(`Engine.GetPhysicsInterpolationFraction`) and animated: folk bob as they walk, sway, swing their
+floating hands and little feet (the arms and legs are empty pivots, the hands follow the arms),
+breathe, look about; chatting, the one speaking nods and gestures with both hands while the other
+nods along; browsing, they tilt their heads to the window; sitting, they sit on the seat, hands in
+the lap, feet swinging. Cats and dogs trot (diagonal legs together), sniff with the head down,
 sit, nap lying down with legs tucked and slow breathing, wag their tails; crows hop, peck, look
 about on roofs and flap in flight; butterflies (drawn 1.8 times the model's size, to be seen) flap fast and fade out at night.
 
@@ -120,9 +102,8 @@ alone shows the start screen; a game screenshot near the plaza needs the start s
 
 `./screenshot.sh modules/Townsfolk/Godot/Preview.tscn` shows the plaza from above the avenue by
 day, two minutes into the simulation, on the Map's ground with Pet City (their scenes, read-only).
-`TOWNSFOLK_PREVIEW=close` looks from among the folk on the plaza; `folk` from 4.5 m in front of
-someone on a bench, at eye height, and `folk,chat` at a chatting pair (simulated on until a chat
-starts); add `night` (for example `TOWNSFOLK_PREVIEW=night` or `close,night`) for 22:00. `SCREENSHOT_FRAMES=12` is enough.
+`TOWNSFOLK_PREVIEW=close` looks from among the folk on the plaza; add `night` (for example
+`TOWNSFOLK_PREVIEW=night` or `close,night`) for 22:00. `SCREENSHOT_FRAMES=12` is enough.
 
 ## Models
 
@@ -131,18 +112,12 @@ repository root) writes the five models; commit them with the script. All in the
 (see the NPCs README's Models) and the Pet module's, simpler, with no eyes or faces on hats or
 objects. Feet at the origin, facing -Z in Godot.
 
-- `folk.glb`: one base townsperson the view tints and dresses, a 1.80 m grown-up in Saria's
-  simple-shapes style (feet at 0, the top of the head at 1.80; `Body` in the Core has the same
-  numbers): a round `Head` (neck pivot 1.48 m; 0.27 m wide and 0.30 m tall round 1.64 m; skin, big
-  dark eyes with sparkles, blush, a smile, little ears) floating 5 cm over a smooth tapered torso
-  `Body` (hip pivot 0.90 m; 0.88..1.44 m, shoulders 0.40 m wide, waist 0.30, hips 0.34, 0.22 deep;
-  `Outfit` with a `Trim` hem at 1.0 m; children `Trousers`, a band round the hips, `Skirt`, a
-  flared skirt to 0.66 m with a `Trim` hem, and `Collar`, a ring at its top); real legs: thighs
-  `LegL`/`LegR` (hip pivots at x -/+0.10, 0.90 m) and shins `ShinL`/`ShinR` (knee pivots, 0.48 m),
-  rounded tubes 0.065 m round (`Legs`), with rounded shoes `FootL`/`FootR` (0.12 m tall, 0.24 long)
-  on the shins; round hands `HandL`/`HandR` (0.055 m round) floating 0.66 m from empty shoulder
-  pivots `ArmL`/`ArmR` (x -/+0.22, 1.40 m); no visible arms or neck. The head is drawn at the NPCs'
-  size, then shrunk, so its face, hair and hats keep their look. The Head's children: hair styles `HairShort`, `HairBob`, `HairBuns`, `HairSpiky`, `HairLong` (material
+- `folk.glb`: one base townsperson the view tints and dresses: a big round `Head` (neck pivot
+  0.72 m; skin, big dark eyes with sparkles, blush, a smile, little ears) floating a few cm over a
+  cone `Body` (hip pivot 0.3 m; `Outfit` with a `Trim` hem; children `Trousers`, a band round its
+  bottom, and `Collar`, a ring at its top), two round floating `HandL`/`HandR` at the ends of empty
+  `ArmL`/`ArmR`, little feet `FootL`/`FootR` under empty `LegL`/`LegR`; no arms, legs or neck. The
+  Head's children: hair styles `HairShort`, `HairBob`, `HairBuns`, `HairSpiky`, `HairLong` (material
   `Hair`) and mushroom-cap hats `HatDome`, `HatFlat`, `HatTall` (`Hat`, `HatSpots`, `Gills`).
 - `cat.glb`, `dog.glb`: simpler Mushroom Cat (mushroom-cap ears) and Mushroom Dog (a little
   mushroom on its back, a collar): `Body`, `Head`, `LegFL`, `LegFR`, `LegBL`, `LegBR`, `Tail`.

@@ -15,23 +15,20 @@ public readonly struct Look
     public readonly Vector3 Skin;
     public readonly HairStyle Hair;
     public readonly Vector3 HairColor;
-    /// <summary>The torso's color (the outfit; and the skirt, with a dress).</summary>
+    /// <summary>The cone body's color (the outfit).</summary>
     public readonly Vector3 Outfit;
     /// <summary>The hem and collar.</summary>
     public readonly Vector3 Trim;
-    /// <summary>Trousers (the legs and a band round the hips) rather than a dress (a skirt, bare legs).</summary>
+    /// <summary>Trousers (a band round the bottom of the cone) rather than a dress.</summary>
     public readonly bool Trousers;
     public readonly Vector3 TrousersColor;
     public readonly HatStyle Hat;
     public readonly Vector3 HatColor;
-    /// <summary>How tall (meters, to the top of the head; <see cref="Looks.MinHeight"/>..<see cref="Looks.MaxHeight"/>).</summary>
-    public readonly float Height;
-
-    /// <summary>The drawn size: folk.glb is <see cref="Body.Height"/> tall, scaled uniformly to <see cref="Height"/>.</summary>
-    public float Scale => Height / Body.Height;
+    /// <summary>Drawn size (1 = the NPCs' size).</summary>
+    public readonly float Scale;
 
     public Look(Vector3 skin, HairStyle hair, Vector3 hairColor, Vector3 outfit, Vector3 trim, bool trousers,
-        Vector3 trousersColor, HatStyle hat, Vector3 hatColor, float height)
+        Vector3 trousersColor, HatStyle hat, Vector3 hatColor, float scale)
     {
         Skin = skin;
         Hair = hair;
@@ -42,7 +39,7 @@ public readonly struct Look
         TrousersColor = trousersColor;
         Hat = hat;
         HatColor = hatColor;
-        Height = height;
+        Scale = scale;
     }
 }
 
@@ -106,12 +103,9 @@ public static class Looks
         new(1f, 0.62f, 0.3f), new(0.55f, 0.95f, 0.75f),
     };
 
-    /// <summary>The folk's heights (meters): evenly between, so about 1.80 on average.</summary>
-    public const float MinHeight = 1.65f, MaxHeight = 1.95f;
-
     private static Vector3 Pick(Random rng, Vector3[] palette) => palette[rng.Next(palette.Length)];
 
-    /// <summary>A look mixed with <paramref name="rng"/>: most wear a mushroom-cap hat, about half wear trousers; a height between <see cref="MinHeight"/> and <see cref="MaxHeight"/>.</summary>
+    /// <summary>A look mixed with <paramref name="rng"/>: most wear a mushroom-cap hat, about half wear trousers.</summary>
     public static Look Mix(Random rng)
     {
         var skin = Pick(rng, SkinTones);
@@ -123,7 +117,7 @@ public static class Looks
         var trousersColor = Pick(rng, TrousersColors);
         var hat = rng.Next(10) < 7 ? (HatStyle)(1 + rng.Next(3)) : HatStyle.None;
         var hatColor = Pick(rng, HatColors);
-        float height = MinHeight + (float)rng.NextDouble() * (MaxHeight - MinHeight);
-        return new Look(skin, hair, hairColor, outfit, trim, trousers, trousersColor, hat, hatColor, height);
+        float scale = 0.94f + (float)rng.NextDouble() * 0.2f;
+        return new Look(skin, hair, hairColor, outfit, trim, trousers, trousersColor, hat, hatColor, scale);
     }
 }

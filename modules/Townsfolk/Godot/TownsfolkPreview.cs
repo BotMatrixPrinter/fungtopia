@@ -14,8 +14,7 @@ namespace Fungtopia.Townsfolk.View;
 /// little bus (two minutes simulated first, so everyone is about their business), draws the Map's
 /// ground and Pet City (the Map and PetCity modules' scenes, read-only) and its own simple sky and
 /// sun. TOWNSFOLK_PREVIEW picks the view: "plaza" (default, the plaza by day from above the avenue),
-/// "close" (down among the folk on the plaza), "folk" (4.5 m from someone on a bench, at eye
-/// height; "folk,chat" someone chatting), "night" (the plaza at 22:00), or "close,night".
+/// "close" (down among the folk on the plaza), "night" (the plaza at 22:00), or "close,night".
 /// </summary>
 public partial class TownsfolkPreview : Node3D
 {
@@ -59,11 +58,6 @@ public partial class TownsfolkPreview : Node3D
         _player = new System.Numerics.Vector3(eye.X, Ground.HeightAt(eye.X, eye.Z), eye.Z);
         for (int i = 0; i < 120 * 60; i++)
             Tick();
-        // "folk,chat": on until a chat is a few seconds in.
-        for (int i = 0; i < 300 * 60 && mode.Contains("chat") && !Chatting(); i++)
-            Tick();
-        for (int i = 0; i < 3 * 60 && mode.Contains("chat"); i++)
-            Tick();
 
         AddEnvironment(night);
         foreach (var path in new[] { "res://modules/Map/Godot/Main.tscn", "res://modules/PetCity/Godot/Main.tscn" })
@@ -76,41 +70,10 @@ public partial class TownsfolkPreview : Node3D
         var camera = new Camera3D { Fov = 55f, Current = true, Far = 900f };
         AddChild(camera);
         float ground = Ground.HeightAt(plaza.X, plaza.Y);
-        if (mode.Contains("folk") && Watch(mode.Contains("chat"), out var from, out var at))
-            camera.LookAtFromPosition(from, at, Vector3.Up);
-        else if (close)
+        if (close)
             camera.LookAtFromPosition(new Vector3(eye.X, _player.Y + 2.6f, eye.Z), new Vector3(2f, ground + 0.6f, plaza.Y + 2f), Vector3.Up);
         else
             camera.LookAtFromPosition(new Vector3(0f, _player.Y + 11f, -172f), new Vector3(0f, ground + 1f, -222f), Vector3.Up);
-    }
-
-    /// <summary>A camera 4.5 m in front of someone sitting on a bench (or chatting, first when <paramref name="chat"/>), at eye height, looking at them.</summary>
-    private bool Watch(bool chat, out Vector3 from, out Vector3 at)
-    {
-        from = at = default;
-        var folk = _town.Folk;
-        int pick = -1;
-        for (int pass = 0; pass < 2; pass++)
-        for (int i = 0; i < folk.Length && pick < 0; i++)
-            if (folk[i].State == ((pass == 0) == chat ? FolkState.Chatting : FolkState.Sitting))
-                pick = i;
-        if (pick < 0)
-            return false;
-        var f = folk[pick];
-        var facing = CityLife.Facing(f.Yaw);
-        var side = new System.Numerics.Vector2(-facing.Y, facing.X);
-        var spot = new System.Numerics.Vector2(f.Position.X, f.Position.Z) + facing * 4.5f + side * 1.2f;
-        at = new Vector3(f.Position.X, f.Position.Y + 1f, f.Position.Z);
-        from = new Vector3(spot.X, Ground.HeightAt(spot.X, spot.Y) + 1.6f, spot.Y);
-        return true;
-    }
-
-    private bool Chatting()
-    {
-        foreach (var f in _town.Folk)
-            if (f.State == FolkState.Chatting)
-                return true;
-        return false;
     }
 
     public override void _PhysicsProcess(double delta) => Tick();
