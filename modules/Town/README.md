@@ -22,11 +22,11 @@ across), which are walked over.
   mushroom caps' gloss and rim and how bright the glowing bits and windows are; `TownMushrooms`,
   the garden mushrooms' kinds, sizes, spot seeds and groups.
 - `Godot/` — `Main.tscn` with `TownView` (draws the placements, lamps' lights), `TownModels`
-  (loads `town.glb` at run time, toon materials), `TownMusic` (loads the song at run time); `Preview.tscn` with `TownPreview` (for
+  (loads `town.glb` at run time, toon materials, ink outlines on all but `TownLook.NoOutline`), `TownMusic` (loads the song at run time); `Preview.tscn` with `TownPreview` (for
   screenshots); `Shaders/` (toon surface with `vivid`, ink outline).
 - `Audio/` — `mushroom_town.mp3`, Mushroom Town's music.
 - `Models/` — `town.py`, the Blender script that builds and exports `town.glb` next to it.
-- `Tests/` — `TownTests.cs`: xUnit tests of `TownLayout` (its props are exactly the Map's Town props), of `town.glb` having an object for every placement (and the food stall's materials: wood, spotted cap, sign, food, steam, lanterns), of the vivid mushrooms (`town.glb`'s caps saturated and bright, spots pure white, stems light cream, every cap material glossy and rim-lit, Glow and the glowing caps twice as bright), of the vibrant palette (lush and yellow-green leaves, golden wood, clean bright stone, six and more petal hues, candy paints, nothing neon, dark trims and lamp posts for contrast), of the garden mushrooms (every kind modelled at the size the game scales from; every kind in three or more sizes; domes, flat, funnel, bell, wavy and conical caps; singles, pairs and clusters of different heights; varied tilts and proportions; neighbors never alike; each group exactly what its spot's seed grows; bracket fungi and small mushrooms on every house, mushrooms in the planters), of `TownGround` (bases never float over the ground nor sink deep, at many spots over the town, roads and the rough Deep Forest), and of `TownModule` with a fake `IMessageBus` (lamps; the music level silent before the player
+- `Tests/` — `TownTests.cs`: xUnit tests of `TownLayout` (its props are exactly the Map's Town props), of `town.glb` having an object for every placement (and the food stall's materials: wood, spotted cap, sign, food, steam, lanterns), of the vivid mushrooms (`town.glb`'s caps saturated and bright, spots pure white, stems light cream, every cap material glossy and rim-lit, Glow and the glowing caps twice as bright), of the vibrant palette (lush and yellow-green leaves, golden wood, clean bright stone, six and more petal hues, candy paints, nothing neon, dark trims and lamp posts for contrast), of the garden mushrooms (every kind modelled at the size the game scales from; every kind in three or more sizes; domes, flat, funnel, bell, wavy and conical caps; singles, pairs and clusters of different heights; varied tilts and proportions; neighbors never alike; each group exactly what its spot's seed grows; bracket fungi and small mushrooms on every house, mushrooms in the planters), of the windows (every pane a thin pane at least 2 cm in front of its wall, the frame and the one-piece crossing bars each at least 2 cm in front of the pane, and no two nearly parallel faces of different parts closer than 2 cm on and round any window, its window box and Abby's display window, read from `town.glb`; panes and bars drawn without an ink outline, frames with one), of `TownGround` (bases never float over the ground nor sink deep, at many spots over the town, roads and the rough Deep Forest), and of `TownModule` with a fake `IMessageBus` (lamps; the music level silent before the player
 exists, rising to 1 over 120 ticks in town, falling to 0 over 120 ticks on the road, in the
 forests, Pet City and the house; the song being an MP3 and broken bytes being refused).
 
@@ -99,8 +99,8 @@ leaning out), size (from the kind's `MinScale`..`MaxScale`, each member clearly 
 before) and proportions (0.8..1.2 times as wide). The same every run. They stand like flower clumps
 (`FlowersSink`, 0.05 m).
 
-The houses' stems grow bracket fungi (three stacks of shelves: either side of the front and at
-the back) and, just past their stone foundations (inside their footprints), seven small mushrooms
+The houses' stems grow bracket fungi (three stacks of shelves: on either side and at the back
+left, clear of the windows and window boxes) and, just past their stone foundations (inside their footprints), seven small mushrooms
 of a mix of kinds (each house its own); the planters a
 fly agaric and an amethyst among their flowers. These are part of their solid models, so nothing
 changes where you can walk.
@@ -180,6 +180,16 @@ Cap colors (`town.py`): `Cap` cherry red (0.97, 0.1, 0.1), `CapPink` (1.0, 0.36,
   striped awning with a scalloped edge, a sign board, two chairs and three mushroom lamps on display.
 - **Fountain** — a round stone basin of water, a spotted mushroom in the middle with water
   streaming from its rim.
+- **Windows** — Tony, 2026-10-26: surfaces lying almost on top of each other z-fought and flickered
+  on a real GPU, so every window is built in clear layers (`CLEAR`, 3 cm; the tests demand 2 cm):
+  a thin pane (`Window`, 3 cm) set clear of the wall everywhere (`stem_out` allows for the stem's
+  taper and curve), the crossing bars as one flat piece (`WindowBar`, wood-colored) a step in front
+  of it, the frame (a torus flattened to 12 cm deep, in the door's color) a step in front of the
+  bars; a house's window box stands clear in front of its window's frame. Abby's shop front is one
+  piece whose big window is a pocket 0.7 m deep (its floor the `Display` shelf), the pane a step in
+  front of its back, the outfits' feet sunk into the shelf, the wooden frame one piece clear in
+  front of the facade; its flower boxes stand clear of the facade, below the frames. The panes and
+  bars have no ink outline (`TownLook.NoOutline`), so it cannot overlap the frame's own.
 - **ClothingShop** — Abby's boutique: a bright mint cap with white spots, pale pink walls and a
   shop front with a pink and white striped, scalloped awning, a lilac arched door, a big window
   with three little outfits on stands (a dress, a shirt with shorts, a sun hat and scarf), a round

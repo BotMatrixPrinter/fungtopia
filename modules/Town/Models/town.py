@@ -48,6 +48,7 @@ COLORS = {
     "DoorGreen": (0.28, 0.95, 0.4),
     "Knob": (1.0, 0.8, 0.2),
     "Window": (1.0, 0.86, 0.42),
+    "WindowBar": (0.88, 0.54, 0.24),
     "Mat": (1.0, 0.56, 0.24),
     "MatStripe": (1.0, 0.88, 0.36),
     "Awning": (1.0, 0.36, 0.54),
@@ -135,11 +136,13 @@ class Piece:
         self.bm = bmesh.new()
 
     def add(self, part, mat):
+        """Appends `part` in material `mat` (or a tuple: each face in mat[its material_index])."""
+        mats = mat if isinstance(mat, tuple) else (mat,)
         mesh = bpy.data.meshes.new("tmp")
         part.to_mesh(mesh)
         part.free()
         for poly in mesh.polygons:
-            poly.material_index = ORDER.index(mat)
+            poly.material_index = ORDER.index(mats[min(poly.material_index, len(mats) - 1)])
         self.bm.from_mesh(mesh)
         bpy.data.meshes.remove(mesh)
 
@@ -245,12 +248,71 @@ def on_wall(rx, ry, angle, z, out=0.0):
     return T(math.sin(a) * (rx + out), math.cos(a) * (ry + out), z) @ R("Z", -angle) @ R("X", -90)
 
 
-def round_window(piece, rx, ry, angle, z, radius=0.55, frame="Wood"):
-    m = on_wall(rx, ry, angle, z, out=0.02)
-    piece.add(cylinder(radius, 0.16, m, segments=24), "Window")
-    piece.add(torus(radius + 0.05, 0.1, m @ T(0, 0, 0.06), segments=24, sides=8), frame)
-    piece.add(box((0.08, radius * 2, 0.06), m @ T(0, 0, 0.09), bevel=0.02), "Wood")
-    piece.add(box((radius * 2, 0.08, 0.06), m @ T(0, 0, 0.09), bevel=0.02), "Wood")
+# Windows are built in clear layers, with no two faces nearer than CLEAR (Tony, 2026-10-26: surfaces
+# a centimeter or two apart z-fought and flickered on a real GPU): a thin pane CLEAR in front of the
+# wall, the crossing bars (one piece) CLEAR in front of the pane, the frame CLEAR in front of the bars.
+CLEAR = 0.03
+PANE = 0.03
+BARS_BACK, BARS = PANE + CLEAR, 0.04
+FRAME_BACK, FRAME = BARS_BACK + BARS + CLEAR, 0.12
+WINDOW_DEPTH = FRAME_BACK + FRAME
+
+
+def stem_out(rx, ry, wall, angle, z, radius):
+    """on_wall's `out` that sets a flat disc of `radius` (facing out at `angle`, centered at height z)
+    CLEAR in front of a house's stem everywhere: the stem tapers from rx x ry at the ground to 0.9 of
+    it at wall + 0.2, so its lower part bulges out and its sides curve away."""
+    a = math.radians(angle)
+    side = (math.cos(a), -math.sin(a))
+
+    def gap(out):
+        x0, y0 = math.sin(a) * (rx + out), math.cos(a) * (ry + out)
+        worst = math.inf
+        for k in range(48):
+            b = 2 * math.pi * k / 48
+            for share in (0.0, 0.5, 1.0):
+                h, v = radius * share * math.cos(b), radius * share * math.sin(b)
+                f = 1 - 0.1 * (z + v) / (wall + 0.2)
+                e = math.hypot((x0 + side[0] * h) / (f * rx), (y0 + side[1] * h) / (f * ry))
+                # At least this far outside the ellipse (its support is never under the shorter axis).
+                worst = min(worst, (e - 1) * f * min(rx, ry))
+        return worst
+
+    out = -0.5
+    while gap(out) < CLEAR:
+        out += 0.005
+    return out
+
+
+def plus(arm, width, depth, matrix):
+    """Two bars crossing as one flat piece (a plus, no faces inside it): arms `arm` from the middle."""
+    part = bmesh.new()
+    a, w = arm, width / 2
+    outline = [(a, -w), (a, w), (w, w), (w, a), (-w, a), (-w, w), (-a, w), (-a, -w), (-w, -w), (-w, -a), (w, -a), (w, -w)]
+    back = [part.verts.new((x, y, -depth / 2)) for x, y in outline]
+    front = [part.verts.new((x, y, depth / 2)) for x, y in outline]
+    part.faces.new(front)
+    part.faces.new(list(reversed(back)))
+    for i in range(len(outline)):
+        j = (i + 1) % len(outline)
+        part.faces.new((back[i], back[j], front[j], front[i]))
+    bmesh.ops.bevel(part, geom=list(part.edges), offset=0.012, segments=2, affect="EDGES", profile=0.5)
+    bmesh.ops.transform(part, matrix=matrix, verts=part.verts)
+    return part
+
+
+def window_layers(piece, m, radius, frame):
+    """A round window on a wall, `m` on the wall's surface facing out: pane, bars and frame in layers."""
+    piece.add(cylinder(radius, PANE, m @ T(0, 0, PANE / 2), segments=24), "Window")
+    piece.add(plus(radius, 0.08, BARS, m @ T(0, 0, BARS_BACK + BARS / 2)), "WindowBar")
+    piece.add(torus(radius + 0.05, 0.1, m @ T(0, 0, FRAME_BACK + FRAME / 2) @ S(1, 1, FRAME / 0.2), segments=24, sides=8), frame)
+
+
+def round_window(piece, rx, ry, wall, angle, z, radius=0.55, frame="Wood"):
+    """A round window on a house's stem; returns how far out (on_wall's `out`) its frame's front is."""
+    out = stem_out(rx, ry, wall, angle, z, radius)
+    window_layers(piece, on_wall(rx, ry, angle, z, out=out), radius, frame)
+    return out + WINDOW_DEPTH
 
 
 def round_door(piece, ry, radius, door_mat, z=0.0):
@@ -291,7 +353,7 @@ def mushroom_house(name, width, depth, height, cap_mat, spot_mat="Spots", wall_m
     # Shelf fungi growing on the stem and small mushrooms of many kinds on the foundation, round
     # the sides and back (each house its own mix).
     seed = sum(map(ord, name))
-    for k, angle in enumerate((70, -68, 160)):
+    for k, angle in enumerate((82, -82, 135)):
         bracket_fungi(p, rx, ry, wall, angle + seed % 9, wall * (0.2 + 0.1 * k), 0.5 - 0.06 * k)
     kinds = [kind for kind, _, _, _ in MUSHROOMS]
     picks = [(72 + seed % 9, 1.6), (96, 1.1), (-78 - seed % 7, 1.4), (-104, 0.95), (150, 1.3), (178, 1.0), (-160, 1.5)]
@@ -314,8 +376,9 @@ def welcome_mat(piece, ry):
     piece.add(sphere(0.18, T(0, ry + 1.3, 0.07), scale=(1, 1, 0.12), segments=14, rings=6), "MatStripe")
 
 
-def window_box(piece, rx, ry, angle, z, flowers=("PetalPink", "PetalYellow")):
-    m = on_wall(rx, ry, angle, 0, out=0.25)
+def window_box(piece, rx, ry, angle, z, flowers=("PetalPink", "PetalYellow"), frame_front=0.15):
+    """A flower box under a window, CLEAR in front of its frame's front (on_wall's `out`), whose bottom it overlaps."""
+    m = on_wall(rx, ry, angle, 0, out=frame_front + CLEAR + 0.1)
     piece.add(box((1.4, 0.4, 0.3), m @ T(0, -z, 0.05), bevel=0.05), "Wood")
     for k in range(4):
         piece.add(sphere(0.13, m @ T(-0.5 + k * 0.33, -z - 0.22, 0.05), segments=10, rings=5), flowers[k % len(flowers)])
@@ -619,10 +682,10 @@ def player_house():
     round_door(p, ry, 1.25, "DoorRed")
     welcome_mat(p, ry)
     for angle in (-42, 42):
-        round_window(p, rx, ry, angle, 2.3, 0.6, "DoorRed")
-        window_box(p, rx, ry, angle, 1.45)
+        front = round_window(p, rx, ry, wall, angle, 2.3, 0.6, "DoorRed")
+        window_box(p, rx, ry, angle, 1.45, frame_front=front)
     for angle in (-100, 100, 160, -160):
-        round_window(p, rx, ry, angle, 2.4, 0.55, "DoorRed")
+        round_window(p, rx, ry, wall, angle, 2.4, 0.55, "DoorRed")
     # A little chimney on the cap.
     x, y, z = cap_point(cap, 140, 0.7)
     p.add(cylinder(0.38, 1.6, T(x, y, z + 0.5), segments=16), "Stone")
@@ -640,9 +703,8 @@ def millie_house():
     # Millie's house: a pink cap with two chimneys shaped like cat ears, a round blue door.
     p, rx, ry, wall, cap = mushroom_house("MillieHouse", 10, 10, 8, "CapPink", spots=9)
     round_door(p, ry, 1.05, "DoorBlue")
-    for angle in (-45, 45, 110, -110, 180):
-        round_window(p, rx, ry, angle, 1.9, 0.5, "DoorBlue")
-    window_box(p, rx, ry, 45, 1.15, ("PetalWhite", "PetalBlue"))
+    fronts = {angle: round_window(p, rx, ry, wall, angle, 1.9, 0.5, "DoorBlue") for angle in (-45, 45, 110, -110, 180)}
+    window_box(p, rx, ry, 45, 1.15, ("PetalWhite", "PetalBlue"), frame_front=fronts[45])
     for side in (-1, 1):
         x, y, z = cap_point(cap, side * 52, 0.72)
         ear = T(x, y, z - 0.2) @ R("Y", side * 18) @ R("Z", side * 8)
@@ -664,7 +726,7 @@ def clinic():
     p, rx, ry, wall, cap = mushroom_house("Clinic", 12, 10, 8.5, "CapWhite", spot_mat="SpotsPale", spots=7)
     arched_door(p, ry, 1.7, 2.4, "DoorBlue")
     for angle in (-40, 40, 100, -100, 160, -160):
-        round_window(p, rx, ry, angle, 2.0, 0.5, "DoorBlue")
+        round_window(p, rx, ry, wall, angle, 2.0, 0.5, "DoorBlue")
     # A red cross on the cap's front and one standing on top.
     x, y, z = cap_point(cap, 0, 0.42)
     red_cross(p, T(x, y + 0.05, z) @ R("X", -65), 2.4)
@@ -781,9 +843,9 @@ def house(index):
         round_door(p, ry, 0.95, door)
     else:
         arched_door(p, ry, 1.3, 2.1, door)
-    for angle in (-48, 48, 115, -115, 180):
-        round_window(p, rx, ry, angle, 1.7, 0.45, door)
-    window_box(p, rx, ry, 48 if index % 2 else -48, 1.0, flowers)
+    fronts = {angle: round_window(p, rx, ry, wall, angle, 1.7, 0.45, door) for angle in (-48, 48, 115, -115, 180)}
+    box_at = 48 if index % 2 else -48
+    window_box(p, rx, ry, box_at, 1.0, flowers, frame_front=fronts[box_at])
     if chimney:
         x, y, z = cap_point(cap, 150 if index else -140, 0.66)
         p.add(cylinder(0.3, 1.3, T(x, y, z + 0.4), segments=14), "Stone")
@@ -822,34 +884,84 @@ def bar(piece, a, b, radius, mat, matrix=Matrix()):
     piece.add(sphere(radius, matrix @ T(b[0], 0, b[1]), segments=10, rings=5), mat)
 
 
+def holed_slab(xs, zs, y0, y1, pocket=None, bevel=0.0):
+    """A slab from y0 (back) to y1 (front, facing +Y) over x xs[0]..xs[3], z zs[0]..zs[3], with an
+    opening xs[1]..xs[2] x zs[1]..zs[2]: right through it (a frame), or `pocket` deep (a shop
+    window). One closed piece, no faces inside; the pocket's floor has material_index 1."""
+    part = bmesh.new()
+    front = [[part.verts.new((x, y1, z)) for x in xs] for z in zs]
+    back = [[part.verts.new((x, y0, z)) for x in xs] for z in zs]
+    for i in range(3):
+        for j in range(3):
+            if (i, j) != (1, 1):
+                part.faces.new((front[i][j], front[i][j + 1], front[i + 1][j + 1], front[i + 1][j]))
+            if (i, j) != (1, 1) or pocket is not None:
+                part.faces.new((back[i][j], back[i + 1][j], back[i + 1][j + 1], back[i][j + 1]))
+    rim = [(0, j) for j in range(3)] + [(i, 3) for i in range(3)] + [(3, j) for j in range(3, 0, -1)] + [(i, 0) for i in range(3, 0, -1)]
+    for k, (i, j) in enumerate(rim):
+        i2, j2 = rim[(k + 1) % len(rim)]
+        part.faces.new((front[i][j], back[i][j], back[i2][j2], front[i2][j2]))
+    hole = [(1, 1), (1, 2), (2, 2), (2, 1)]
+    if pocket is None:
+        inner = [back[i][j] for i, j in hole]
+    else:
+        inner = [part.verts.new((xs[j], y1 - pocket, zs[i])) for i, j in hole]
+        part.faces.new(inner)
+    for k, (i, j) in enumerate(hole):
+        k2 = (k + 1) % 4
+        i2, j2 = hole[k2]
+        face = part.faces.new((front[i][j], front[i2][j2], inner[k2], inner[k]))
+        if pocket is not None and i == i2 == 1:
+            face.material_index = 1
+    bmesh.ops.recalc_face_normals(part, faces=part.faces)
+    if bevel > 0:
+        # The outside edges and the opening's rim only (bevelling a pocket's inner corners would
+        # fill them in towards whatever stands inside).
+        deep = set(inner) if pocket is not None else set()
+        sharp = [e for e in part.edges if len(e.link_faces) == 2 and e.calc_face_angle(0.0) > 0.1
+                 and not any(v in deep for v in e.verts)]
+        bmesh.ops.bevel(part, geom=sharp, offset=bevel, segments=3, affect="EDGES", profile=0.5)
+    return part
+
+
 def front_flower_box(piece, x, y, z, width, flowers):
+    """A flower box on a flat front at y, CLEAR in front of it."""
+    y += CLEAR
     piece.add(box((width, 0.4, 0.3), T(x, y + 0.2, z), bevel=0.05), "Wood")
     count = max(3, int(width / 0.33))
+    step = (width - 0.4) / (count - 1)
     for k in range(count):
-        fx = x - width / 2 + 0.2 + k * (width - 0.4) / (count - 1)
-        piece.add(sphere(0.14, T(fx, y + 0.22, z + 0.2), segments=10, rings=5), flowers[k % len(flowers)])
-        piece.add(sphere(0.1, T(fx + 0.12, y + 0.3, z + 0.12), scale=(1.3, 0.7, 0.5), segments=8, rings=4), "Leaf")
+        fx = x - width / 2 + 0.2 + k * step
+        piece.add(sphere(0.14, T(fx, y + 0.18, z + 0.2), segments=10, rings=5), flowers[k % len(flowers)])
+        # Small leaves between the flowers, in front of them (clear of the box).
+        if k < count - 1:
+            piece.add(sphere(0.06, T(fx + step / 2, y + 0.32, z + 0.205), scale=(1.3, 0.7, 0.5), segments=8, rings=4), "Leaf")
 
 
 def outfit_stand(piece, matrix, kind, mat):
-    """A little outfit on a stand in the shop window: a round foot, a pole and the clothes."""
-    piece.add(cylinder(0.16, 0.05, matrix @ T(0, 0, 0.025), segments=16), "WoodDark")
-    piece.add(cylinder(0.025, 0.9, matrix @ T(0, 0, 0.45), segments=8), "Wood")
+    """A little outfit on a stand in the shop window: a round foot (sunk 0.025 into the shelf), a pole
+    and the clothes (no two faces nearer than CLEAR: the pole ends well inside the foot and the clothes)."""
+    def pole(z0, z1):
+        piece.add(cylinder(0.025, z1 - z0, matrix @ T(0, 0, (z0 + z1) / 2), segments=8), "Wood")
+
+    piece.add(cylinder(0.16, 0.08, matrix @ T(0, 0, 0.04), segments=16), "WoodDark")
     if kind == "dress":
+        pole(0.0525, 1.0)
         piece.add(cylinder(0.3, 0.6, matrix @ T(0, 0, 0.6), segments=20, radius2=0.1), mat)
         piece.add(box((0.24, 0.14, 0.24), matrix @ T(0, 0, 0.98), bevel=0.06), mat)
-        piece.add(torus(0.3, 0.03, matrix @ T(0, 0, 0.32), segments=20, sides=6), "Display")
+        piece.add(torus(0.28, 0.03, matrix @ T(0, 0, 0.36), segments=20, sides=6), "Display")
     elif kind == "shirt":
+        pole(0.0525, 0.8)
         piece.add(box((0.4, 0.18, 0.42), matrix @ T(0, 0, 0.8), bevel=0.07), mat)
         for side in (-1, 1):
             piece.add(box((0.2, 0.15, 0.13), matrix @ T(side * 0.26, 0, 0.92) @ R("Y", side * 30), bevel=0.05), mat)
-        piece.add(box((0.36, 0.17, 0.34), matrix @ T(0, 0, 0.42), bevel=0.06), "FabricBlue")
+        piece.add(box((0.36, 0.17, 0.34), matrix @ T(0, 0, 0.39), bevel=0.06), "FabricBlue")
     else:
         # A sun hat on top of the pole with a scarf hanging below it.
-        piece.add(cylinder(0.3, 0.04, matrix @ T(0, 0, 0.92), segments=24), mat)
-        piece.add(dome(0.16, 0.14, matrix @ T(0, 0, 0.93), segments=16), mat)
-        piece.add(torus(0.16, 0.025, matrix @ T(0, 0, 0.96), segments=16, sides=6), "PetalPink")
-        piece.add(box((0.12, 0.06, 0.45), matrix @ T(0.06, 0.04, 0.6) @ R("Y", 8), bevel=0.03), "PetalBlue")
+        pole(0.0525, 0.99)
+        piece.add(cylinder(0.3, 0.06, matrix @ T(0, 0, 0.92), segments=24), mat)
+        piece.add(dome(0.16, 0.14, matrix @ T(0, 0, 0.92), segments=16), mat)
+        piece.add(box((0.12, 0.06, 0.45), matrix @ T(0.15, 0.04, 0.6) @ R("Y", 8), bevel=0.03), "PetalBlue")
 
 
 def clothing_shop():
@@ -859,33 +971,28 @@ def clothing_shop():
     p, rx, ry, wall, cap = mushroom_house("ClothingShop", 10, 9, 8, "CapMint", wall_mat="WallPink", spots=9)
     capx, capy, base, cap_h = cap
     w, front, back, top = 7.0, ry + 0.5, 1.4, base - 0.1
-    p.add(box((w, front - 0.5 - back, top), T(0, (back + front - 0.5) / 2, top / 2), bevel=0.08), "WallPink")
-    # The facade, around the big window's opening (x from 0.8 to 3.1, z from 0.75 to 2.6).
+    # The shop front, one piece from the stem to the facade, with the big window's opening (x from 0.8
+    # to 3.1, z from 0.75 to 2.6) a pocket 0.7 deep; its floor is the display shelf.
     wx0, wx1, wz0, wz1 = 0.8, 3.1, 0.75, 2.6
-    fy = front - 0.25
-    p.add(box((wx0 + w / 2, 0.5, top), T((wx0 - w / 2) / 2, fy, top / 2), bevel=0.08), "WallPink")
-    p.add(box((w / 2 - wx1, 0.5, top), T((wx1 + w / 2) / 2, fy, top / 2), bevel=0.08), "WallPink")
-    p.add(box((wx1 - wx0, 0.5, wz0), T((wx0 + wx1) / 2, fy, wz0 / 2), bevel=0.06), "WallPink")
-    p.add(box((wx1 - wx0, 0.5, top - wz1), T((wx0 + wx1) / 2, fy, (wz1 + top) / 2), bevel=0.06), "WallPink")
-    # The big window: a glowing pane at the back of the opening, a wooden frame, outfits on stands.
-    p.add(box((wx1 - wx0, 0.06, wz1 - wz0), T((wx0 + wx1) / 2, front - 0.52, (wz0 + wz1) / 2), bevel=0.0), "Window")
-    for x in (wx0, wx1):
-        p.add(box((0.14, 0.16, wz1 - wz0 + 0.14), T(x, front + 0.02, (wz0 + wz1) / 2), bevel=0.03), "Wood")
-    for z in (wz0, wz1):
-        p.add(box((wx1 - wx0 + 0.14, 0.16, 0.14), T((wx0 + wx1) / 2, front + 0.02, z), bevel=0.03), "Wood")
-    p.add(box((wx1 - wx0, 0.5, 0.05), T((wx0 + wx1) / 2, front - 0.25, wz0 + 0.02), bevel=0.0), "Display")
+    shelf, depth = wz0 + 0.045, 0.7
+    p.add(holed_slab((-w / 2, wx0, wx1, w / 2), (0, shelf, wz1, top), back, front, pocket=depth, bevel=0.06),
+          ("WallPink", "Display"))
+    # The big window: a glowing pane CLEAR in front of the pocket's back, reaching under the facade
+    # all round (CLEAR clear of the pocket's sides), a wooden frame CLEAR in front of the facade, and
+    # outfits on stands, their feet sunk into the shelf.
+    pane_y = front - depth + CLEAR + PANE / 2
+    p.add(box((wx1 - wx0 - 2 * CLEAR, PANE, wz1 - shelf - 2 * CLEAR), T((wx0 + wx1) / 2, pane_y, (shelf + wz1) / 2), bevel=0.0), "Window")
+    p.add(holed_slab((wx0 - 0.07, wx0 + 0.07, wx1 - 0.07, wx1 + 0.07), (wz0 - 0.07, wz0 + 0.07, wz1 - 0.07, wz1 + 0.07),
+                     front + CLEAR, front + CLEAR + 0.12, bevel=0.03), "Wood")
     for k, (kind, mat) in enumerate((("dress", "PetalPink"), ("shirt", "FabricYellow"), ("hat", "AwningCream"))):
         x = wx0 + (k + 0.5) * (wx1 - wx0) / 3
-        outfit_stand(p, T(x, front - 0.25, wz0 + 0.045) @ S(0.95, 0.95, 0.95), kind, mat)
-    front_flower_box(p, (wx0 + wx1) / 2, front, wz0 - 0.3, wx1 - wx0 + 0.2, ("PetalPink", "PetalWhite", "PetalYellow"))
-    # The door, a small round window on the left with its own flower box, two little lanterns.
+        outfit_stand(p, T(x, front - 0.3, shelf - 0.025) @ S(0.95, 0.95, 0.95), kind, mat)
+    # Its flower box sits just below the frame (the flowers clear of it).
+    front_flower_box(p, (wx0 + wx1) / 2, front, wz0 - 0.07 - CLEAR - 0.34, wx1 - wx0 + 0.2, ("PetalPink", "PetalWhite", "PetalYellow"))
+    # The door, a small round window on the left with its own flower box below it, two little lanterns.
     arched_door(p, front, 1.5, 2.4, "DoorLilac")
-    m = T(-2.3, front + 0.02, 1.8) @ R("X", -90)
-    p.add(cylinder(0.55, 0.16, m, segments=24), "Window")
-    p.add(torus(0.6, 0.1, m @ T(0, 0, 0.06), segments=24, sides=8), "Wood")
-    p.add(box((0.08, 1.1, 0.06), m @ T(0, 0, 0.09), bevel=0.02), "Wood")
-    p.add(box((1.1, 0.08, 0.06), m @ T(0, 0, 0.09), bevel=0.02), "Wood")
-    front_flower_box(p, -2.3, front, 1.0, 1.4, ("PetalBlue", "PetalPink"))
+    window_layers(p, T(-2.3, front + CLEAR, 1.8) @ R("X", -90), 0.55, "Wood")
+    front_flower_box(p, -2.3, front, 1.8 - 0.55 - 0.15 - CLEAR - 0.34, 1.4, ("PetalBlue", "PetalPink"))
     for x in (-1.15, 1.15):
         p.add(box((0.1, 0.25, 0.1), T(x, front + 0.1, 2.35), bevel=0.02), "Metal")
         p.add(sphere(0.13, T(x, front + 0.25, 2.25), segments=12, rings=6), "Glow")

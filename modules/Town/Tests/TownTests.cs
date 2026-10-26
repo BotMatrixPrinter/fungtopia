@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Numerics;
@@ -1149,6 +1150,330 @@ public class TownTests
         Assert.False(TownModule.LooksLikeMp3(Encoding.ASCII.GetBytes("<html>not found</html>")));
         Assert.False(TownModule.LooksLikeMp3(Encoding.ASCII.GetBytes("version https://git-lfs")));
         Assert.False(TownModule.LooksLikeMp3(new byte[] { 0xFF, 0xF1, 0x50, 0x80 })); // AAC (ADTS), layer 0
+    }
+
+    // ---- Windows: no near-coincident surfaces (they z-fight on a real GPU) ----
+
+    /// <summary>The clear step (m) between any two nearly parallel faces of different parts on and round the windows.</summary>
+    private const float WindowClearance = 0.02f;
+
+    private readonly record struct Tri(Vector3 A, Vector3 B, Vector3 C, string Material, int Part)
+    {
+        public Vector3 Normal => Vector3.Cross(B - A, C - A);
+        public Vector3 Center => (A + B + C) / 3f;
+    }
+
+    /// <summary>
+    /// The triangles of object <paramref name="name"/> of Models/town.glb (glTF axes, Y up), each with
+    /// its material and its part: the connected piece of mesh it belongs to (a pane, a frame, a wall...).
+    /// </summary>
+    private static List<Tri> ModelTriangles(string name)
+    {
+        string path = Path.Combine(RepoRoot(), "modules", "Town", "Models", "town.glb");
+        byte[] glb = File.ReadAllBytes(path);
+        int jsonLength = BitConverter.ToInt32(glb, 12);
+        int bin = 20 + jsonLength + 8;
+        using var json = ModelJson();
+        var root = json.RootElement;
+        var accessors = root.GetProperty("accessors");
+        var views = root.GetProperty("bufferViews");
+        var materials = root.GetProperty("materials");
+
+        int Start(JsonElement accessor)
+        {
+            var view = views[accessor.GetProperty("bufferView").GetInt32()];
+            int offset = view.TryGetProperty("byteOffset", out var o) ? o.GetInt32() : 0;
+            return bin + offset + (accessor.TryGetProperty("byteOffset", out var a) ? a.GetInt32() : 0);
+        }
+
+        var raw = new List<(Vector3, Vector3, Vector3, string)>();
+        foreach (var node in root.GetProperty("nodes").EnumerateArray())
+        {
+            if (!node.TryGetProperty("name", out var n) || n.GetString() != name)
+                continue;
+            Assert.False(node.TryGetProperty("translation", out _) || node.TryGetProperty("rotation", out _) || node.TryGetProperty("scale", out _), name);
+            var mesh = root.GetProperty("meshes")[node.GetProperty("mesh").GetInt32()];
+            foreach (var primitive in mesh.GetProperty("primitives").EnumerateArray())
+            {
+                string material = materials[primitive.GetProperty("material").GetInt32()].GetProperty("name").GetString()!;
+                var pos = accessors[primitive.GetProperty("attributes").GetProperty("POSITION").GetInt32()];
+                int p0 = Start(pos);
+                Vector3 Vertex(int i) => new(BitConverter.ToSingle(glb, p0 + 12 * i), BitConverter.ToSingle(glb, p0 + 12 * i + 4), BitConverter.ToSingle(glb, p0 + 12 * i + 8));
+                var idx = accessors[primitive.GetProperty("indices").GetInt32()];
+                int i0 = Start(idx), count = idx.GetProperty("count").GetInt32(), type = idx.GetProperty("componentType").GetInt32();
+                int Index(int k) => type switch
+                {
+                    5121 => glb[i0 + k],
+                    5123 => BitConverter.ToUInt16(glb, i0 + 2 * k),
+                    _ => (int)BitConverter.ToUInt32(glb, i0 + 4 * k),
+                };
+                for (int k = 0; k + 2 < count; k += 3)
+                    raw.Add((Vertex(Index(k)), Vertex(Index(k + 1)), Vertex(Index(k + 2)), material));
+            }
+        }
+        Assert.NotEmpty(raw);
+
+        // Parts: triangles joined by shared corners (positions to 0.1 mm, across materials and seams).
+        var keys = new Dictionary<(int, int, int), int>();
+        var parent = new List<int>();
+        int Find(int x) { while (parent[x] != x) x = parent[x] = parent[parent[x]]; return x; }
+        int Key(Vector3 v)
+        {
+            var k = ((int)MathF.Round(v.X * 1e4f), (int)MathF.Round(v.Y * 1e4f), (int)MathF.Round(v.Z * 1e4f));
+            if (!keys.TryGetValue(k, out int id))
+            {
+                keys[k] = id = parent.Count;
+                parent.Add(id);
+            }
+            return id;
+        }
+        var corners = new List<(int, int, int)>();
+        foreach (var (a, b, c, _) in raw)
+        {
+            int ka = Key(a), kb = Key(b), kc = Key(c);
+            parent[Find(kb)] = Find(ka);
+            parent[Find(kc)] = Find(ka);
+            corners.Add((ka, kb, kc));
+        }
+        var tris = new List<Tri>(raw.Count);
+        for (int i = 0; i < raw.Count; i++)
+            tris.Add(new Tri(raw[i].Item1, raw[i].Item2, raw[i].Item3, raw[i].Item4, Find(corners[i].Item1)));
+        return tris;
+    }
+
+    private static Vector3 ClosestOnTriangle(Vector3 p, Vector3 a, Vector3 b, Vector3 c)
+    {
+        // Ericson, Real-Time Collision Detection, 5.1.5.
+        Vector3 ab = b - a, ac = c - a, ap = p - a;
+        float d1 = Vector3.Dot(ab, ap), d2 = Vector3.Dot(ac, ap);
+        if (d1 <= 0f && d2 <= 0f) return a;
+        Vector3 bp = p - b;
+        float d3 = Vector3.Dot(ab, bp), d4 = Vector3.Dot(ac, bp);
+        if (d3 >= 0f && d4 <= d3) return b;
+        float vc = d1 * d4 - d3 * d2;
+        if (vc <= 0f && d1 >= 0f && d3 <= 0f) return a + d1 / (d1 - d3) * ab;
+        Vector3 cp = p - c;
+        float d5 = Vector3.Dot(ab, cp), d6 = Vector3.Dot(ac, cp);
+        if (d6 >= 0f && d5 <= d6) return c;
+        float vb = d5 * d2 - d1 * d6;
+        if (vb <= 0f && d2 >= 0f && d6 <= 0f) return a + d2 / (d2 - d6) * ac;
+        float va = d3 * d6 - d5 * d4;
+        if (va <= 0f && d4 - d3 >= 0f && d5 - d6 >= 0f) return b + (d4 - d3) / (d4 - d3 + d5 - d6) * (c - b);
+        float denom = 1f / (va + vb + vc);
+        return a + ab * (vb * denom) + ac * (vc * denom);
+    }
+
+    private static float SegmentDistance(Vector3 p1, Vector3 q1, Vector3 p2, Vector3 q2)
+    {
+        // Ericson 5.1.9.
+        Vector3 d1 = q1 - p1, d2 = q2 - p2, r = p1 - p2;
+        float a = Vector3.Dot(d1, d1), e = Vector3.Dot(d2, d2), f = Vector3.Dot(d2, r);
+        float s, t;
+        if (a <= 1e-12f && e <= 1e-12f) return Vector3.Distance(p1, p2);
+        if (a <= 1e-12f) { s = 0f; t = Math.Clamp(f / e, 0f, 1f); }
+        else
+        {
+            float c = Vector3.Dot(d1, r);
+            if (e <= 1e-12f) { t = 0f; s = Math.Clamp(-c / a, 0f, 1f); }
+            else
+            {
+                float b = Vector3.Dot(d1, d2), denom = a * e - b * b;
+                s = denom > 1e-12f ? Math.Clamp((b * f - c * e) / denom, 0f, 1f) : 0f;
+                t = (b * s + f) / e;
+                if (t < 0f) { t = 0f; s = Math.Clamp(-c / a, 0f, 1f); }
+                else if (t > 1f) { t = 1f; s = Math.Clamp((b - c) / a, 0f, 1f); }
+            }
+        }
+        return Vector3.Distance(p1 + d1 * s, p2 + d2 * t);
+    }
+
+    /// <summary>Where segment p..q crosses triangle t, as a share of the way from p to q (-1 when it does not).</summary>
+    private static float SegmentHit(Vector3 p, Vector3 q, in Tri t)
+    {
+        Vector3 d = q - p, e1 = t.B - t.A, e2 = t.C - t.A, h = Vector3.Cross(d, e2);
+        float det = Vector3.Dot(e1, h);
+        if (MathF.Abs(det) < 1e-12f) return -1f;
+        Vector3 s = p - t.A;
+        float u = Vector3.Dot(s, h) / det;
+        if (u < 0f || u > 1f) return -1f;
+        Vector3 qv = Vector3.Cross(s, e1);
+        float v = Vector3.Dot(d, qv) / det;
+        if (v < 0f || u + v > 1f) return -1f;
+        float k = Vector3.Dot(e2, qv) / det;
+        return k >= 0f && k <= 1f ? k : -1f;
+    }
+
+    private static bool SegmentHitsTriangle(Vector3 p, Vector3 q, in Tri t) => SegmentHit(p, q, t) >= 0f;
+
+    /// <summary>The distance between two triangles (0 when they cross).</summary>
+    private static float TriangleDistance(in Tri x, in Tri y)
+    {
+        Vector3[] xs = { x.A, x.B, x.C }, ys = { y.A, y.B, y.C };
+        for (int i = 0; i < 3; i++)
+            if (SegmentHitsTriangle(xs[i], xs[(i + 1) % 3], y) || SegmentHitsTriangle(ys[i], ys[(i + 1) % 3], x))
+                return 0f;
+        float best = float.MaxValue;
+        for (int i = 0; i < 3; i++)
+        {
+            best = MathF.Min(best, Vector3.Distance(xs[i], ClosestOnTriangle(xs[i], y.A, y.B, y.C)));
+            best = MathF.Min(best, Vector3.Distance(ys[i], ClosestOnTriangle(ys[i], x.A, x.B, x.C)));
+            for (int j = 0; j < 3; j++)
+                best = MathF.Min(best, SegmentDistance(xs[i], xs[(i + 1) % 3], ys[j], ys[(j + 1) % 3]));
+        }
+        return best;
+    }
+
+    /// <summary>A window pane of a building and its local axes: outward normal, sideways and up.</summary>
+    private readonly record struct Pane(int Part, Vector3 Center, Vector3 Normal, Vector3 Side, float HalfWidth, float HalfHeight, float Back, float Front);
+
+    /// <summary>The window panes (the parts of material Window) of object <paramref name="name"/>.</summary>
+    private static List<Pane> Panes(List<Tri> tris)
+    {
+        var panes = new List<Pane>();
+        foreach (var part in tris.Where(t => t.Material == "Window").Select(t => t.Part).Distinct())
+        {
+            var own = tris.Where(t => t.Part == part).ToList();
+            Assert.All(own, t => Assert.Equal("Window", t.Material));
+            var points = own.SelectMany(t => new[] { t.A, t.B, t.C }).ToList();
+            var center = points.Aggregate(Vector3.Zero, (s, p) => s + p) / points.Count;
+            var outward = new Vector3(center.X, 0f, center.Z);
+            // The pane faces where its biggest flat face faces, away from the building's middle.
+            var normal = own.MaxBy(t => t.Normal.LengthSquared()).Normal;
+            normal = Vector3.Normalize(Vector3.Dot(normal, outward) < 0f ? -normal : normal);
+            var side = Vector3.Normalize(Vector3.Cross(Vector3.UnitY, normal));
+            float Along(Vector3 p, Vector3 axis) => Vector3.Dot(p - center, axis);
+            panes.Add(new Pane(part, center, normal, side,
+                points.Max(p => MathF.Abs(Along(p, side))), points.Max(p => MathF.Abs(p.Y - center.Y)),
+                points.Min(p => Along(p, normal)), points.Max(p => Along(p, normal))));
+        }
+        return panes;
+    }
+
+    private static readonly string[] WindowedBuildings = { "PlayerHouse", "MillieHouse", "Clinic", "House0", "House1", "House2", "House3", "ClothingShop" };
+
+    [Fact]
+    public void EveryWindowPaneIsAThinPaneClearlyInFrontOfItsWallWithFrameAndBarsAStepInFrontOfIt()
+    {
+        int round = 0;
+        foreach (string name in WindowedBuildings)
+        {
+            var tris = ModelTriangles(name);
+            var panes = Panes(tris);
+            Assert.NotEmpty(panes);
+            foreach (var pane in panes)
+            {
+                string where = $"{name} pane at {pane.Center}";
+                // A thin pane (a disc, or the shop's big display pane).
+                Assert.True(pane.Front - pane.Back <= 0.05f, $"{where} is {pane.Front - pane.Back} m thick");
+                var others = tris.Where(t => t.Part != pane.Part).ToList();
+
+                // Behind it, the wall (or the shop's back wall): nothing of it within the clearance
+                // of the pane's back, and the pane wholly outside it (the wall is not crossed in front).
+                float behind = float.MaxValue;
+                int wall = -1;
+                var from = pane.Center + pane.Normal * pane.Back;
+                foreach (var t in others)
+                {
+                    float k = SegmentHit(from, from - pane.Normal, t);
+                    if (k >= 0f && k < behind)
+                    {
+                        behind = k;
+                        wall = t.Part;
+                    }
+                }
+                Assert.True(wall >= 0, $"{where} has no wall behind it");
+                Assert.True(behind >= WindowClearance, $"{where}: its wall is {behind} m behind its back");
+                foreach (var t in tris.Where(t => t.Part == wall))
+                    Assert.False(SegmentHitsTriangle(pane.Center + pane.Normal * pane.Back, pane.Center + pane.Normal * 1f, t), $"{where} sinks into its wall");
+
+                // The frame and the crossing bars (the parts centered on the pane's axis, in front of
+                // it): each wholly a clear step in front of the pane.
+                var onAxis = others.GroupBy(t => t.Part).Where(g =>
+                {
+                    var pts = g.SelectMany(t => new[] { t.A, t.B, t.C }).ToList();
+                    var c = (pts.Aggregate(Vector3.Zero, (s, p) => s + p) / pts.Count) - pane.Center;
+                    return MathF.Abs(Vector3.Dot(c, pane.Side)) < 0.05f && MathF.Abs(c.Y) < 0.05f
+                        && Vector3.Dot(c, pane.Normal) > pane.Front && Vector3.Dot(c, pane.Normal) < 0.8f;
+                }).ToList();
+                Assert.NotEmpty(onAxis);
+                foreach (var g in onAxis)
+                {
+                    float back = g.SelectMany(t => new[] { t.A, t.B, t.C }).Min(p => Vector3.Dot(p - pane.Center, pane.Normal));
+                    Assert.True(back >= pane.Front + WindowClearance - 0.001f,
+                        $"{where}: its {g.First().Material} is only {back - pane.Front} m in front of the pane");
+                }
+                bool isRound = MathF.Abs(pane.HalfWidth - pane.HalfHeight) < 0.02f;
+                if (isRound)
+                {
+                    round++;
+                    // Round windows: the bars (WindowBar, one crossing piece) and the painted frame.
+                    Assert.Equal(2, onAxis.Count);
+                    Assert.Contains(onAxis, g => g.All(t => t.Material == "WindowBar"));
+                    Assert.Contains(onAxis, g => g.All(t => t.Material != "WindowBar" && t.Material != "Window"));
+                }
+            }
+        }
+        // Every house's round windows and Abby's round window (the big display pane is not round).
+        Assert.Equal(6 + 5 + 6 + 4 * 5 + 1, round);
+    }
+
+    [Fact]
+    public void NoTwoNearlyParallelFacesOnAndRoundTheWindowsAreCloserThanTheClearance()
+    {
+        // The parts of each window (those wholly round it: the pane, its bars and frame, the window
+        // box and its flowers below, the shop window's outfits) against each other and everything
+        // else there (the wall behind, the shop front with its shelf and back wall, fungi on the
+        // stem nearby): faces of different parts that are nearly parallel (within 25°) never come
+        // closer than the clearance (crossing faces at a steep angle do not fight).
+        float parallel = MathF.Cos(25f * MathF.PI / 180f);
+        var problems = new List<string>();
+        foreach (string name in WindowedBuildings)
+        {
+            var tris = ModelTriangles(name);
+            foreach (var pane in Panes(tris))
+            {
+                bool Inside(Vector3 p)
+                {
+                    var d = p - pane.Center;
+                    float side = Vector3.Dot(d, pane.Side), depth = Vector3.Dot(d, pane.Normal);
+                    return MathF.Abs(side) <= pane.HalfWidth + 0.35f && d.Y <= pane.HalfHeight + 0.35f
+                        && d.Y >= -pane.HalfHeight - 0.7f && depth >= -0.35f && depth <= 0.7f;
+                }
+                var near = tris.Where(t => Inside(t.A) || Inside(t.B) || Inside(t.C)).ToList();
+                var outside = tris.Where(t => !(Inside(t.A) && Inside(t.B) && Inside(t.C))).Select(t => t.Part).ToHashSet();
+                var bounds = near.Select(t => (Min: Vector3.Min(t.A, Vector3.Min(t.B, t.C)), Max: Vector3.Max(t.A, Vector3.Max(t.B, t.C)))).ToList();
+                var units = near.Select(t => Vector3.Normalize(t.Normal)).ToList();
+                for (int i = 0; i < near.Count; i++)
+                {
+                    if (near[i].Normal.LengthSquared() < 1e-14f) continue;
+                    for (int j = i + 1; j < near.Count; j++)
+                    {
+                        if (near[i].Part == near[j].Part || near[j].Normal.LengthSquared() < 1e-14f) continue;
+                        if (outside.Contains(near[i].Part) && outside.Contains(near[j].Part)) continue;
+                        if (MathF.Abs(Vector3.Dot(units[i], units[j])) < parallel) continue;
+                        var gap = Vector3.Max(bounds[i].Min - bounds[j].Max, bounds[j].Min - bounds[i].Max);
+                        if (gap.X >= WindowClearance || gap.Y >= WindowClearance || gap.Z >= WindowClearance) continue;
+                        float d = TriangleDistance(near[i], near[j]);
+                        if (d < WindowClearance)
+                            problems.Add($"{name}: {near[i].Material} and {near[j].Material} {d:0.000} m apart at {near[i].Center}");
+                    }
+                }
+            }
+        }
+        Assert.True(problems.Count == 0, $"{problems.Count} close faces, e.g.\n" + string.Join("\n", problems.Distinct().Take(20)));
+    }
+
+    [Fact]
+    public void ThePanesAndBarsHaveNoInkOutlineButTheFramesKeepTheirs()
+    {
+        // Their outline (an inverted hull) would overlap the frame's own right where they meet it.
+        Assert.False(TownLook.Outlined("Window"));
+        Assert.False(TownLook.Outlined("WindowBar"));
+        foreach (string frame in new[] { "DoorRed", "DoorBlue", "DoorGreen", "Wood" })
+            Assert.True(TownLook.Outlined(frame), frame);
+        // The bars are painted like the old wooden bars.
+        var colors = ModelColors();
+        Assert.Equal(colors["Wood"], colors["WindowBar"]);
     }
 
     [Fact]

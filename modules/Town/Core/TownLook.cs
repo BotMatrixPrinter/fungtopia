@@ -20,6 +20,16 @@ public static class TownLook
     public static readonly string[] Glows = { "Glow", "CapGlowBlue", "CapGlowGreen" };
 
     /// <summary>
+    /// The town.glb materials drawn without an ink outline: small soft details, and the windows'
+    /// panes and bars, whose outline would overlap their frame's own (the frames keep theirs).
+    /// </summary>
+    public static readonly string[] NoOutline =
+    {
+        "Spots", "SpotsPale", "MatStripe", "Water", "Soot", "Glow", "SignText", "Steam", "Scales", "MorelPit", "CupInner",
+        "Window", "WindowBar",
+    };
+
+    /// <summary>
     /// How much richer than its material every surface is drawn (the toon shader's <c>vivid</c>):
     /// saturation pushed this many times away from grey (whites and greys stay), so the filmic
     /// tonemapping does not wash the cheerful colors out. Mild, never neon.
@@ -42,6 +52,9 @@ public static class TownLook
 
     /// <summary>Whether material <paramref name="name"/> of town.glb glows at night.</summary>
     public static bool Glowing(string name) => System.Array.IndexOf(Glows, name) >= 0;
+
+    /// <summary>Whether material <paramref name="name"/> of town.glb is drawn with an ink outline.</summary>
+    public static bool Outlined(string name) => System.Array.IndexOf(NoOutline, name) < 0;
 
     /// <summary>Whether material <paramref name="name"/> of town.glb is a mushroom cap.</summary>
     public static bool IsCap(string name) => System.Array.IndexOf(Caps, name) >= 0;

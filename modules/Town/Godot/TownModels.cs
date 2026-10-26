@@ -6,15 +6,12 @@ namespace Fungtopia.Town.View;
 /// <summary>
 /// Loads town.glb at run time and draws it toon-shaded with ink outlines. The glowing surfaces
 /// (<see cref="TownLook.Glows"/>: lamp bulbs, glowing mushrooms) and Window share one material each, so the view lights them all up at night at once.
-/// Mushroom caps (<see cref="TownLook.Caps"/>) get a soft glossy band and a light rim.
+/// Mushroom caps (<see cref="TownLook.Caps"/>) get a soft glossy band and a light rim; <see cref="TownLook.NoOutline"/> no ink outline.
 /// </summary>
 public static class TownModels
 {
     public const string Town = "res://modules/Town/Models/town.glb";
     private const string Shaders = "res://modules/Town/Godot/Shaders/";
-
-    /// <summary>Surfaces drawn without an ink outline (small soft details).</summary>
-    private static readonly HashSet<string> NoOutline = new() { "Spots", "SpotsPale", "MatStripe", "Water", "Soot", "Glow", "SignText", "Steam", "Scales", "MorelPit", "CupInner" };
 
     private static Shader? s_toon;
     private static ShaderMaterial? s_outline;
@@ -123,7 +120,7 @@ public static class TownModels
         // glTF stores linear colors; the shader's albedo is an sRGB color like Blender's swatch.
         var color = source is BaseMaterial3D standard ? standard.AlbedoColor : Colors.White;
         float glow = name is "Water" or "Steam" ? 0.25f : TownLook.Glowing(name) ? TownLook.DayGlow : name is "Window" ? TownLook.WindowDayGlow : 0f;
-        var material = Toon(color.SrgbToLinear(), !NoOutline.Contains(name), glow, TownLook.IsCap(name));
+        var material = Toon(color.SrgbToLinear(), TownLook.Outlined(name), glow, TownLook.IsCap(name));
         s_materials[name] = material;
         return material;
     }
