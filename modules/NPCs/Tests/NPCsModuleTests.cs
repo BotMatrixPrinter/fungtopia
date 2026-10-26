@@ -1172,15 +1172,20 @@ public class NPCsModuleTests
         }
     }
 
-    /// <summary>Each model, how high it stands (Pip on the step stool) and the clothes that color its cone body.</summary>
-    public static readonly TheoryData<string, float, string[]> NpcModels = new()
+    /// <summary>
+    /// Each model, how high it stands (Pip on the step stool), the clothes that color its body and
+    /// whether that body is a cone (a dress) or a capsule.
+    /// </summary>
+    public static readonly TheoryData<string, float, string[], bool> NpcModels = new()
     {
-        { "jeremy", 0f, new[] { "Coat" } },
-        { "millie", 0f, new[] { "Dress" } },
-        { "lucy", 0f, new[] { "Shirt", "Skirt" } },
-        { "abby", 0f, new[] { "Dress" } },
-        { "pip", 0.45f, new[] { "Shirt", "Trousers" } },
+        { "jeremy", 0f, new[] { "Coat" }, false },
+        { "millie", 0f, new[] { "Dress" }, true },
+        { "lucy", 0f, new[] { "Shirt", "Skirt" }, false },
+        { "abby", 0f, new[] { "Dress" }, true },
+        { "pip", 0.45f, new[] { "Shirt", "Trousers" }, false },
     };
+
+    private static readonly string[] NpcFiles = { "jeremy", "millie", "lucy", "abby", "pip" };
 
     private static float Radius(Vector3 v) => MathF.Sqrt(v.X * v.X + v.Z * v.Z);
 
@@ -1193,26 +1198,33 @@ public class NPCsModuleTests
 
     [Theory]
     [MemberData(nameof(NpcModels))]
-    public void TheModelsKeepThePartsAndPivotsNpcFigureAnimates(string file, float lift, string[] cloth)
+    public void TheModelsKeepThePartsAndPivotsNpcFigureAnimates(string file, float lift, string[] cloth, bool cone)
     {
-        _ = cloth;
+        _ = cone;
         var glb = new Glb(file);
-        foreach (var part in new[] { "Body", "Head", "LegL", "LegR", "ArmL", "ArmR", "HandL", "HandR", "FootL", "FootR" })
+        foreach (var part in new[] { "Body", "Head", "LegL", "LegR", "ArmL", "ArmR", "HandL", "HandR" })
             Assert.True(glb.Has(part), part);
-        // The player characters' rig: the neck, the hip, the shoulders, the hands at the ends of 0.42 m (invisible) arms.
-        Assert.True(Vector3.Distance(new Vector3(0f, 0.72f + lift, 0f), glb.Origin("Head")) < 0.001f);
-        Assert.True(Vector3.Distance(new Vector3(0f, 0.3f + lift, 0f), glb.Origin("Body")) < 0.001f);
-        foreach (var (arm, hand, leg, foot, side) in new[] { ("ArmL", "HandL", "LegL", "FootL", -1f), ("ArmR", "HandR", "LegR", "FootR", 1f) })
+        var body = glb.Vertices("Body", cloth);
+        float bottom = body.Min(v => v.Y), top = body.Max(v => v.Y);
+        // The neck just under the floating head, the hip low in the body.
+        var head = glb.Vertices("Head", "Skin");
+        Assert.True(Vector3.Distance(new Vector3(0f, (top + Min(head).Y) / 2, 0f), glb.Origin("Head")) < 0.03f);
+        Assert.True(MathF.Abs(glb.Origin("Body").X) < 0.001f && MathF.Abs(glb.Origin("Body").Z) < 0.001f);
+        Assert.InRange(glb.Origin("Body").Y, bottom, bottom + (top - bottom) * 0.25f);
+        foreach (var (arm, hand, leg, side) in new[] { ("ArmL", "HandL", "LegL", -1f), ("ArmR", "HandR", "LegR", 1f) })
         {
-            Assert.True(Vector3.Distance(new Vector3(side * 0.23f, 0.65f + lift, 0f), glb.Origin(arm)) < 0.001f, arm);
-            var reach = glb.Origin(hand) - glb.Origin(arm);
-            Assert.Equal(0.42f, reach.Length(), 3);
-            Assert.True(reach.X * side > 0.1f && reach.Y < -0.3f, $"{hand} hangs down beside the body");
+            // The (invisible) arms from the shoulders, near the top of the body, down to the hands' centers.
+            var shoulder = glb.Origin(arm);
+            Assert.InRange(shoulder.X * side, 0.1f, 0.2f);
+            Assert.InRange(shoulder.Y, top - 0.15f, top);
+            var reach = glb.Origin(hand) - shoulder;
+            Assert.True(reach.X * side > 0.1f && reach.Y < -0.2f, $"{hand} hangs down beside the body");
+            // Each leg turns at the hip, up inside the body over its foot.
             var hip = glb.Origin(leg);
-            Assert.InRange(hip.Y - lift, 0.28f, 0.36f);
-            Assert.InRange(hip.X * side, 0.08f, 0.16f);
-            // The feet hang from the legs' pivots, so they move with them.
-            Assert.Equal(leg, glb.ParentOf(foot));
+            Assert.InRange(hip.Y, bottom + 0.05f, bottom + 0.2f);
+            Assert.InRange(hip.X * side, 0.06f, 0.11f);
+            var legs = glb.Vertices(leg);
+            Assert.InRange((Min(legs).X + Max(legs).X) / 2, hip.X - 0.01f, hip.X + 0.01f);
         }
         // Pip's spoon is held in the right hand, and Pip stands on the 0.45 m step stool.
         Assert.Equal(file == "pip", glb.Has("Spoon"));
@@ -1229,89 +1241,151 @@ public class NPCsModuleTests
 
     [Theory]
     [MemberData(nameof(NpcModels))]
-    public void TheModelsAreARoundHeadFloatingOverATriangleBody(string file, float lift, string[] cloth)
+    public void TheModelsHaveTheDrawingsProportions(string file, float lift, string[] cloth, bool cone)
     {
+        _ = cone;
         var glb = new Glb(file);
-        // The big round head, where and as big as the player characters'.
+        // The big round ball of a head, about 0.38 m across (0.42 with the little ears), its top
+        // at about 1.47 m: about a quarter of the height.
         var head = glb.Vertices("Head", "Skin");
         var min = Min(head);
         var max = Max(head);
-        Assert.Equal(1.088f + lift, (min.Y + max.Y) / 2, 2);
+        Assert.InRange(max.Y - lift, 1.44f, 1.5f);
         Assert.Equal(0f, (min.X + max.X) / 2, 2);
-        Assert.Equal(0.75f, max.Y - min.Y, 2);
-        Assert.Equal(0.77f, max.Z - min.Z, 2);
+        Assert.InRange(max.X - min.X, 0.36f, 0.43f);
+        Assert.InRange(max.Z - min.Z, 0.34f, 0.4f);
+        Assert.InRange(max.Y - min.Y, 0.33f, 0.4f);
         Assert.Contains("Eye", glb.Materials("Head"));
-        Assert.Contains("Mouth", glb.Materials("Head"));
 
         // A gap of a few cm between everything on the head (hair, ears, hat) and everything on the
         // body: no neck.
         float bodyTop = glb.VerticesUnder("Body").Max(v => v.Y);
         float headBottom = glb.VerticesUnder("Head").Min(v => v.Y);
-        Assert.InRange(headBottom - bodyTop, 0.03f, 0.15f);
+        Assert.InRange(headBottom - bodyTop, 0.02f, 0.12f);
 
-        // The clothes color a smooth cone: a triangle from the front, wide at the bottom, narrowing
-        // steadily to a rounded top, round all the way round, from just over the feet up to the top.
+        // The body about half the height, over the legs' quarter.
         var body = glb.Vertices("Body", cloth);
-        float bottom = body.Min(v => v.Y), top = body.Max(v => v.Y), h = top - bottom;
-        Assert.InRange(bottom - lift, 0.08f, 0.2f);
-        Assert.InRange(top - lift, 0.55f, 0.66f);
-        float last = float.MaxValue;
-        for (int i = 0; i < 5; i++)
+        float bottom = body.Min(v => v.Y) - lift, top = body.Max(v => v.Y) - lift;
+        Assert.InRange(top - bottom, 0.62f, 0.78f);
+        Assert.InRange(bottom, 0.3f, 0.42f);
+
+        foreach (var leg in new[] { "LegL", "LegR" })
         {
-            float widest = WidestBetween(body, bottom + h * i / 5f, bottom + h * (i + 1) / 5f);
-            Assert.True(widest < last - 0.02f, $"slice {i}: {widest} not narrower than {last}");
-            last = widest;
+            // A plain straight tube (0.06 m radius) from inside the body down to a rounded foot a
+            // little wider than it, on the ground (or the stool).
+            var shoe = glb.Vertices(leg, "Shoe");
+            var tube = glb.Vertices(leg).Except(shoe).ToList();
+            Assert.True(tube.Count > 0, $"{leg} has a tube");
+            Assert.True(Max(tube).Y - lift > bottom + 0.1f, $"{leg} reaches up into the body");
+            var mid = tube.Where(v => v.Y - lift > 0.15f && v.Y - lift < bottom - 0.02f).ToList();
+            Assert.True(mid.Count > 20, $"{leg} shows under the body");
+            float width = Max(mid).X - Min(mid).X;
+            Assert.InRange(width, 0.11f, 0.13f);
+            Assert.InRange(Max(mid).Z - Min(mid).Z, 0.11f, 0.13f);
+            var low = Min(shoe);
+            var high = Max(shoe);
+            Assert.InRange(low.Y - lift, -0.005f, 0.01f);
+            Assert.InRange(high.Y - lift, 0.08f, 0.14f);
+            Assert.InRange(high.X - low.X, width + 0.01f, width + 0.06f);
+            Assert.InRange(Min(glb.Vertices(leg)).Y - lift, -0.005f, 0.01f);
         }
-        float base_ = WidestBetween(body, bottom, bottom + h * 0.2f);
-        Assert.InRange(base_, 0.26f, 0.34f);
-        Assert.True(WidestBetween(body, bottom + h * 0.8f, top) < 0.5f * base_);
-        Assert.True(body.Count > 500, "a smooth cone");
-        var rim = body.Where(v => v.Y > bottom + h * 0.3f && v.Y < bottom + h * 0.35f).Select(Radius).ToList();
-        Assert.True(rim.Max() - rim.Min() < 0.02f, "round");
     }
 
     [Theory]
     [MemberData(nameof(NpcModels))]
-    public void TheModelsHaveFloatingRoundHandsAndLittleFeetButNoArmsOrLegs(string file, float lift, string[] cloth)
+    public void TheBodyIsATriangleForADressAndACapsuleOtherwise(string file, float lift, string[] cloth, bool cone)
     {
+        _ = lift;
+        var body = new Glb(file).Vertices("Body", cloth);
+        float bottom = body.Min(v => v.Y), top = body.Max(v => v.Y), h = top - bottom;
+        Assert.True(body.Count > 500, "a smooth body");
+        var rim = body.Where(v => v.Y > bottom + h * 0.3f && v.Y < bottom + h * 0.35f).Select(Radius).ToList();
+        Assert.True(rim.Max() - rim.Min() < 0.02f, "round");
+        if (cone)
+        {
+            // A clean tall cone: wide at the bottom (about as wide as the head), narrowing steadily
+            // to a narrow rounded top.
+            float last = float.MaxValue;
+            for (int i = 0; i < 5; i++)
+            {
+                float widest = WidestBetween(body, bottom + h * i / 5f, bottom + h * (i + 1) / 5f);
+                Assert.True(widest < last - 0.015f, $"slice {i}: {widest} not narrower than {last}");
+                last = widest;
+            }
+            float base_ = WidestBetween(body, bottom, bottom + h * 0.1f);
+            Assert.InRange(base_ * 2, 0.36f, 0.44f);
+            Assert.True(WidestBetween(body, bottom + h * 0.85f, top) < 0.5f * base_);
+        }
+        else
+        {
+            // A tall rounded capsule about 0.32 m wide: straight up its middle, rounded off at the top
+            // and the bottom.
+            var slices = Enumerable.Range(1, 6).Select(i => WidestBetween(body, bottom + h * (0.15f + i * 0.1f), bottom + h * (0.2f + i * 0.1f))).ToList();
+            Assert.InRange(slices.Min() * 2, 0.3f, 0.35f);
+            Assert.True(slices.Max() - slices.Min() < 0.025f, "straight up the middle");
+            Assert.True(WidestBetween(body, top - 0.01f, top) < slices.Min() * 0.8f, "rounded top");
+            Assert.True(WidestBetween(body, bottom, bottom + 0.01f) < slices.Max() + 0.005f, "no flare at the bottom");
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(NpcModels))]
+    public void TheModelsHaveBigFloatingOvalHandsWithFingerMarksButNoArms(string file, float lift, string[] cloth, bool cone)
+    {
+        _ = lift;
+        _ = cone;
         var glb = new Glb(file);
-        // No arm or leg meshes: the arms and legs are only pivots, and the only skin is the head and the hands.
-        foreach (var limb in new[] { "ArmL", "ArmR", "LegL", "LegR" })
-            Assert.Equal(-1, glb.Node(limb).Mesh);
+        // No arm meshes: the arms are only pivots, and the only skin is the head and the hands.
+        foreach (var arm in new[] { "ArmL", "ArmR" })
+            Assert.Equal(-1, glb.Node(arm).Mesh);
         Assert.Equal(new[] { "HandL", "HandR", "Head" },
             glb.Nodes.Where(n => glb.Materials(n.Name).Contains("Skin")).Select(n => n.Name).OrderBy(n => n, StringComparer.Ordinal));
 
         var body = glb.Vertices("Body", cloth);
         float bottom = body.Min(v => v.Y), top = body.Max(v => v.Y), h = top - bottom;
         var everything = glb.Vertices("Body");
+        float headWidth = Max(glb.Vertices("Head", "Skin")).X - Min(glb.Vertices("Head", "Skin")).X;
         foreach (var (hand, side) in new[] { ("HandL", -1f), ("HandR", 1f) })
         {
-            // Round, beside the body a little below its middle, with air between them and the body.
-            var v = glb.Vertices(hand);
+            // A big oval, about 0.18 m tall and 0.14 m wide (about half the head's width), beside the
+            // body at about its middle height, well out from it.
+            var v = glb.Vertices(hand, "Skin");
             var size = Max(v) - Min(v);
-            Assert.InRange(size.X, 0.12f, 0.2f);
-            Assert.InRange(size.Y / size.X, 0.9f, 1.1f);
-            Assert.InRange(size.Z / size.X, 0.9f, 1.1f);
-            var center = glb.Origin(hand);
+            Assert.InRange(size.Y, 0.16f, 0.2f);
+            Assert.InRange(size.X, 0.12f, 0.16f);
+            Assert.InRange(size.X / headWidth, 0.3f, 0.45f);
+            Assert.InRange(size.Y / size.X, 1.15f, 1.45f);
+            var center = (Min(v) + Max(v)) / 2;
             Assert.True(center.X * side > 0, hand);
-            Assert.InRange(center.Y, bottom + h * 0.2f, bottom + h * 0.6f);
+            Assert.InRange(center.Y, bottom + h * 0.35f, bottom + h * 0.65f);
             float inner = v.Min(p => p.X * side);
-            Assert.True(inner > WidestBetween(everything.Where(p => MathF.Abs(p.Z) < 0.1f).ToList(), center.Y - 0.1f, center.Y + 0.1f) + 0.03f,
-                $"{hand} touches the body");
+            Assert.True(inner > WidestBetween(everything.Where(p => MathF.Abs(p.Z) < 0.1f).ToList(), center.Y - 0.1f, center.Y + 0.1f) + 0.05f,
+                $"{hand} is not well out from the body");
+            // Three short finger marks down the front of its lower half.
+            var marks = glb.Vertices(hand, "Finger");
+            Assert.True(marks.All(p => p.Y < center.Y && p.Z < center.Z), $"{hand}'s finger marks are on the front of its lower half");
+            Assert.True(Max(marks).Y - Min(marks).Y < size.Y * 0.5f, "short");
+            var xs = marks.Select(p => p.X).OrderBy(x => x).ToList();
+            int lines = 1 + xs.Zip(xs.Skip(1), (a, b) => b - a > 0.008f ? 1 : 0).Sum();
+            Assert.Equal(3, lines);
         }
-        foreach (var (foot, side) in new[] { ("FootL", -1f), ("FootR", 1f) })
-        {
-            // Little rounded feet on the ground (or the stool) under the triangle.
-            var v = glb.Vertices(foot);
-            var low = Min(v);
-            var high = Max(v);
-            Assert.InRange(low.Y - lift, -0.01f, 0.02f);
-            Assert.True(high.Y <= bottom + 0.02f, $"{foot} reaches into the body");
-            Assert.InRange(high.Y - low.Y, 0.08f, 0.16f);
-            Assert.InRange(high.X - low.X, 0.12f, 0.24f);
-            Assert.True((low.X + high.X) / 2 * side > 0.05f, foot);
-            Assert.True(Math.Max(MathF.Abs(low.X), MathF.Abs(high.X)) < WidestBetween(body, bottom, bottom + 0.05f), $"{foot} sticks out sideways");
-        }
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    public void EachOneIsDrawnAbout1point4To1point5MetersTallWithThePromptOverTheTopOfTheHead(int npc)
+    {
+        var glb = new Glb(NpcFiles[npc]);
+        float lift = npc == NPCsModule.Pip ? 0.45f : 0f;
+        float scale = NPCsModule.FigureScales[npc];
+        Assert.InRange((Max(glb.Vertices("Head", "Skin")).Y - lift) * scale, 1.4f, 1.5f);
+        // HeadTops is the top of everything on the head (hair, ears, the bun, Pip's hat), where the view floats the prompt.
+        Assert.Equal(glb.VerticesUnder("Head").Max(v => v.Y), NPCsModule.HeadTops[npc], 2);
+        Assert.Equal(npc == NPCsModule.Jeremy, NPCsModule.FigureScales.Max() == scale);
     }
 
     /// <summary>Asserts that the node's mesh has each of the materials.</summary>
@@ -1334,9 +1408,10 @@ public class NPCsModuleTests
         // The coat opens in a V at the top of the front over the shirt and tie; the badge is on his left.
         var shirt = glb.Vertices("Body", "Shirt");
         Assert.True(InFront(glb, "Body", "Shirt") && InFront(glb, "Body", "Tie"));
-        Assert.True(shirt.Min(v => v.Y) > 0.3f, "the shirt shows only at the top");
+        var coat = glb.Vertices("Body", "Coat");
+        Assert.True(shirt.Min(v => v.Y) > (coat.Min(v => v.Y) + coat.Max(v => v.Y)) / 2, "the shirt shows only at the top");
         Assert.True(InFront(glb, "Body", "Badge") && glb.Vertices("Body", "Badge").All(v => v.X < 0f));
-        // The stethoscope rings the top of the cone, its chest piece in front.
+        // The stethoscope rings the top of the coat, its chest piece in front.
         var tube = glb.Vertices("Body", "Tube");
         Assert.True(tube.Any(v => v.Z > 0.05f) && tube.Any(v => v.Z < -0.05f));
         Assert.True(InFront(glb, "Body", "Metal"));
@@ -1352,10 +1427,10 @@ public class NPCsModuleTests
         Assert.True(glb.Vertices("Head", "EarInner").Max(v => v.Y) > glb.Vertices("Head", "Skin").Max(v => v.Y) + 0.05f);
         HasMaterials(glb, "Body", "Dress", "Frill", "Spots", "Bow", "Hair");
         Assert.True(InFront(glb, "Body", "Bow"));
-        // The little tail sticks out behind the cone.
+        // The little tail sticks out behind the dress.
         var tail = glb.Vertices("Body", "Hair");
         Assert.True(tail.All(v => v.Z > 0f));
-        Assert.True(tail.Max(v => v.Z) > 0.3f);
+        Assert.True(tail.Max(v => v.Z) > WidestBetween(glb.Vertices("Body", "Dress"), 0.5f, 0.8f) + 0.08f);
     }
 
     [Fact]
@@ -1364,10 +1439,10 @@ public class NPCsModuleTests
         var glb = new Glb("lucy");
         HasMaterials(glb, "Head", "Hair", "Lid", "Petal", "FlowerMiddle", "Eye");
         HasMaterials(glb, "Body", "Shirt", "Skirt", "Print", "Heart");
-        // "Pet Store" across the front of the cone, hearts around it, the skirt a band round the bottom.
+        // "Pet Store" across the front of the shirt, hearts around it, the skirt a band round the bottom.
         var print = glb.Vertices("Body", "Print");
         Assert.True(InFront(glb, "Body", "Print"));
-        Assert.True(Max(print).X - Min(print).X > 0.12f);
+        Assert.True(Max(print).X - Min(print).X > 0.1f);
         Assert.True(InFront(glb, "Body", "Heart"));
         var skirt = glb.Vertices("Body", "Skirt");
         Assert.True(skirt.Max(v => v.Y) < glb.Vertices("Body", "Shirt").Min(v => v.Y) + 0.06f);
@@ -1379,11 +1454,12 @@ public class NPCsModuleTests
         var glb = new Glb("abby");
         HasMaterials(glb, "Head", "Hair", "Band", "Eye", "EyeShine");
         // The tall top bun.
-        Assert.True(glb.Vertices("Head", "Hair").Max(v => v.Y) > glb.Vertices("Head", "Skin").Max(v => v.Y) + 0.25f);
+        Assert.True(glb.Vertices("Head", "Hair").Max(v => v.Y) > glb.Vertices("Head", "Skin").Max(v => v.Y) + 0.12f);
         // The cone is her dress (checked as a triangle above), with a white collar at the top and a white hem.
         HasMaterials(glb, "Body", "Dress", "Collar", "Hem");
         var dress = glb.Vertices("Body", "Dress");
         Assert.True(glb.Vertices("Body", "Collar").Min(v => v.Y) > dress.Max(v => v.Y) - 0.15f);
+        Assert.True(glb.Vertices("Body", "Collar").Max(v => v.Y) > dress.Max(v => v.Y) - 0.1f);
         Assert.True(glb.Vertices("Body", "Hem").Max(v => v.Y) < dress.Min(v => v.Y) + 0.1f);
     }
 
@@ -1400,6 +1476,10 @@ public class NPCsModuleTests
         var spoon = glb.Vertices("Spoon");
         Assert.True(Min(spoon).Y < glb.Origin("HandR").Y - 0.3f);
         HasMaterials(glb, "Stool", "Wood", "WoodDark");
+        // Still short of the stall's counter (its top is 1.03 m up): the step stool lifts Pip's
+        // shoulders over it to stir the pot, the feet standing on it.
+        Assert.True(glb.Origin("ArmR").Y - 0.45f < 1.03f && glb.Origin("ArmR").Y > 1.03f + 0.3f);
+        Assert.Equal(0.45f, glb.VerticesUnder("LegL").Min(v => v.Y), 2);
     }
 
     /// <summary>HSV saturation of a color.</summary>

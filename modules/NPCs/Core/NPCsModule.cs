@@ -82,6 +82,15 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
     /// <summary>How far to the left of the counter's middle (as Pip sees it) Pip stands, beside the soup pot (meters).</summary>
     public const float PipBesidePot = 0.4f;
 
+    /// <summary>How big the view draws each model (by NPC index): all about 1.4 to 1.5 m tall, Jeremy the tallest.</summary>
+    public static readonly float[] FigureScales = { 1.02f, 1.0f, 0.97f, 0.99f, 0.96f };
+
+    /// <summary>
+    /// The top of each model (hair, ears, bun or hat; meters above its origin, before <see cref="FigureScales"/>;
+    /// Pip on the step stool): the view floats the prompt over it.
+    /// </summary>
+    public static readonly float[] HeadTops = { 1.5f, 1.56f, 1.5f, 1.65f, 2.0f };
+
     /// <summary>The <see cref="SaveData.Version"/> this module writes and reads.</summary>
     public const int SaveVersion = 1;
 
