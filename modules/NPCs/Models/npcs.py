@@ -6,23 +6,26 @@
 #   blender -b --factory-startup --python modules/NPCs/Models/npcs.py -- pip
 #
 # Folk made of a few clean simple shapes, in the player characters' style (Saria's drawing, see the
-# Player README's Models), about 1.47 m tall: a big round head (0.38 m across, a quarter of the
-# height) floating a few cm over the body (no neck), the body about half the height (a tall
-# cone, a triangle from the front, for a dress; a tall rounded capsule otherwise), two straight tube
-# legs with rounded feet under it (a quarter of the height), and two big oval hands with finger
-# marks floating well out beside the body at about its middle height (no arms).
-#   Dr. Jeremy: big dark eyes with sparkles, a neat side parting, a white doctor's coat (the capsule)
+# Player README's Models; Tony, 2026-10-26: "too elongated, the torso should be somewhat shorter and
+# more rounded at the base, and the legs should be further apart but still within the base of the
+# torso"), about 1.30 m tall: a big round head (0.38 m across) floating a few cm over the body (no
+# neck), the body short (0.36 to 0.88 m) and round at the base (a triangle from the front with a
+# fully rounded, softly curved bottom for a dress; a soft egg otherwise), two straight tube legs,
+# wide apart, coming out from under its base (inside its outline seen from the front) down to
+# rounded feet, and two big oval hands with finger marks floating well out beside the body at about
+# its middle height (no arms).
+#   Dr. Jeremy: big dark eyes with sparkles, a neat side parting, a white doctor's coat (the egg)
 #               with lapels, buttons and a name badge open over a blue shirt and red tie, a
 #               stethoscope round its top.
 #   Millie:     cat ears, happy ^ ^ closed eyes, honey bunches, a pink bow, a mint spotted dress
-#               (the cone) with a frilly hem, and a little curled cat tail.
+#               (the triangle) with a frilly hem, and a little curled cat tail.
 #   Lucy:       a flower in her purple bob, half-lidded unimpressed eyes, a flat little mouth, a shirt
-#               (the capsule) saying "Pet Store" with little hearts, a skirt band round the bottom.
-#   Abby:       big dark eyes, a happy smile, hair in a tall top bun, the cone her pink triangle
+#               (the egg) saying "Pet Store" with little hearts, a skirt band round the bottom.
+#   Abby:       big dark eyes, a happy smile, hair in a tall top bun, the triangle her pink
 #               dress with a white collar and hem.
 #   Pip:        the cook at the Mushroom Munchies food stall: big dark eyes, rosy freckled cheeks,
 #               a big smile, a puffy white chef's hat shaped like a mushroom cap with red spots, a
-#               cream apron with a little muffin printed on it over the capsule, a wooden spoon in
+#               cream apron with a little muffin printed on it over the egg, a wooden spoon in
 #               the right hand; standing on a little wooden step stool (to reach over the counter).
 #
 # Meters, feet at the origin, facing Blender +Y (Godot's -Z, forward, after the glTF export).
@@ -53,36 +56,46 @@ COLORS = {
 # The rig: the neck (the head's pivot), the hip (the body's and legs' pivot), the shoulders and
 # the invisible arms' ends, the hands' centers.
 HIP_Z = 0.46
-NECK_Z = 1.08
-SHOULDER_X, SHOULDER_Z = 0.15, 0.98
-HAND_C = Vector((0.32, 0.02, 0.7))
-LEG_X, LEG_R = 0.08, 0.06
+NECK_Z = 0.9
+SHOULDER_X, SHOULDER_Z = 0.1, 0.8
+HAND_C = Vector((0.38, 0.02, 0.58))
+# The legs: their hips LEG_X out, wide apart but inside the base's outline seen from the front.
+LEG_X, LEG_R = 0.11, 0.06
 
 # The head is drawn at the design size below (a ball of radius HEAD_R round HEAD_C, its features
-# placed on it) and then scaled into place: a ball 0.38 m across with its top at about 1.47 m.
+# placed on it) and then scaled into place: a ball 0.38 m across with its top at about 1.30 m.
 HEAD_R = 0.4
 HEAD_C = Vector((0, 0, 1.088))
 HEAD_SCALE = 0.475
-HEAD_AT = Vector((0, 0, 1.29))
+HEAD_AT = Vector((0, 0, 1.11))
 HEAD_FIT = Matrix.Translation(HEAD_AT) @ Matrix.Scale(HEAD_SCALE, 4) @ Matrix.Translation(-HEAD_C)
 
-# The body, from BODY_BOTTOM to BODY_TOP: a cone (a dress: BODY_R0 round its bottom, narrowing to a
-# rounded top) or a capsule (a rounded tall box, round from above). use_body picks one.
-BODY_BOTTOM, BODY_TOP = 0.36, 1.06
+# The body, a smooth solid of revolution from BODY_BOTTOM to BODY_TOP (Tony, 2026-10-26: shorter and
+# rounder at the base, as the player characters'): its outline as (radius, z) points from the axis
+# under its bottom round to the axis over its top, smoothed through them. A "triangle" (a dress:
+# narrow and round at the top, 0.42 m wide low down, with a fully rounded, softly curved bottom) or
+# an "egg" (0.28 m wide near the top, widest, 0.38 m, low down, curving round underneath). use_body
+# picks one.
+BODY_BOTTOM, BODY_TOP = 0.36, 0.88
 BODIES = {
-    # radius at the bottom, at the top, rounding of the bottom rim and of the top
-    "cone": (0.2, 0.035, 0.04, 0.1),
-    "capsule": (0.16, 0.16, 0.07, 0.1),
+    "triangle": [(0, 0.36), (0.07, 0.362), (0.125, 0.37), (0.168, 0.386), (0.197, 0.41), (0.21, 0.44),
+                 (0.2, 0.48), (0.165, 0.57), (0.128, 0.665), (0.092, 0.76), (0.064, 0.828), (0.042, 0.862),
+                 (0.02, 0.877), (0, 0.88)],
+    "egg": [(0, 0.36), (0.07, 0.363), (0.125, 0.376), (0.163, 0.4), (0.184, 0.433), (0.19, 0.465),
+            (0.185, 0.51), (0.172, 0.575), (0.157, 0.645), (0.143, 0.72), (0.131, 0.785), (0.108, 0.835),
+            (0.072, 0.866), (0.035, 0.878), (0, 0.88)],
 }
-BODY_R0, BODY_R1, ROUND0, ROUND1 = BODIES["cone"]
-# Where a band round the bottom of the body (Lucy's skirt, Pip's trousers) ends.
-BAND_TOP = 0.55
+BODY = BODIES["triangle"]
+# Where a band round the bottom of the body (Lucy's skirt, Pip's trousers) ends; the height of a
+# dress's hem (round its widest).
+BAND_TOP = 0.5
+HEM_Z = 0.425
 
 
 def use_body(kind):
-    global BODY_R0, BODY_R1, ROUND0, ROUND1, _side
-    BODY_R0, BODY_R1, ROUND0, ROUND1 = BODIES[kind]
-    _side = body_profile()
+    global BODY, _side
+    BODY = BODIES[kind]
+    _side = outline()
 
 
 def material(name, color):
@@ -269,45 +282,48 @@ def _copy_into(source, target):
 
 # The body.
 
-def rounded(corners, radii, steps=6):
-    """The polyline through corners, each corner cut round (a quadratic curve) radii[i] along its edges."""
-    points = [corners[0]]
-    for i in range(1, len(corners) - 1):
-        c, d = Vector(corners[i]), radii[i]
-        if d <= 0:
-            points.append(corners[i])
-            continue
-        a = c + (Vector(corners[i - 1]) - c).normalized() * d
-        b = c + (Vector(corners[i + 1]) - c).normalized() * d
-        for k in range(steps + 1):
-            t = k / steps
-            p = a * (1 - t) ** 2 + c * 2 * t * (1 - t) + b * t * t
-            points.append((p.x, p.y))
-    points.append(corners[-1])
-    return points
+def outline(offset=0.0):
+    """The body's whole outline (BODY, smoothed through its points: a Catmull-Rom curve, mirrored
+    across the axis at both ends so it meets it level), offset out along its normal by offset, as
+    dense (radius, z) points from the axis under its bottom up round its side to the axis over its
+    top. z only grows along it."""
+    pts = [(-BODY[1][0], BODY[1][1])] + BODY + [(-BODY[-2][0], BODY[-2][1])]
+    curve = []
+    for i in range(1, len(pts) - 2):
+        p0, p1, p2, p3 = pts[i - 1:i + 3]
+        n = max(2, int(math.dist(p1, p2) / 0.008))
+        for k in range(n + (1 if i == len(pts) - 3 else 0)):
+            t = k / n
+            curve.append(tuple(0.5 * (2 * p1[c] + (-p0[c] + p2[c]) * t + (2 * p0[c] - 5 * p1[c] + 4 * p2[c] - p3[c]) * t * t +
+                                      (-p0[c] + 3 * p1[c] - 3 * p2[c] + p3[c]) * t ** 3) for c in (0, 1)))
+    out = []
+    for i, (r, z) in enumerate(curve):
+        a, b = curve[max(i - 1, 0)], curve[min(i + 1, len(curve) - 1)]
+        d = Vector((b[0] - a[0], b[1] - a[1])).normalized()
+        out.append((0.0 if r < 1e-6 else r + d.y * offset, z - d.x * offset))
+    return out
 
 
-def straight_radius(z):
-    """The body's radius at height z along its straight side, before the rounding."""
-    return BODY_R0 + (BODY_R1 - BODY_R0) * (z - BODY_BOTTOM) / (BODY_TOP - BODY_BOTTOM)
+def _cross(p, q, z):
+    """The point between p and q at height z."""
+    t = (z - p[1]) / (q[1] - p[1])
+    return (p[0] + (q[0] - p[0]) * t, z)
 
 
 def body_profile(offset=0.0, z0=BODY_BOTTOM, z1=BODY_TOP):
-    """The outline of the body (offset out by offset, for things over it) from z0 to z1; rounded
-    at its true bottom rim and top, flat where it is cut off."""
-    bottom, top = z0 <= BODY_BOTTOM, z1 >= BODY_TOP
-    z0, z1 = (z0 - offset if bottom else z0), (z1 + offset if top else z1)
-    corners = [(0, z0), (straight_radius(z0) + offset, z0), (straight_radius(z1) + offset, z1), (0, z1)]
-    points = rounded(corners, [0, ROUND0 if bottom else 0, ROUND1 if top else 0, 0], steps=8)
-    # Rings every few cm up the side, for smooth shading (and the toon outline).
-    dense = [points[0]]
-    for p, q in zip(points, points[1:]):
-        n = max(1, int(math.dist(p, q) / 0.03))
-        dense += [(p[0] + (q[0] - p[0]) * k / n, p[1] + (q[1] - p[1]) * k / n) for k in range(1, n + 1)]
-    return dense
+    """The outline of the body (offset out by offset, for things over it) from z0 to z1: round
+    under its bottom and over its top to the axis where it reaches them, open where it is cut off."""
+    pts = outline(offset)
+    if z0 > BODY_BOTTOM:
+        i = next(i for i in range(1, len(pts)) if pts[i][1] >= z0)
+        pts = [_cross(pts[i - 1], pts[i], z0)] + pts[i:]
+    if z1 < BODY_TOP:
+        i = next(i for i in range(1, len(pts)) if pts[i][1] > z1)
+        pts = pts[:i] + [_cross(pts[i - 1], pts[i], z1)]
+    return pts
 
 
-_side = body_profile()
+_side = outline()
 
 
 def _side_at(z):
@@ -397,7 +413,7 @@ def cone_text(part, mat, text, z, size, lift=0.006):
     geom.from_mesh(mesh)
     bpy.data.meshes.remove(mesh)
     for v in geom.verts:
-        # Text space: x right, y up, z out of the page; on the cone (seen from the front, +Y):
+        # Text space: x right, y up, z out of the page; on the body (seen from the front, +Y):
         # right is -X, up +Z, out +Y.
         v.co = front(-v.co.x, z + v.co.y, lift + v.co.z)
     part.world_mesh(mat, geom)
@@ -516,31 +532,31 @@ def jeremy(mats):
                     segments=12, rings=6)
     head.build()
 
-    use_body("capsule")
+    use_body("egg")
     body = Part("Body", (0, 0, HIP_Z))
-    # The white doctor's coat is the capsule, open at the top in a V over a blue shirt and red tie.
-    v_low, k = 0.8, 0.36
+    # The white doctor's coat is the egg, open at the top in a V over a blue shirt and red tie.
+    v_low, k = 0.69, 0.45
     body.lathe(mats["Coat"], body_profile())
     body.lathe(mats["Shirt"], body_profile(0.005, v_low, BODY_TOP),
                cuts=(((0, 0, v_low), Vector((1, 0, -k))), ((0, 0, v_low), Vector((-1, 0, -k))),
                      ((0, 0.02, 0), Vector((0, -1, 0)))))
-    patch(body, mats["Tie"], 0, 0.88, (0.017, 0.055, 0.008), lift=0.01, segments=12, rings=6)
-    patch(body, mats["Tie"], 0, 0.95, (0.02, 0.016, 0.01), lift=0.01, segments=12, rings=6)
+    patch(body, mats["Tie"], 0, 0.745, (0.017, 0.045, 0.008), lift=0.01, segments=12, rings=6)
+    patch(body, mats["Tie"], 0, 0.8, (0.02, 0.016, 0.01), lift=0.01, segments=12, rings=6)
     # Lapels along the V, buttons down the front below it, a name badge on the chest.
     for side in (-1, 1):
         x = 0.04
-        a = math.degrees(math.atan2(x, body_radius(0.88)))
-        patch(body, mats["Lapel"], -side * a, 0.88, (0.022, 0.07, 0.008), lift=0.009, roll=side * 18, segments=12, rings=6)
-    for z in (0.72, 0.6, 0.48):
+        a = math.degrees(math.atan2(x, body_radius(0.75)))
+        patch(body, mats["Lapel"], -side * a, 0.75, (0.022, 0.055, 0.008), lift=0.009, roll=side * 18, segments=12, rings=6)
+    for z in (0.63, 0.55, 0.47):
         patch(body, mats["Button"], 0, z, (0.014, 0.014, 0.006), lift=0.005, segments=12, rings=6)
-    patch(body, mats["Badge"], 36, 0.79, (0.07, 0.04, 0.01), lift=0.007, roll=-6, box=True)
-    patch(body, mats["BadgeStripe"], 36, 0.803, (0.072, 0.01, 0.012), lift=0.008, roll=-6, box=True)
+    patch(body, mats["Badge"], 36, 0.68, (0.07, 0.04, 0.01), lift=0.007, roll=-6, box=True)
+    patch(body, mats["BadgeStripe"], 36, 0.693, (0.072, 0.01, 0.012), lift=0.008, roll=-6, box=True)
     # The stethoscope: a ring round the top of the coat, two tubes down the front, a shiny chest piece.
-    band(body, mats["Tube"], 0.95, 0.01, lift=0.01)
-    piece = on_cone(-18, 0.72, 0.016)
+    band(body, mats["Tube"], 0.8, 0.01, lift=0.01)
+    piece = on_cone(-18, 0.63, 0.016)
     for a in (-42, 34):
-        body.capsule(mats["Tube"], on_cone(a, 0.95, 0.011), piece, 0.009, segments=8)
-    patch(body, mats["Metal"], -18, 0.72, (0.032, 0.032, 0.016), lift=0.018, segments=16, rings=8)
+        body.capsule(mats["Tube"], on_cone(a, 0.8, 0.011), piece, 0.009, segments=8)
+    patch(body, mats["Metal"], -18, 0.63, (0.032, 0.032, 0.016), lift=0.018, segments=16, rings=8)
     body.build()
     rig(mats, legs="Trousers")
 
@@ -567,18 +583,19 @@ def millie(mats):
                   @ Matrix.Translation((0, 0.06, 0.17)) @ Matrix.Diagonal((1.0, 0.3, 1.0, 1.0)))
     head.build()
 
-    use_body("cone")
+    use_body("triangle")
     body = Part("Body", (0, 0, HIP_Z))
-    # The mint dress is the cone, with white spots, a frilly hem and a pink bow at the top.
+    # The mint dress is the triangle, with white spots, a frilly hem round its widest, low down
+    # (its rounded bottom curving away under it), and a pink bow at the top.
     body.lathe(mats["Dress"], body_profile())
-    band(body, mats["Frill"], BODY_BOTTOM + 0.025, 0.02, lift=0.003)
-    for a, z in ((20, 0.46), (-40, 0.44), (75, 0.5), (-95, 0.46), (140, 0.48), (-150, 0.5), (180, 0.44),
-                 (5, 0.64), (-70, 0.62), (110, 0.66), (-130, 0.68), (35, 0.8), (-25, 0.84), (160, 0.78)):
-        patch(body, mats["Spots"], a, z, (0.026, 0.026, 0.008), lift=0.003, segments=16, rings=8)
-    ribbon_bow(body, mats["Bow"], on_cone(0, 0.96, 0.025), 0.05)
+    band(body, mats["Frill"], HEM_Z, 0.02, lift=0.003)
+    for a, z in ((20, 0.49), (-40, 0.48), (75, 0.5), (-95, 0.49), (140, 0.5), (-150, 0.51), (180, 0.48),
+                 (5, 0.59), (-70, 0.58), (110, 0.6), (-130, 0.61), (35, 0.69), (-25, 0.72), (160, 0.68)):
+        patch(body, mats["Spots"], a, z, (0.024, 0.024, 0.008), lift=0.003, segments=16, rings=8)
+    ribbon_bow(body, mats["Bow"], on_cone(0, 0.8, 0.025), 0.05)
     # A little cat tail, curling up from the back of the dress.
-    pts = [on_cone(180, 0.52, -0.02), on_cone(175, 0.52, 0.08), on_cone(165, 0.58, 0.14), on_cone(160, 0.67, 0.15),
-           on_cone(165, 0.72, 0.1)]
+    pts = [on_cone(180, 0.49, -0.02), on_cone(175, 0.49, 0.09), on_cone(165, 0.53, 0.16), on_cone(160, 0.6, 0.17),
+           on_cone(165, 0.64, 0.12)]
     for a, b in zip(pts, pts[1:]):
         body.capsule(mats["Hair"], a, b, 0.028, segments=10)
     body.build()
@@ -608,15 +625,15 @@ def lucy(mats):
                 segments=12, rings=6)
     head.build()
 
-    use_body("capsule")
+    use_body("egg")
     body = Part("Body", (0, 0, HIP_Z))
-    # The pale pink shirt is the capsule above a skirt band round its bottom, "Pet Store" across
+    # The pale pink shirt is the egg above a skirt band round and under its base, "Pet Store" across
     # the front with little hearts around.
     body.lathe(mats["Shirt"], body_profile(0.0, BAND_TOP - 0.03, BODY_TOP))
     body.lathe(mats["Skirt"], body_profile(0.012, BODY_BOTTOM - 0.006, BAND_TOP))
-    cone_text(body, mats["Print"], "Pet", 0.82, 0.06)
-    cone_text(body, mats["Print"], "Store", 0.75, 0.06)
-    for a, z, s in ((48, 0.66, 0.016), (-44, 0.67, 0.015), (0, 0.65, 0.013), (42, 0.89, 0.013), (-40, 0.9, 0.015)):
+    cone_text(body, mats["Print"], "Pet", 0.73, 0.055)
+    cone_text(body, mats["Print"], "Store", 0.675, 0.055)
+    for a, z, s in ((50, 0.6, 0.016), (-46, 0.61, 0.015), (0, 0.6, 0.013), (40, 0.78, 0.013), (-38, 0.79, 0.015)):
         heart(body, mats["Heart"], on_cone(a, z, 0.005), s, cone_normal(a, z))
     body.build()
     rig(mats)
@@ -635,14 +652,15 @@ def abby(mats):
     head.sphere(mats["Hair"], top + Vector((0, 0, 0.2)), (0.17, 0.16, 0.16), segments=28, rings=14)
     head.build()
 
-    use_body("cone")
+    use_body("triangle")
     body = Part("Body", (0, 0, HIP_Z))
-    # The cone is her pink triangle dress, with a white collar at the top and a white hem.
+    # The triangle is her pink dress, with a white collar at the top and a white hem round its
+    # widest, low down (its rounded bottom curving away under it).
     body.lathe(mats["Dress"], body_profile())
-    band(body, mats["Collar"], 0.97, 0.016, lift=0.003)
+    band(body, mats["Collar"], 0.815, 0.016, lift=0.003)
     for side in (-1, 1):
-        patch(body, mats["Collar"], side * 24, 0.94, (0.032, 0.022, 0.008), lift=0.008, roll=-side * 30, segments=12, rings=6)
-    band(body, mats["Hem"], BODY_BOTTOM + 0.03, 0.018, lift=0.003)
+        patch(body, mats["Collar"], side * 24, 0.79, (0.032, 0.022, 0.008), lift=0.008, roll=-side * 30, segments=12, rings=6)
+    band(body, mats["Hem"], HEM_Z, 0.018, lift=0.003)
     body.build()
     rig(mats)
 
@@ -665,7 +683,9 @@ def muffin_print(part, mats, z, size, lift=0.018):
                 segments=10, rings=5)
 
 
-STOOL_H = 0.45
+# The step stool's height: Pip's shoulders (0.8 m up) are under the stall's counter top (1.03 m),
+# so Pip stands on it, its shoulders as high over the counter as before the body was shortened.
+STOOL_H = 0.63
 
 
 def pip(mats):
@@ -706,18 +726,18 @@ def pip(mats):
                     rotation=normal.to_track_quat("Z", "Y").to_matrix().to_4x4(), segments=14, rings=6)
     head.build()
 
-    use_body("capsule")
+    use_body("egg")
     body = Part("Body", (0, 0, HIP_Z))
-    # The coral shirt is the capsule above a trousers band round its bottom; the cream apron
+    # The coral shirt is the egg above a trousers band round and under its base; the cream apron
     # covers the middle of its front from the trousers up to the chest, tied round it with a bow at the back.
     body.lathe(mats["Shirt"], body_profile(0.0, BAND_TOP - 0.03, BODY_TOP))
     body.lathe(mats["Trousers"], body_profile(0.01, BODY_BOTTOM - 0.006, BAND_TOP))
-    body.lathe(mats["Apron"], body_profile(0.014, BODY_BOTTOM + 0.03, 0.9),
-               cuts=(((0, 0.04, 0), Vector((0, -1, 0))), ((0.11, 0, 0), Vector((1, 0, 0))), ((-0.11, 0, 0), Vector((-1, 0, 0)))))
-    band(body, mats["Apron"], 0.9, 0.011, lift=0.01)
-    band(body, mats["Apron"], 0.66, 0.013, lift=0.014)
-    ribbon_bow(body, mats["Apron"], on_cone(180, 0.66, 0.03), 0.04)
-    muffin_print(body, mats, 0.75, 0.1)
+    body.lathe(mats["Apron"], body_profile(0.014, BODY_BOTTOM + 0.04, 0.765),
+               cuts=(((0, 0.04, 0), Vector((0, -1, 0))), ((0.12, 0, 0), Vector((1, 0, 0))), ((-0.12, 0, 0), Vector((-1, 0, 0)))))
+    band(body, mats["Apron"], 0.765, 0.011, lift=0.01)
+    band(body, mats["Apron"], 0.585, 0.013, lift=0.014)
+    ribbon_bow(body, mats["Apron"], on_cone(180, 0.585, 0.03), 0.04)
+    muffin_print(body, mats, 0.665, 0.1)
     body.build()
     rig(mats, legs="Trousers")
 
@@ -729,7 +749,7 @@ def pip(mats):
     spoon.build().parent = bpy.data.objects["HandR"]
     bpy.data.objects["Spoon"].location = (0, 0, 0)
 
-    # The counter top is about as high as Pip's shoulders, so Pip stands on a little step stool
+    # The counter top is well over Pip's shoulders, so Pip stands on a little step stool
     # behind it (to stir the pot on it and be seen over it): lift everything onto it.
     for obj in bpy.data.objects:
         if obj.parent is None:

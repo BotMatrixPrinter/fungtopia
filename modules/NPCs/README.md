@@ -27,15 +27,20 @@ conversation in speech bubbles (the Dialogue module shows them).
   they stand, the prompt's range at the counter, greeting then the food menu, the greetings taking
   turns, no prompt or talk while a menu holds `UiFocus`), and saving and restoring (round trip, no
   side effects, bad or unknown JSON keeps the defaults); and the five `.glb` models read back (the
-  parts and pivots `NpcFigure` animates; the drawing's proportions: the 0.38 m round head topping
-  out at about 1.47 m and floating a few cm over the body, the body about half the height, the tube
-  legs (0.06 m radius) with rounded feet a little wider than them on the ground or the stool; a cone
-  body for Millie's and Abby's dresses, a 0.32 m capsule for the others; big oval hands, about half
-  the head's width, floating well out beside the body at its middle with three finger marks, no
-  arm meshes; each one drawn 1.4 to 1.5 m tall, Jeremy the tallest, with `HeadTops`, where the
+  parts and pivots `NpcFigure` animates; the drawing's proportions: the 0.38 m round head, its center at
+  about 1.11 m and its top at about 1.30 m, floating a few cm (its skin 4 to 6 cm) over the body,
+  the body about 25% shorter than before (0.36 to about 0.88 m), the tube legs (0.06 m radius, as
+  long as before) with rounded feet a little wider than them on the ground or the stool, their
+  hips 0.11 m out and leg and foot inside the base's outline seen from the front; the body round at
+  the base: widest low down, curving softly round underneath with no sharp edge, only narrowing
+  above, a rounded top: a triangle about 0.42 m wide for Millie's and Abby's dresses, an egg (about
+  0.28 m wide near the top, 0.38 m at its widest) for the others; big oval hands, about half the
+  head's width, floating well out beside the body at its middle with three finger marks, no arm
+  meshes; each one drawn about 1.25 to 1.35 m tall, Jeremy the tallest, with `HeadTops`, where the
   prompt floats, at the top of their head; and each one's look: Jeremy's coat, badge and
   stethoscope, Millie's ears and tail, Lucy's flower and "Pet Store" print, Abby's bun and dress,
-  Pip's hat, muffin apron, spoon and the stool Pip still needs at the counter); Pip's vivid mushroom hat (cherry red spots, pure white
+  Pip's hat, muffin apron, spoon and the 0.63 m stool Pip still needs at the counter,
+  the shoulders as high as before); Pip's vivid mushroom hat (cherry red spots, pure white
 cap, light cream gills, Pip's other colors unchanged) and `MushroomLook` (only the cap gets the
 gloss and the stronger rim, and the toon shader takes them).
 
@@ -140,7 +145,7 @@ swinging, the weight shifting slowly from leg to leg (the hip moves over the sta
 stays planted) with the free leg lifting in a little step now and then, and while talking a little
 bounce on each step in place (the left and right foot in turn), nodding and a waving right hand.
 The arms are empty pivots (nothing draws them): turning an arm moves its hand along; the legs turn
-at the hip. Each is drawn at `NPCsModule.FigureScales` (1.4 to 1.5 m tall, Jeremy, a grown-up, the
+at the hip. Each is drawn at `NPCsModule.FigureScales` (about 1.25 to 1.35 m tall, Jeremy, a grown-up, the
 tallest) and the prompt floats over `NPCsModule.HeadTops` (the top of the hair, ears, bun or hat);
 Millie is the liveliest, Abby nearly as lively, Lucy barely moves. Pip stirs the soup
 pot on the counter (the right hand up over its rim, circling, the spoon tipped into it), and when
@@ -158,30 +163,36 @@ as a player walking up to `Places.FoodSpot` sees it.
 `blender -b --factory-startup --python modules/NPCs/Models/npcs.py` (from the repository root)
 writes `jeremy.glb`, `millie.glb`, `lucy.glb`, `abby.glb` and `pip.glb` (`... npcs.py -- pip` only
 that one); commit them with the script. Folk built of a few clean simple shapes in the player
-characters' new style (Saria's drawing "you choose between these", see the Player README's Models),
-about 1.47 m tall: a big plain round head, 0.38 m across with its top at about 1.47 m (a quarter of
-the height), floating a few cm over the body (no neck); the body about half the height (0.36 to
-1.06 m): a clean tall cone for a dress (0.4 m wide at the bottom, about as wide as the head, up to a
-narrow rounded top; Millie and Abby) or a tall rounded capsule 0.32 m wide otherwise (Jeremy, Lucy,
-Pip); two plain straight tube legs (0.06 m radius) from inside the body down to rounded feet a
-little wider than them (a quarter of the height); two big oval hands (0.18 m tall, 0.14 m wide)
-floating well out beside the body at its middle, each with three short dark finger marks; no arms.
+characters' new style (Saria's drawing "you choose between these", see the Player README's Models;
+Tony, 2026-10-26: "too elongated, the torso should be somewhat shorter and more rounded at the
+base, and the legs should be further apart but still within the base of the torso"), about 1.30 m
+tall: a big plain round head, 0.38 m across, its center at about 1.11 m and its top at about 1.30 m,
+floating a few cm over the body (no neck); the body short (0.36 to 0.88 m, 25% shorter than the old
+0.36 to 1.06 m) and round at the base, a smooth outline (`BODIES`, the player characters' shapes):
+for a dress a triangle from the front (narrow and round at the top, 0.42 m wide low down) with a
+fully rounded, softly curved bottom (Millie and Abby, the frilly or white hem round its widest),
+otherwise a soft egg (0.28 m wide near the top, widest, 0.38 m, low down, curving round underneath;
+Jeremy, Lucy, Pip); two plain straight tube legs (0.06 m radius), their hips 0.11 m out, from inside
+the body down to rounded feet a little wider than them, coming out from under its base inside its
+outline seen from the front; two big oval hands (0.18 m tall, 0.14 m wide) floating well out beside
+the body at its middle (0.58 m), each with three short dark finger marks; no arms.
 Each keeps the features Saria drew for them (the head is modelled at a design size and scaled onto
 the ball, `HEAD_FIT`). Dr. Jeremy: big dark eyes with sparkles, a neat side parting, his white
-doctor's coat as the capsule, open in a V at the top over a blue shirt and red tie, with lapels,
+doctor's coat as the egg, open in a V at the top over a blue shirt and red tie, with lapels,
 buttons and a name badge, a stethoscope ringing its top with the chest piece in front, dark
 trousers. Millie: cat ears with pink insides, happy ^ ^ closed eyes, honey hair in bunches, a mint
-dress with white spots and a frilly hem as the cone, a pink bow at its top, a little curled cat
+dress with white spots and a frilly hem as the triangle, a pink bow at its top, a little curled cat
 tail behind. Lucy: a pink flower in her purple bob, half-lidded unimpressed eyes and a flat little
-mouth, a pale pink shirt saying "Pet Store" with little hearts as the capsule over a blue skirt band
-round its bottom, purple tights. Abby: big dark eyes with sparkles, a happy smile, auburn hair with
-a tall top bun, the cone her pink triangle dress with a white collar and hem. Pip: big dark eyes
+mouth, a pale pink shirt saying "Pet Store" with little hearts as the egg over a blue skirt band
+round and under its base, purple tights. Abby: big dark eyes with sparkles, a happy smile, auburn hair with
+a tall top bun, the triangle her pink dress with a white collar and hem. Pip: big dark eyes
 with sparkles, rosy cheeks with freckles, a big smile, short ginger hair, a puffy chef's hat shaped
 like a mushroom cap, vivid like every mushroom in the game: crisp pure white with pure cherry red
-spots and clean light cream gills, a coral shirt capsule with a trousers band, a cream apron over
+spots and clean light cream gills, a coral shirt egg with a trousers band, a cream apron over
 its front (tied with a bow at the back) with a little muffin printed on it (pink cup, blueberries, a
 cherry), a wooden spoon in the right hand (`Spoon`, a child of `HandR`), standing on a little
-wooden step stool (`Stool`, 0.45 m: the counter top, 1.03 m, is about as high as Pip's shoulders, so
-Pip still needs it to stir the pot and be seen over it). Objects with pivots where they
-move: `Body` (hip, 0.46 m), `Head` (neck, 1.08 m), `LegL`/`LegR` (hip; the tube with its foot),
+wooden step stool (`Stool`, 0.63 m: the counter top, 1.03 m, is well over Pip's shoulders, 0.8 m, so
+Pip still needs it to stir the pot and be seen over it; it lifts the shoulders to 1.43 m, as high as
+before the body was shortened). Objects with pivots where they
+move: `Body` (hip, 0.46 m), `Head` (neck, 0.9 m), `LegL`/`LegR` (hip, 0.11 m out; the tube with its foot),
 `ArmL`/`ArmR` (shoulder; empty, invisible), `HandL`/`HandR` (hand center, at the arms' ends). Feet (Pip's stool) at the origin, facing -Z in Godot. No eyes on objects.

@@ -1262,8 +1262,8 @@ public class NPCsModuleTests
     }
 
     /// <summary>
-    /// Each model, how high it stands (Pip on the step stool), the clothes that color its body and
-    /// whether that body is a cone (a dress) or a capsule.
+    /// Each model, how high it stands (Pip on the step stool), the clothes that color its body (the
+    /// last one round its base) and whether that body is a triangle (a dress) or an egg.
     /// </summary>
     public static readonly TheoryData<string, float, string[], bool> NpcModels = new()
     {
@@ -1271,8 +1271,11 @@ public class NPCsModuleTests
         { "millie", 0f, new[] { "Dress" }, true },
         { "lucy", 0f, new[] { "Shirt", "Skirt" }, false },
         { "abby", 0f, new[] { "Dress" }, true },
-        { "pip", 0.45f, new[] { "Shirt", "Trousers" }, false },
+        { "pip", StoolHeight, new[] { "Shirt", "Trousers" }, false },
     };
+
+    /// <summary>Pip's step stool (npcs.py's STOOL_H): Pip's shoulders as high over the counter as before the body was shortened.</summary>
+    private const float StoolHeight = 0.63f;
 
     private static readonly string[] NpcFiles = { "jeremy", "millie", "lucy", "abby", "pip" };
 
@@ -1304,18 +1307,18 @@ public class NPCsModuleTests
         {
             // The (invisible) arms from the shoulders, near the top of the body, down to the hands' centers.
             var shoulder = glb.Origin(arm);
-            Assert.InRange(shoulder.X * side, 0.1f, 0.2f);
+            Assert.InRange(shoulder.X * side, 0.08f, 0.2f);
             Assert.InRange(shoulder.Y, top - 0.15f, top);
             var reach = glb.Origin(hand) - shoulder;
             Assert.True(reach.X * side > 0.1f && reach.Y < -0.2f, $"{hand} hangs down beside the body");
-            // Each leg turns at the hip, up inside the body over its foot.
+            // Each leg turns at the hip, up inside the body over its foot, wider apart than the old 0.08 m.
             var hip = glb.Origin(leg);
             Assert.InRange(hip.Y, bottom + 0.05f, bottom + 0.2f);
-            Assert.InRange(hip.X * side, 0.06f, 0.11f);
+            Assert.InRange(hip.X * side, 0.105f, 0.115f);
             var legs = glb.Vertices(leg);
             Assert.InRange((Min(legs).X + Max(legs).X) / 2, hip.X - 0.01f, hip.X + 0.01f);
         }
-        // Pip's spoon is held in the right hand, and Pip stands on the 0.45 m step stool.
+        // Pip's spoon is held in the right hand, and Pip stands on the step stool.
         Assert.Equal(file == "pip", glb.Has("Spoon"));
         Assert.Equal(file == "pip", glb.Has("Stool"));
         if (file == "pip")
@@ -1324,7 +1327,7 @@ public class NPCsModuleTests
             Assert.Contains("Wood", glb.Materials("Spoon"));
             var stool = glb.Vertices("Stool");
             Assert.Equal(0f, Min(stool).Y, 2);
-            Assert.Equal(0.45f, Max(stool).Y, 2);
+            Assert.Equal(StoolHeight, Max(stool).Y, 2);
         }
     }
 
@@ -1334,12 +1337,13 @@ public class NPCsModuleTests
     {
         _ = cone;
         var glb = new Glb(file);
-        // The big round ball of a head, about 0.38 m across (0.42 with the little ears), its top
-        // at about 1.47 m: about a quarter of the height.
+        // The big round ball of a head, about 0.38 m across (0.42 with the little ears), moved down
+        // with the shorter body: its center at about 1.11 m (was 1.28), its top at about 1.30 m.
         var head = glb.Vertices("Head", "Skin");
         var min = Min(head);
         var max = Max(head);
-        Assert.InRange(max.Y - lift, 1.44f, 1.5f);
+        Assert.InRange(max.Y - lift, 1.28f, 1.32f);
+        Assert.InRange((min.Y + max.Y) / 2 - lift, 1.09f, 1.13f);
         Assert.Equal(0f, (min.X + max.X) / 2, 2);
         Assert.InRange(max.X - min.X, 0.36f, 0.43f);
         Assert.InRange(max.Z - min.Z, 0.34f, 0.4f);
@@ -1347,25 +1351,35 @@ public class NPCsModuleTests
         Assert.Contains("Eye", glb.Materials("Head"));
 
         // A gap of a few cm between everything on the head (hair, ears, hat) and everything on the
-        // body: no neck.
+        // body: no neck. The head's skin still 4 to 6 cm over the body's top.
         float bodyTop = glb.VerticesUnder("Body").Max(v => v.Y);
         float headBottom = glb.VerticesUnder("Head").Min(v => v.Y);
         Assert.InRange(headBottom - bodyTop, 0.02f, 0.12f);
+        Assert.InRange(min.Y - glb.Vertices("Body", cloth).Max(v => v.Y), 0.035f, 0.065f);
 
-        // The body about half the height, over the legs' quarter.
+        // The body about 25% shorter than the old one (0.36 to 1.06 m): 0.36 to about 0.88 m.
         var body = glb.Vertices("Body", cloth);
         float bottom = body.Min(v => v.Y) - lift, top = body.Max(v => v.Y) - lift;
-        Assert.InRange(top - bottom, 0.62f, 0.78f);
-        Assert.InRange(bottom, 0.3f, 0.42f);
+        Assert.InRange(top - bottom, 0.5f, 0.56f);
+        Assert.InRange((top - bottom) / 0.7f, 0.71f, 0.79f);
+        Assert.InRange(bottom, 0.34f, 0.37f);
+        Assert.InRange(top, 0.87f, 0.9f);
+        // The base: the widest of the body's lowest 30%.
+        float baseR = WidestBetween(body, bottom + lift, bottom + lift + (top - bottom) * 0.3f);
 
         foreach (var leg in new[] { "LegL", "LegR" })
         {
-            // A plain straight tube (0.06 m radius) from inside the body down to a rounded foot a
-            // little wider than it, on the ground (or the stool).
+            // A plain straight tube (0.06 m radius, as long as before) from inside the body down to a
+            // rounded foot a little wider than it, on the ground (or the stool), coming out from
+            // under the base inside its outline seen from the front (the leg and its foot no
+            // further out than the base's widest).
             var shoe = glb.Vertices(leg, "Shoe");
             var tube = glb.Vertices(leg).Except(shoe).ToList();
             Assert.True(tube.Count > 0, $"{leg} has a tube");
             Assert.True(Max(tube).Y - lift > bottom + 0.1f, $"{leg} reaches up into the body");
+            Assert.InRange(Max(tube).Y - Min(tube).Y, 0.53f, 0.57f);
+            Assert.True(tube.Max(v => MathF.Abs(v.X)) < baseR, $"{leg} is not inside the base");
+            Assert.True(shoe.Max(v => MathF.Abs(v.X)) < baseR, $"{leg}'s foot is not inside the base");
             var mid = tube.Where(v => v.Y - lift > 0.15f && v.Y - lift < bottom - 0.02f).ToList();
             Assert.True(mid.Count > 20, $"{leg} shows under the body");
             float width = Max(mid).X - Min(mid).X;
@@ -1382,40 +1396,68 @@ public class NPCsModuleTests
 
     [Theory]
     [MemberData(nameof(NpcModels))]
-    public void TheBodyIsATriangleForADressAndACapsuleOtherwise(string file, float lift, string[] cloth, bool cone)
+    public void TheBodyIsShorterAndRoundAtTheBaseATriangleForADressAndAnEggOtherwise(string file, float lift, string[] cloth, bool cone)
     {
         _ = lift;
         var body = new Glb(file).Vertices("Body", cloth);
         float bottom = body.Min(v => v.Y), top = body.Max(v => v.Y), h = top - bottom;
         Assert.True(body.Count > 500, "a smooth body");
-        var rim = body.Where(v => v.Y > bottom + h * 0.3f && v.Y < bottom + h * 0.35f).Select(Radius).ToList();
-        Assert.True(rim.Max() - rim.Min() < 0.02f, "round");
+        var ring = body.Where(v => v.Y > bottom + h * 0.3f && v.Y < bottom + h * 0.35f).Select(Radius).ToList();
+        Assert.True(ring.Max() - ring.Min() < 0.02f, "round");
+        // Rounder at the base: the widest low down, then the outline curves softly round under it
+        // to the middle of the bottom (no sharp rim: it never turns more than 25 degrees between
+        // neighboring rings, on each piece of cloth), and up over a rounded top.
+        float widest = body.Max(Radius);
+        float widestY = body.First(v => Radius(v) == widest).Y;
+        Assert.InRange(widestY, bottom + 0.05f, bottom + h * 0.3f);
+        Assert.True(body.Where(v => v.Y < bottom + 0.01f).Max(Radius) < 0.65f * widest, "a round bottom");
+        Assert.True(body.Where(v => v.Y > top - 0.01f).Max(Radius) < 0.08f, "a rounded top");
+        var glb = new Glb(file);
+        foreach (var piece in cloth)
+        {
+            var outline = Outline(glb.Vertices("Body", piece));
+            for (int i = 1; i + 1 < outline.Length; i++)
+            {
+                var a = new Vector2(outline[i].R - outline[i - 1].R, outline[i].Y - outline[i - 1].Y);
+                var b = new Vector2(outline[i + 1].R - outline[i].R, outline[i + 1].Y - outline[i].Y);
+                float turn = MathF.Acos(Math.Clamp(Vector2.Dot(Vector2.Normalize(a), Vector2.Normalize(b)), -1f, 1f));
+                Assert.True(turn < 25f * MathF.PI / 180f, $"{piece}: a sharp edge at {outline[i].Y}: {turn * 180f / MathF.PI} degrees");
+            }
+            // Above the widest it only narrows, up to the top.
+            for (int i = 1; i < outline.Length; i++)
+                if (outline[i - 1].Y >= widestY)
+                    Assert.True(outline[i].R <= outline[i - 1].R + 1e-4f, $"{piece}: wider again at {outline[i].Y}");
+        }
         if (cone)
         {
-            // A clean tall cone: wide at the bottom (about as wide as the head), narrowing steadily
-            // to a narrow rounded top.
+            // A triangle from the front, about 0.42 m wide low down, narrowing steadily to a narrow
+            // rounded top.
+            Assert.InRange(2 * widest, 0.41f, 0.43f);
             float last = float.MaxValue;
-            for (int i = 0; i < 5; i++)
+            for (int i = 1; i < 5; i++)
             {
-                float widest = WidestBetween(body, bottom + h * i / 5f, bottom + h * (i + 1) / 5f);
-                Assert.True(widest < last - 0.015f, $"slice {i}: {widest} not narrower than {last}");
-                last = widest;
+                float slice = WidestBetween(body, bottom + h * i / 5f, bottom + h * (i + 1) / 5f);
+                Assert.True(slice < last - 0.02f, $"slice {i}: {slice} not narrower than {last}");
+                last = slice;
             }
-            float base_ = WidestBetween(body, bottom, bottom + h * 0.1f);
-            Assert.InRange(base_ * 2, 0.36f, 0.44f);
-            Assert.True(WidestBetween(body, bottom + h * 0.85f, top) < 0.5f * base_);
+            Assert.True(WidestBetween(body, bottom + h * 0.8f, top) < 0.45f * widest, "a narrow top");
         }
         else
         {
-            // A tall rounded capsule about 0.32 m wide: straight up its middle, rounded off at the top
-            // and the bottom.
-            var slices = Enumerable.Range(1, 6).Select(i => WidestBetween(body, bottom + h * (0.15f + i * 0.1f), bottom + h * (0.2f + i * 0.1f))).ToList();
-            Assert.InRange(slices.Min() * 2, 0.3f, 0.35f);
-            Assert.True(slices.Max() - slices.Min() < 0.025f, "straight up the middle");
-            Assert.True(WidestBetween(body, top - 0.01f, top) < slices.Min() * 0.8f, "rounded top");
-            Assert.True(WidestBetween(body, bottom, bottom + 0.01f) < slices.Max() + 0.005f, "no flare at the bottom");
+            // A soft egg: about 0.28 m wide near the top, widest (about 0.38 m; a little more over a
+            // band of cloth round its base) low down.
+            Assert.InRange(2 * widest, 0.37f, 0.41f);
+            Assert.InRange(2 * WidestBetween(body, bottom + h * 0.78f, bottom + h * 0.82f), 0.25f, 0.31f);
+            Assert.True(WidestBetween(body, bottom + h * 0.45f, bottom + h * 0.55f) < widest - 0.015f, "wider low down than in the middle");
         }
     }
+
+    /// <summary>
+    /// A body's outline seen from the front: its radius at each height (rings of the solid of
+    /// revolution), bottom to top.
+    /// </summary>
+    private static (float Y, float R)[] Outline(List<Vector3> vertices) =>
+        vertices.GroupBy(v => MathF.Round(v.Y, 4)).Select(g => (g.Key, g.Max(Radius))).OrderBy(r => r.Key).ToArray();
 
     [Theory]
     [MemberData(nameof(NpcModels))]
@@ -1466,12 +1508,12 @@ public class NPCsModuleTests
     [InlineData(2)]
     [InlineData(3)]
     [InlineData(4)]
-    public void EachOneIsDrawnAbout1point4To1point5MetersTallWithThePromptOverTheTopOfTheHead(int npc)
+    public void EachOneIsDrawnAbout1point2To1point35MetersTallWithThePromptOverTheTopOfTheHead(int npc)
     {
         var glb = new Glb(NpcFiles[npc]);
-        float lift = npc == NPCsModule.Pip ? 0.45f : 0f;
+        float lift = npc == NPCsModule.Pip ? StoolHeight : 0f;
         float scale = NPCsModule.FigureScales[npc];
-        Assert.InRange((Max(glb.Vertices("Head", "Skin")).Y - lift) * scale, 1.4f, 1.5f);
+        Assert.InRange((Max(glb.Vertices("Head", "Skin")).Y - lift) * scale, 1.22f, 1.35f);
         // HeadTops is the top of everything on the head (hair, ears, the bun, Pip's hat), where the view floats the prompt.
         Assert.Equal(glb.VerticesUnder("Head").Max(v => v.Y), NPCsModule.HeadTops[npc], 2);
         Assert.Equal(npc == NPCsModule.Jeremy, NPCsModule.FigureScales.Max() == scale);
@@ -1519,7 +1561,7 @@ public class NPCsModuleTests
         // The little tail sticks out behind the dress.
         var tail = glb.Vertices("Body", "Hair");
         Assert.True(tail.All(v => v.Z > 0f));
-        Assert.True(tail.Max(v => v.Z) > WidestBetween(glb.Vertices("Body", "Dress"), 0.5f, 0.8f) + 0.08f);
+        Assert.True(tail.Max(v => v.Z) > WidestBetween(glb.Vertices("Body", "Dress"), 0.45f, 0.75f) + 0.08f);
     }
 
     [Fact]
@@ -1565,10 +1607,12 @@ public class NPCsModuleTests
         var spoon = glb.Vertices("Spoon");
         Assert.True(Min(spoon).Y < glb.Origin("HandR").Y - 0.3f);
         HasMaterials(glb, "Stool", "Wood", "WoodDark");
-        // Still short of the stall's counter (its top is 1.03 m up): the step stool lifts Pip's
-        // shoulders over it to stir the pot, the feet standing on it.
-        Assert.True(glb.Origin("ArmR").Y - 0.45f < 1.03f && glb.Origin("ArmR").Y > 1.03f + 0.3f);
-        Assert.Equal(0.45f, glb.VerticesUnder("LegL").Min(v => v.Y), 2);
+        // Still short of the stall's counter (its top is 1.03 m up), more so with the shorter body:
+        // the step stool lifts Pip's shoulders over it to stir the pot, as high as before (1.43 m),
+        // the feet standing on it.
+        Assert.True(glb.Origin("ArmR").Y - StoolHeight < 1.03f && glb.Origin("ArmR").Y > 1.03f + 0.35f);
+        Assert.Equal(1.43f, glb.Origin("ArmR").Y, 2);
+        Assert.Equal(StoolHeight, glb.VerticesUnder("LegL").Min(v => v.Y), 2);
     }
 
     /// <summary>HSV saturation of a color.</summary>
