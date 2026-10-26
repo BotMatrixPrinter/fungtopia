@@ -21,6 +21,15 @@ public enum HomePrompt
     Shop,
     Decorate,
     Wardrobe,
+
+    /// <summary>Near the Mushroom Cat at home: Interact publishes <see cref="SetActivePet"/> for it.</summary>
+    TakeCat,
+
+    /// <summary>Near the Mushroom Dog at home.</summary>
+    TakeDog,
+
+    /// <summary>Near the Mushroom Crow at home.</summary>
+    TakeCrow,
 }
 
 /// <summary>How the latest purchase went.</summary>
@@ -136,7 +145,7 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
     /// <summary>The <see cref="UiFocus.Owner"/> of placement mode (the decorating catalog and grid).</summary>
     public const int DecorateFocusOwner = 7461002;
 
-    /// <summary>The <see cref="InteractAvailable.Owner"/> published while a prompt shows (door, shop, decorate, wardrobe), so the gamepad's A uses it instead of jumping.</summary>
+    /// <summary>The <see cref="InteractAvailable.Owner"/> published while a prompt shows (door, shop, decorate, wardrobe, a pet at home), so the gamepad's A uses it instead of jumping.</summary>
     public const int InteractOwner = 7461003;
 
     private static readonly Vector3[] PetSpawns =
@@ -405,13 +414,19 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
             bool home = message.AtHome(pet.Kind);
             if (home && !pet.Present)
             {
+                // Sent home while the player is in the house (swapped for a pet at home): it
+                // appears near the player and starts wandering; otherwise at its own spot.
+                bool nearPlayer = Inside && _player.Alive;
                 pet.Present = true;
-                pet.Position = FreePetSpot(PetSpawns[i]);
+                pet.Position = FreePetSpot(nearPlayer ? NearPlayer() : PetSpawns[i]);
                 pet.Target = pet.Position;
                 pet.Speed = 0f;
                 pet.Asleep = false;
                 pet.BedItem = -1;
-                Choose(ref pet);
+                if (nearPlayer)
+                    Wander(ref pet);
+                else
+                    Choose(ref pet);
             }
             pet.Present = home;
         }
@@ -474,7 +489,19 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
                 return HomePrompt.Decorate;
             if (Distance(p, HomeRoom.WardrobeFront) <= IndoorReach)
                 return HomePrompt.Wardrobe;
-            return HomePrompt.None;
+            // The nearest pet at home within reach can be taken along.
+            int nearest = -1;
+            float nearestDistance = IndoorReach;
+            for (int i = 0; i < _pets.Length; i++)
+            {
+                float d = Distance(p, _pets[i].Position);
+                if (_pets[i].Present && d <= nearestDistance)
+                {
+                    nearest = i;
+                    nearestDistance = d;
+                }
+            }
+            return nearest < 0 ? HomePrompt.None : TakePrompt(_pets[nearest].Kind);
         }
         if (Distance(p, Places.HomeDoor.Position) <= OutdoorReach)
             return HomePrompt.Enter;
@@ -482,6 +509,14 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
             return HomePrompt.Shop;
         return HomePrompt.None;
     }
+
+    /// <summary>The prompt that takes <paramref name="kind"/> along.</summary>
+    public static HomePrompt TakePrompt(PetKind kind) => kind switch
+    {
+        PetKind.Dog => HomePrompt.TakeDog,
+        PetKind.Crow => HomePrompt.TakeCrow,
+        _ => HomePrompt.TakeCat,
+    };
 
     private void Use(HomePrompt prompt)
     {
@@ -501,6 +536,15 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
                 break;
             case HomePrompt.Wardrobe:
                 _bus!.Publish(new OpenWardrobe());
+                break;
+            case HomePrompt.TakeCat:
+                _bus!.Publish(new SetActivePet(PetKind.Cat));
+                break;
+            case HomePrompt.TakeDog:
+                _bus!.Publish(new SetActivePet(PetKind.Dog));
+                break;
+            case HomePrompt.TakeCrow:
+                _bus!.Publish(new SetActivePet(PetKind.Crow));
                 break;
         }
     }
@@ -749,6 +793,14 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
         return preferred;
     }
 
+    /// <summary>A floor spot a little beside the player (on the room's grid of cell centers).</summary>
+    private Vector3 NearPlayer()
+    {
+        var p = _player.Position + new Vector3(0.75f, 0f, 0f);
+        int c = Math.Clamp(HomeRoom.ColumnAt(p.X), 0, HomeRoom.Columns - 1), r = Math.Clamp(HomeRoom.RowAt(p.Z), 0, HomeRoom.Rows - 1);
+        return HomeRoom.CellsCenter(c, r, 1, 1);
+    }
+
     private uint NextRandom()
     {
         // xorshift32: deterministic, allocation-free.
@@ -780,9 +832,7 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
         uint roll = NextRandom() % 10u;
         if (roll < 4)
         {
-            pet.Activity = PetActivity.Wander;
-            pet.Timer = RandomRange(3f, 6f);
-            pet.Target = WanderTarget(pet.Position);
+            Wander(ref pet);
         }
         else if (roll < 7)
         {
@@ -797,6 +847,13 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
             pet.Timer = RandomRange(4f, 7f);
             pet.Target = WanderTarget(pet.Position);
         }
+    }
+
+    private void Wander(ref HomePet pet)
+    {
+        pet.Activity = PetActivity.Wander;
+        pet.Timer = RandomRange(3f, 6f);
+        pet.Target = WanderTarget(pet.Position);
     }
 
     /// <summary>The nearest placed pet bed no other napping pet has taken, or -1.</summary>

@@ -25,6 +25,9 @@ public static class HomeText
         HomePrompt.Shop => "Shop",
         HomePrompt.Decorate => "Decorate",
         HomePrompt.Wardrobe => "Wardrobe",
+        HomePrompt.TakeCat => "Take Mushroom Cat along",
+        HomePrompt.TakeDog => "Take Mushroom Dog along",
+        HomePrompt.TakeCrow => "Take Mushroom Crow along",
         _ => "",
     };
 

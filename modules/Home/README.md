@@ -34,7 +34,7 @@ Test it with `./test.sh Home` from the repository root.
 `Fungtopia.Wallet.WalletState` and `SpendResult`, `Fungtopia.Pet.OwnedPets`,
 `Fungtopia.Wardrobe.WardrobeState`, `Fungtopia.StartScreen.StartScreenState` and `Fungtopia.Save.CollectSave` and
 `RestorePart`; it publishes `Fungtopia.Save.SavePart`, `Fungtopia.Player.TeleportPlayer`,
-`Fungtopia.Wallet.SpendCoins`, `Fungtopia.Wardrobe.OpenWardrobe`, `Fungtopia.Input.UiFocus`, `Fungtopia.Input.InteractAvailable` and `HomeState`, and takes the
+`Fungtopia.Wallet.SpendCoins`, `Fungtopia.Wardrobe.OpenWardrobe`, `Fungtopia.Pet.SetActivePet`, `Fungtopia.Input.UiFocus`, `Fungtopia.Input.InteractAvailable` and `HomeState`, and takes the
 world's spots from the Map Contract (`Places`, `Areas`). An Interact press is acted on at the
 next tick, for whatever `Prompt` shows then (only while the player is alive, and never while
 the start screen is open, below):
@@ -54,7 +54,7 @@ the start screen is open, below):
   when its `SpendResult` is `Ok` the item goes into the inventory (owned, not placed);
   `LastShopResult` is `Bought`, `TooFewCoins` or `Full` (64 items at most).
 - **Smart A.** While a prompt shows (`Prompt` is not `None`: the door outside or inside, the shop,
-  decorating or the wardrobe) the module holds `Fungtopia.Input.InteractAvailable(InteractOwner,
+  decorating, the wardrobe or a pet at home) the module holds `Fungtopia.Input.InteractAvailable(InteractOwner,
   true)` (7461003), published on the tick the prompt appears and released (false) on the tick it
   goes, so the gamepad's A button interacts there instead of jumping.
 - **Menus and UiFocus.** The shop's panel (`ShopFocusOwner`) and placement mode
@@ -93,6 +93,14 @@ the start screen is open, below):
   has taken, `OnBed`, else on the floor) and plays (chasing another pet at home, or zooming
   around), 3 to 14 s at a time, steering clear of furniture. The order is a fixed pseudo-random
   sequence: the same every run.
+- **Taking a pet along.** Inside, within 1.2 m of a pet at home (`Present`; the nearest one when
+  several are close) and no door, catalog book or wardrobe prompt there: "[Interact] Take Mushroom
+  Cat along" (`TakeCat`; `TakeDog`, `TakeCrow` for "Mushroom Dog", "Mushroom Crow") publishes
+  `SetActivePet(kind)`. Nothing changes at home until the Pet module's next `OwnedPets`: then the
+  chosen pet leaves the home floor (the Pet module shows it beside the player) and the one that was
+  active comes home on the free spot nearest 0.75 m east of the player and starts wandering (a pet
+  coming home while the player is not in the house appears at its own spot). No such prompt while
+  decorating, in the shop or a wardrobe screen, on the start screen or while defeated.
 
 - **Saving.** `CollectSave(RequestId)` is answered at once with one `SavePart(RequestId, "Home",
   json)`: every owned item in order, compact JSON from `HomeSave` (version `HomeSave.Version`, 1),

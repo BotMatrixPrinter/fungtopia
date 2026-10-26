@@ -33,6 +33,7 @@ public class HomeModuleTests
         public readonly List<UiFocus> Focus = new();
         public readonly List<InteractAvailable> Available = new();
         public readonly List<SavePart> SaveParts = new();
+        public readonly List<SetActivePet> ActivePets = new();
         public int OpenWardrobes;
         public int? Coins;
 
@@ -57,6 +58,8 @@ public class HomeModuleTests
                 SaveParts.Add(part);
             if (message is OpenWardrobe)
                 OpenWardrobes++;
+            if (message is SetActivePet setActive)
+                ActivePets.Add(setActive);
             if (_handlers.TryGetValue(typeof(T), out var list))
                 foreach (var handler in list)
                     ((IMessageHandler<T>)handler).Handle(message);
@@ -552,7 +555,8 @@ public class HomeModuleTests
     /// <summary>Every text the panels show with buttons in it, for <paramref name="device"/>.</summary>
     private static IEnumerable<string> ButtonTexts(DeviceKind device)
     {
-        foreach (var prompt in new[] { HomePrompt.Enter, HomePrompt.Leave, HomePrompt.Shop, HomePrompt.Decorate, HomePrompt.Wardrobe })
+        foreach (var prompt in new[] { HomePrompt.Enter, HomePrompt.Leave, HomePrompt.Shop, HomePrompt.Decorate, HomePrompt.Wardrobe,
+                     HomePrompt.TakeCat, HomePrompt.TakeDog, HomePrompt.TakeCrow })
             yield return HomeText.Prompt(prompt, device);
         yield return HomeText.ShopHelp(device);
         yield return HomeText.DecorateHelp(device);
@@ -565,6 +569,9 @@ public class HomeModuleTests
     [InlineData(HomePrompt.Shop, DeviceKind.PlayStation, "ps_cross", "Shop")]
     [InlineData(HomePrompt.Decorate, DeviceKind.Nintendo, "ns_b", "Decorate")]
     [InlineData(HomePrompt.Wardrobe, DeviceKind.Generic, "xbox_a", "Wardrobe")]
+    [InlineData(HomePrompt.TakeCat, DeviceKind.KeyboardMouse, "key_e", "Take Mushroom Cat along")]
+    [InlineData(HomePrompt.TakeDog, DeviceKind.PlayStation, "ps_cross", "Take Mushroom Dog along")]
+    [InlineData(HomePrompt.TakeCrow, DeviceKind.Xbox, "xbox_a", "Take Mushroom Crow along")]
     public void ThePromptIsTheInteractIconOfTheDeviceAndTheVerb(HomePrompt prompt, DeviceKind device, string icon, string verb)
     {
         Assert.Equal($"[img={HomeText.PromptIconSize}]res://modules/Input/Glyphs/{icon}.svg[/img] {verb}", HomeText.Prompt(prompt, device));
@@ -1108,6 +1115,164 @@ public class HomeModuleTests
             }
         }
         Assert.True(onBed);
+    }
+
+    /// <summary>Inside with the Cat out and the Dog and the Crow at home, ticked until the two are under 1.5 m apart.</summary>
+    private static (HomeModule home, FakeBus bus) DogAndCrowCloseAtHome()
+    {
+        var (home, bus) = Started();
+        Inside(home, bus);
+        for (int t = 0; t < 60 * 120; t++)
+        {
+            Owned(bus, true, true, true, PetKind.Cat);
+            home.Tick(Step);
+            if (Vector3.Distance(home.Pets[(int)PetKind.Dog].Position, home.Pets[(int)PetKind.Crow].Position) < 1.5f)
+                return (home, bus);
+        }
+        throw new InvalidOperationException("the Dog and the Crow never came close");
+    }
+
+    private static Vector3 PetAt(HomeModule home, PetKind kind) => home.Pets[(int)kind].Position;
+
+    [Fact]
+    public void NearAPetAtHomeThePromptTakesItAlongAndInteractPublishesSetActivePet()
+    {
+        var (home, bus) = Started();
+        Owned(bus, true, true, false, PetKind.Cat);
+        Inside(home, bus);
+        Assert.Equal(HomePrompt.None, home.Prompt);
+        Assert.Empty(bus.Available);
+
+        StandAt(bus, PetAt(home, PetKind.Dog) + new Vector3(0.5f, 0f, 0f));
+        home.Tick(Step);
+        Assert.Equal(HomePrompt.TakeDog, home.Prompt);
+        Assert.Equal("Take Mushroom Dog along", HomeText.PromptVerb(home.Prompt));
+        Assert.Equal(Prompts.Rich(PromptAction.Interact, DeviceKind.KeyboardMouse, HomeText.PromptIconSize) + " Take Mushroom Dog along",
+            HomeText.Prompt(home.Prompt, home.Device));
+        // Smart A: the gamepad's A takes the pet along instead of jumping.
+        Assert.Equal(new InteractAvailable(HomeModule.InteractOwner, true), Assert.Single(bus.Available));
+
+        PressInteract(bus);
+        home.Tick(Step);
+        Assert.Equal(PetKind.Dog, Assert.Single(bus.ActivePets).Kind);
+        Assert.Empty(bus.Teleports);
+        Assert.Equal(0, bus.OpenWardrobes);
+        Assert.False(home.Decorating);
+
+        // Over 1.2 m away: no prompt.
+        StandAt(bus, PetAt(home, PetKind.Dog) + new Vector3(0f, 0f, 1.3f));
+        home.Tick(Step);
+        Assert.Equal(HomePrompt.None, home.Prompt);
+        Assert.False(bus.Available[^1].Available);
+    }
+
+    [Fact]
+    public void TheNearestPetAtHomeWins()
+    {
+        var (home, bus) = DogAndCrowCloseAtHome();
+        var dog = PetAt(home, PetKind.Dog);
+        var crow = PetAt(home, PetKind.Crow);
+        StandAt(bus, Vector3.Lerp(dog, crow, 0.3f));
+        home.Tick(Step);
+        Assert.Equal(HomePrompt.TakeDog, home.Prompt);
+
+        dog = PetAt(home, PetKind.Dog);
+        crow = PetAt(home, PetKind.Crow);
+        StandAt(bus, Vector3.Lerp(dog, crow, 0.7f));
+        home.Tick(Step);
+        Assert.Equal(HomePrompt.TakeCrow, home.Prompt);
+        PressInteract(bus);
+        home.Tick(Step);
+        Assert.Equal(PetKind.Crow, Assert.Single(bus.ActivePets).Kind);
+    }
+
+    [Fact]
+    public void TheSwappedPetsLeaveAndJoinTheHomeFloorOnTheNextOwnedPets()
+    {
+        var (home, bus) = Started();
+        Owned(bus, true, true, false, PetKind.Cat);
+        Inside(home, bus);
+        var player = PetAt(home, PetKind.Dog) + new Vector3(0.5f, 0f, 0f);
+        Interact(home, bus, player);
+        Assert.Equal(PetKind.Dog, Assert.Single(bus.ActivePets).Kind);
+        // Until the Pet module answers, nothing changes at home.
+        Assert.True(home.Pets[(int)PetKind.Dog].Present);
+        Assert.False(home.Pets[(int)PetKind.Cat].Present);
+
+        // The Pet module's next OwnedPets: the Dog is out with the player, the Cat came home.
+        Owned(bus, true, true, false, PetKind.Dog);
+        Assert.False(home.Pets[(int)PetKind.Dog].Present);
+        var cat = home.Pets[(int)PetKind.Cat];
+        Assert.True(cat.Present);
+        Assert.True(Vector3.Distance(cat.Position, player) <= 1.5f, $"the Cat appeared at {cat.Position}, the player is at {player}");
+        Assert.Equal(Areas.HomeFloorY, cat.Position.Y);
+        Assert.True(Areas.Home.Contains(cat.Position.X, cat.Position.Z));
+        int column = HomeRoom.ColumnAt(cat.Position.X), row = HomeRoom.RowAt(cat.Position.Z);
+        Assert.Equal(-1, home.ItemAt(column, row));
+        Assert.False(HomeRoom.UnderWardrobe(column, row));
+        Assert.Equal(PetActivity.Wander, cat.Activity);
+
+        var start = cat.Position;
+        bool moved = false;
+        for (int t = 0; t < 60 * 10; t++)
+        {
+            Owned(bus, true, true, false, PetKind.Dog);
+            home.Tick(Step);
+            Assert.False(home.Pets[(int)PetKind.Dog].Present);
+            Assert.True(home.Pets[(int)PetKind.Cat].Present);
+            moved |= Vector3.Distance(PetAt(home, PetKind.Cat), start) > 0.5f;
+        }
+        Assert.True(moved);
+    }
+
+    [Fact]
+    public void NoPetPromptWhileDecoratingInAScreenOrDefeated()
+    {
+        var (home, bus) = Started();
+        Owned(bus, true, true, false, PetKind.Cat);
+        Inside(home, bus);
+        var near = PetAt(home, PetKind.Dog) + new Vector3(0.3f, 0f, 0f);
+        StandAt(bus, near);
+        home.Tick(Step);
+        Assert.Equal(HomePrompt.TakeDog, home.Prompt);
+
+        // Decorating: Interact places or picks up, it takes no pet along.
+        home.StartDecorating();
+        home.Tick(Step);
+        Assert.Equal(HomePrompt.None, home.Prompt);
+        Assert.False(bus.Available[^1].Available);
+        PressInteract(bus);
+        home.Tick(Step);
+        Assert.Equal(HomePrompt.None, home.Prompt);
+        home.Back();
+
+        // A wardrobe screen, then the start screen.
+        bus.Publish(new WardrobeState(true, false));
+        StandAt(bus, PetAt(home, PetKind.Dog));
+        home.Tick(Step);
+        Assert.Equal(HomePrompt.None, home.Prompt);
+        PressInteract(bus);
+        home.Tick(Step);
+        bus.Publish(new WardrobeState(false, false));
+        bus.Publish(new StartScreenState(true));
+        StandAt(bus, PetAt(home, PetKind.Dog));
+        home.Tick(Step);
+        Assert.Equal(HomePrompt.None, home.Prompt);
+        PressInteract(bus);
+        home.Tick(Step);
+        bus.Publish(new StartScreenState(false));
+
+        // Defeated.
+        StandAt(bus, PetAt(home, PetKind.Dog), alive: false);
+        home.Tick(Step);
+        Assert.Equal(HomePrompt.None, home.Prompt);
+        PressInteract(bus);
+        home.Tick(Step);
+
+        Assert.Empty(bus.ActivePets);
+        StandAt(bus, PetAt(home, PetKind.Dog));
+        home.Tick(Step);
+        Assert.Equal(HomePrompt.TakeDog, home.Prompt);
     }
 
     [Fact]
