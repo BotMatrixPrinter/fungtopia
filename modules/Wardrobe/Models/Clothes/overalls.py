@@ -1,4 +1,4 @@
-# Overalls (Bottom, starter; pairs with the Overalls Top): denim overalls, the band round the lower triangle down to its bottom edge, with a rolled-up cuff and a stitched pocket.
+# Overalls (Bottom, starter; pairs with the Overalls Top): denim overalls, a band round the body's lower edge with a stitched pocket and legs round the leg tubes down to just above the feet, with rolled-up cuffs.
 # Run from the repository root (writes overalls.glb next to this script):
 #   blender -b --factory-startup --python modules/Wardrobe/Models/Clothes/overalls.py
 # Shapes and rig sizes: ../kit.py.
@@ -14,13 +14,17 @@ reset()
 denim = material("Denim", (0.32, 0.5, 0.82))
 cuff = material("Cuff", (0.55, 0.7, 0.95))
 stitch = material("Stitch", (1.0, 0.8, 0.3))
-body = Part("Body")
-cloth(body, denim, BODY_BOTTOM, BAND_TOP, out=BOTTOM_OUT)
-ring(body, denim, BAND_TOP - 0.004, 0.014, out=BOTTOM_OUT)
-ring(body, cuff, BODY_BOTTOM + 0.035, 0.026, out=BOTTOM_OUT)
-rot = body_frame(35, 0.21)
-p, n = body_point(35, 0.21, BOTTOM_OUT + 0.008)
-body.box(denim, p, (0.045, 0.035, 0.01), rotation=rot)
-body.torus(stitch, p + n * 0.01, 0.03, 0.005, rotation=rot, scale=(1.2, 0.95))
-body.build()
+for body in bodies():
+    cloth(body, denim, BODY_BOTTOM, BAND_TOP, out=BOTTOM_OUT)
+    ring(body, denim, BAND_TOP - 0.004, 0.011, out=BOTTOM_OUT)
+    z = at(0.15)
+    rot = body_frame(35, z)
+    p, n = body_point(35, z, BOTTOM_OUT + 0.006)
+    body.box(denim, p, (0.034, 0.026, 0.008), rotation=rot)
+    body.torus(stitch, p + n * 0.008, 0.022, 0.004, rotation=rot, scale=(1.2, 0.95))
+    body.build()
+for leg in legs():
+    leg_tube(leg, denim, 0.15)
+    leg_ring(leg, cuff, 0.158, 0.017)
+    leg.build()
 export(__file__)

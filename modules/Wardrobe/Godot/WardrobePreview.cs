@@ -139,7 +139,13 @@ public partial class WardrobePreview : Node3D, IMessageHandler<SpendCoins>, IMes
         };
         for (int i = 0; i < looks.Length; i++)
         {
-            var mannequin = new Mannequin { Position = new Vector3(-1.95f + i * 1.3f, 0, 0), RotationDegrees = new Vector3(0, 195 - i * 10, 0) };
+            // The dresses on the Girl, the others on the Boy.
+            var mannequin = new Mannequin
+            {
+                Character = i % 2 == 0 ? 0 : 1,
+                Position = new Vector3(-1.95f + i * 1.3f, 0, 0),
+                RotationDegrees = new Vector3(0, 195 - i * 10, 0),
+            };
             AddChild(mannequin);
             mannequin.Apply(looks[i]);
         }

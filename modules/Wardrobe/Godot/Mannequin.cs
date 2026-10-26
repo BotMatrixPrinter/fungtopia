@@ -4,17 +4,23 @@ using Godot;
 namespace Fungtopia.Wardrobe.View;
 
 /// <summary>
-/// For previews only: the Player module's simple-shapes rig (its boy.glb, read as a file: a round
-/// head over a cone body, floating hands, round feet) dressed from an <see cref="AppearanceState"/>:
-/// skin and eye colors, the hair style in its color, and each worn item's objects parented to the
-/// rig part of the same name with no offset (<see cref="Attach"/>). The rig's own outfit objects
-/// (its hair, shirt and bow tie, trousers), its bows, its nocked arrow and its strap are hidden, so the body is
-/// bare skin under the clothes; its round shoes show while no shoes are worn. The game's character
+/// For previews only: the Player module's simple-shapes rig (its boy.glb or girl.glb by
+/// <see cref="Character"/>, read as a file: a round bald head floating over the Boy's capsule or the
+/// Girl's cone body, floating oval hands, tube legs into rounded feet) dressed from an
+/// <see cref="AppearanceState"/>: skin and eye colors, the hair style in its color ("No hair": none),
+/// and each worn item's objects parented to the rig part they go on with no offset
+/// (<see cref="Attach.PartFor"/>: a BodyGirl or BodyBoy object only on that character's body). The
+/// rig's own outfit objects (the shirt and bow tie or the dress, the trousers, the ribbon), its bows,
+/// its nocked arrow and its strap are hidden, so the body is bare skin under the clothes; its
+/// rounded shoes show while no shoes are worn. The game's character
 /// is drawn by the Player module; this shows how the pieces fit it.
 /// </summary>
 public partial class Mannequin : Node3D
 {
-    private const string Rig = "res://modules/Player/Models/boy.glb";
+    private const string Models = "res://modules/Player/Models/";
+
+    /// <summary>0 the Girl, 1 the Boy (the default); set before it enters the tree.</summary>
+    public int Character { get; set; } = 1;
 
     private static readonly StandardMaterial3D s_hidden = new()
     {
@@ -28,11 +34,11 @@ public partial class Mannequin : Node3D
 
     public override void _Ready()
     {
-        _rig = ToonGlb.Load(Rig);
+        _rig = ToonGlb.Load(Models + (Character == 0 ? "girl.glb" : "boy.glb"));
         if (_rig == null)
             return;
         AddChild(_rig);
-        foreach (var name in new[] { "Hair", "DefaultTop", "DefaultBottom", "DefaultHead", "BackBow", "HandBow", "NockArrow" })
+        foreach (var name in new[] { "DefaultTop", "DefaultBottom", "DefaultHead", "BackBow", "HandBow", "NockArrow" })
             Show(name, false);
         Hide(_rig, "Wood");
     }
@@ -67,6 +73,8 @@ public partial class Mannequin : Node3D
 
     private void Put(string path, Color? hair)
     {
+        if (string.IsNullOrEmpty(path))
+            return; // "No hair"
         var model = ToonGlb.Load(path);
         if (model == null || _rig == null)
             return;
@@ -74,7 +82,10 @@ public partial class Mannequin : Node3D
             ToonGlb.Tint(model, "Hair", tint);
         foreach (var child in model.GetChildren())
         {
-            if (child is not Node3D piece || _rig.FindChild(piece.Name, true, false) is not Node3D part)
+            if (child is not Node3D piece)
+                continue;
+            string partName = Attach.PartFor(piece.Name, Character);
+            if (partName.Length == 0 || _rig.FindChild(partName, true, false) is not Node3D part)
                 continue;
             model.RemoveChild(piece);
             piece.Owner = null;

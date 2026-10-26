@@ -1,4 +1,4 @@
-# Spotted Mushroom Dress (Top/dress, starter): a red dress over the whole triangle with white spots like a mushroom cap, a ruffled hem and a cream collar.
+# Spotted Mushroom Dress (Top/dress, girl, starter): a red dress over the whole cone with white spots like a mushroom cap, a ruffled hem and a cream collar.
 # Run from the repository root (writes spotted_dress.glb next to this script):
 #   blender -b --factory-startup --python modules/Wardrobe/Models/Clothes/spotted_dress.py
 # Shapes and rig sizes: ../kit.py.
@@ -14,12 +14,13 @@ reset()
 red = material("Cloth", CAP_RED)
 spot_mat = material("Spots", SPOT_WHITE)
 cream = material("Collar", (1.0, 0.92, 0.8))
-body = Part("Body")
-cloth(body, red, out=TOP_OUT + 0.002)
-ring(body, red, BODY_BOTTOM + 0.035, 0.022, out=TOP_OUT + 0.002)
-ring(body, cream, 0.55, 0.022, out=TOP_OUT + 0.002)
-for a, z in ((20, 0.22), (-40, 0.2), (75, 0.25), (-95, 0.22), (140, 0.24), (-150, 0.25), (180, 0.2),
-             (5, 0.36), (-70, 0.35), (110, 0.37), (-130, 0.39), (40, 0.46), (-20, 0.48), (160, 0.45)):
-    spot(body, spot_mat, a, z, 0.04, out=TOP_OUT + 0.002)
-body.build()
+for body in bodies(both=False):
+    OUT = TOP_OUT + 0.002
+    cloth(body, red, out=OUT)
+    ring(body, red, BODY_BOTTOM + 0.03, 0.016, out=OUT)
+    ring(body, cream, at(0.88), 0.014, out=OUT)
+    for a, f in ((20, 0.19), (-40, 0.15), (75, 0.25), (-95, 0.19), (140, 0.23), (-150, 0.25), (180, 0.15),
+                 (5, 0.48), (-70, 0.46), (110, 0.5), (-130, 0.54), (40, 0.69), (-20, 0.73), (160, 0.67)):
+        spot(body, spot_mat, a, at(f), 0.034 - 0.018 * f, out=OUT)
+    body.build()
 export(__file__)

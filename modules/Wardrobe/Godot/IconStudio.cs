@@ -30,11 +30,18 @@ public partial class IconStudio : Node
         };
         AddChild(viewport);
         _icons[key] = viewport;
-        var model = ToonGlb.Load(path);
+        // "No hair" has no model: its icon is the plain round bald head.
+        var model = string.IsNullOrEmpty(path) ? BaldHead() : ToonGlb.Load(path);
         if (model == null)
             return viewport.GetTexture();
         if (hair is Color tint)
             ToonGlb.Tint(model, "Hair", tint);
+        // An item for both bodies has a body object for each: the icon shows the Girl's cone one.
+        if (model.FindChild(Attach.BodyGirl, false, false) != null && model.FindChild(Attach.BodyBoy, false, false) is Node boy)
+        {
+            model.RemoveChild(boy);
+            boy.QueueFree();
+        }
         viewport.AddChild(model);
         viewport.AddChild(new DirectionalLight3D { LightEnergy = 1.2f, RotationDegrees = new Vector3(-35f, -25f, 0f) });
         viewport.AddChild(new WorldEnvironment
@@ -63,5 +70,18 @@ public partial class IconStudio : Node
         viewport.AddChild(camera);
         camera.LookAtFromPosition(center + dir * 4f, center, Vector3.Up);
         return viewport.GetTexture();
+    }
+
+    /// <summary>A plain round head (the Player's 0.19 m ball at its height), for "No hair".</summary>
+    private static Node3D BaldHead()
+    {
+        var root = new Node3D();
+        root.AddChild(new MeshInstance3D
+        {
+            Mesh = new SphereMesh { Radius = 0.19f, Height = 0.38f },
+            Position = new Vector3(0f, 1.28f, 0f),
+            MaterialOverride = ToonGlb.Material(WardrobeStyle.ToColor(Looks.SkinTones[1])),
+        });
+        return root;
     }
 }

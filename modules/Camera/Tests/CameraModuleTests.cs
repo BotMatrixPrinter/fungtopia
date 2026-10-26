@@ -660,8 +660,8 @@ public class CameraModuleTests
     private static readonly int AimTicks = (int)MathF.Ceiling(CameraModule.AimTransitionSeconds * 60f);
     private static readonly int HoldTicks = (int)MathF.Ceiling(CameraModule.AimHoldSeconds * 60f);
 
-    /// <summary>The chibi head seen as a ball: about 0.86 m wide, plus its ink outline.</summary>
-    private const float HeadOutlineRadius = 0.45f;
+    /// <summary>The round head seen as a ball: 0.38 m wide, plus its ink outline and a little room.</summary>
+    private const float HeadOutlineRadius = 0.22f;
 
     /// <summary>Ticks with the player standing at <paramref name="feet"/> facing the camera's way (as while drawing) and the bow drawn <paramref name="draw"/>.</summary>
     private static void RunBow(CameraModule camera, FakeBus bus, Vector3 feet, float draw, int ticks)

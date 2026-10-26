@@ -88,7 +88,7 @@ public sealed class WardrobeModule : IModule, IMessageHandler<SetLook>, IMessage
     }
 
     public int Skin { get; private set; }
-    public int HairStyle { get; private set; }
+    public int HairStyle { get; private set; } = Looks.NoHair;
     public int HairColor { get; private set; }
     public int EyeColor { get; private set; }
 

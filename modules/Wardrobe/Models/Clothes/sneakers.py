@@ -1,4 +1,4 @@
-# Sneakers (Shoes, starter): chunky white-and-red sneakers over the round feet, with fat soles and laces.
+# Sneakers (Shoes, starter): chunky white-and-red sneakers over the rounded feet, with fat soles and laces.
 # Run from the repository root (writes sneakers.glb next to this script):
 #   blender -b --factory-startup --python modules/Wardrobe/Models/Clothes/sneakers.py
 # Shapes and rig sizes: ../kit.py.
@@ -15,15 +15,18 @@ white = material("Cloth", (1.0, 0.98, 0.95))
 red = material("Accent", (0.92, 0.3, 0.32))
 sole = material("Sole", (0.95, 0.85, 0.7))
 lace = material("Lace", (0.3, 0.25, 0.3))
-for name in ("LegL", "LegR"):
-    leg = Part(name)
-    c = shoe(leg, white, sole)
+for leg in legs():
+    SOLE = 0.026
+    c, size = shoe(leg, white, sole, sole=SOLE)
     # A red toe cap and a red band round the heel.
-    leg.sphere(red, c + Vector((0, 0.07, -0.012)), (0.075, 0.07, 0.05), segments=16, rings=8, cut=((0, 0, 0.032), (0, 0, -1)))
-    leg.torus(red, c + Vector((0, 0, -0.012)), 0.102, 0.012, arc=0.5, segments=24, scale=(1.33, 1),
+    leg.sphere(red, c, (size[0] + 0.004, size[1] + 0.004, size[2] + 0.004), segments=32, rings=16,
+               cut=((0, 0, SOLE), (0, 0, -1)), keep=((0, c.y + size[1] * 0.55, 0), (0, -1, 0)))
+    dz = -0.01
+    k = math.sqrt(1 - (dz / size[2]) ** 2)
+    leg.torus(red, c + Vector((0, 0, dz)), 1.0, 0.01, arc=0.5, segments=32, scale=(size[1] * k + 0.001, size[0] * k + 0.001),
               rotation=Matrix.Rotation(math.radians(-90), 4, "Z"))
-    for dy in (0.03, 0.06):
-        z = c.z + 0.064 * math.sqrt(1 - (dy / 0.135) ** 2) - 0.012
-        leg.capsule(lace, c + Vector((-0.035, dy, z - c.z)), c + Vector((0.035, dy, z - c.z)), 0.007, segments=6)
+    for dy in (0.045, 0.07):
+        z = c.z + size[2] * math.sqrt(1 - (dy / size[1]) ** 2) - 0.004
+        leg.capsule(lace, Vector((c.x - 0.026, c.y + dy, z)), Vector((c.x + 0.026, c.y + dy, z)), 0.0055, segments=6)
     leg.build()
 export(__file__)

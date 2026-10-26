@@ -116,6 +116,11 @@ direction moves one item per 0.2 s and a short flick exactly one. `Press(StartBu
 - Up / Down (`MenuNav.Vertical`) highlight the row above / below on the `Look` step (`Skin`,
   `HairStyle`, `HairColor`, `EyeColor`, `Outfit`; they stop at the ends); on menus they move
   the highlight; elsewhere nothing.
+- The hair row starts on "No hair" (`HairStyle` = `Looks.NoHair`, the style appended last to
+  `Looks.HairStyles`, with no model): the characters' round heads are bald, as Saria's drawing has
+  them, so a character made here has no hair unless the player picks a style (Right from "No
+  hair" wraps round to the first style, Left goes to the last real one). The look step's first
+  `SetLook` already carries it.
 - `Pick(row, value)` (a click on a swatch or pill) highlights that row and gives it that value,
   on the `Look` step only; values out of range and outfits that do not fit are ignored.
 - `Point(option)` (0 or 1) highlights that choice (the mouse is over its card), on menus that

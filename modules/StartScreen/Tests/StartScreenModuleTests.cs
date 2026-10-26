@@ -582,7 +582,7 @@ public class StartScreenModuleTests
         Assert.Equal(LookRow.Skin, screen.Row);
         Assert.Equal(1, screen.Outfit);
         Assert.Equal("Mushroom Dress", Catalog.StarterOutfits[screen.Outfit].Name);
-        AssertLook(Assert.Single(bus.SetLooks), 0, 0, 0, 0);
+        AssertLook(Assert.Single(bus.SetLooks), 0, Looks.NoHair, 0, 0);
         Assert.Equal(new[] { ("spotted_dress", Slot.Top), ("", Slot.Bottom), ("mary_janes", Slot.Shoes), ("big_bow", Slot.Head) },
             Equipped(bus));
         Assert.Equal(new[] { "SetLook", "Equip", "Equip", "Equip", "Equip", "PreviewYaw", "UiFocus", "StartScreenState" }, bus.Order);
@@ -602,6 +602,29 @@ public class StartScreenModuleTests
             Equipped(bus));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void TheHairRowStartsOnNoHairSoANewCharacterHasNoHair(bool boy)
+    {
+        var bus = new FakeBus();
+        var screen = Started(bus);
+        Assert.Equal(Looks.NoHair, screen.HairStyle);
+        Assert.Equal(Looks.NoHair, screen.LookValue(LookRow.HairStyle));
+        Assert.Equal("", Looks.HairStyles[screen.HairStyle].ModelPath);
+        ToCharacter(screen);
+        PressAndTick(screen, boy ? StartButton.Right : StartButton.Left, StartButton.Confirm);
+        Assert.Equal(StartStep.Look, screen.Step);
+        // The look step's first SetLook already says "No hair"; it stays so unless a style is picked.
+        AssertLook(Assert.Single(bus.SetLooks), 0, Looks.NoHair, 0, 0);
+        bus.ClearLookMessages();
+        PressAndTick(screen, StartButton.Right);                      // skin 1, still no hair
+        Assert.Equal(Looks.NoHair, Assert.Single(bus.SetLooks).HairStyle);
+        bus.ClearLookMessages();
+        PressAndTick(screen, StartButton.Down, StartButton.Left);    // the hair row: the last real style
+        Assert.Equal(Looks.NoHair - 1, Assert.Single(bus.SetLooks).HairStyle);
+    }
+
     [Fact]
     public void ArrowsChangeEachRowAndSendSetLookAtOnce()
     {
@@ -609,28 +632,28 @@ public class StartScreenModuleTests
         var screen = OnLookStep(bus);
 
         PressAndTick(screen, StartButton.Right);                      // skin 1
-        AssertLook(Assert.Single(bus.SetLooks), 1, 0, 0, 0);
+        AssertLook(Assert.Single(bus.SetLooks), 1, Looks.NoHair, 0, 0);
         Assert.Empty(bus.Equips);
         Assert.Equal(new[] { "SetLook", "PreviewYaw", "UiFocus", "StartScreenState" }, bus.Order);
 
         bus.ClearLookMessages();
-        PressAndTick(screen, StartButton.Down, StartButton.Right, StartButton.Right);   // hair style 2
+        PressAndTick(screen, StartButton.Down, StartButton.Right, StartButton.Right);   // from No hair (the last) round to style 1
         Assert.Equal(LookRow.HairStyle, screen.Row);
-        AssertLook(Assert.Single(bus.SetLooks), 1, 2, 0, 0);
+        AssertLook(Assert.Single(bus.SetLooks), 1, 1, 0, 0);
 
         bus.ClearLookMessages();
         PressAndTick(screen, StartButton.Down, StartButton.Left);    // hair color wraps to the last
         Assert.Equal(LookRow.HairColor, screen.Row);
-        AssertLook(Assert.Single(bus.SetLooks), 1, 2, Looks.HairColors.Length - 1, 0);
+        AssertLook(Assert.Single(bus.SetLooks), 1, 1, Looks.HairColors.Length - 1, 0);
 
         bus.ClearLookMessages();
         PressAndTick(screen, StartButton.Down, StartButton.Right, StartButton.Right, StartButton.Right);
         Assert.Equal(LookRow.EyeColor, screen.Row);
-        AssertLook(Assert.Single(bus.SetLooks), 1, 2, Looks.HairColors.Length - 1, 3);
+        AssertLook(Assert.Single(bus.SetLooks), 1, 1, Looks.HairColors.Length - 1, 3);
         Assert.Empty(bus.Equips);
 
         Assert.Equal(1, screen.Skin);
-        Assert.Equal(2, screen.HairStyle);
+        Assert.Equal(1, screen.HairStyle);
         Assert.Equal(Looks.HairColors.Length - 1, screen.HairColor);
         Assert.Equal(3, screen.EyeColor);
         Assert.True(Looks.Valid(screen.Skin, screen.HairStyle, screen.HairColor, screen.EyeColor));
@@ -645,8 +668,8 @@ public class StartScreenModuleTests
         for (int i = 1; i <= Looks.HairStyles.Length; i++)
         {
             PressAndTick(screen, StartButton.Right);
-            Assert.Equal(i % Looks.HairStyles.Length, screen.HairStyle);
-            Assert.Equal(i % Looks.HairStyles.Length, bus.SetLooks[^1].HairStyle);
+            Assert.Equal((Looks.NoHair + i) % Looks.HairStyles.Length, screen.HairStyle);
+            Assert.Equal((Looks.NoHair + i) % Looks.HairStyles.Length, bus.SetLooks[^1].HairStyle);
         }
         Assert.Equal(Looks.HairStyles.Length, bus.SetLooks.Count);
     }
@@ -722,14 +745,14 @@ public class StartScreenModuleTests
         screen.Pick(LookRow.EyeColor, 2);
         Tick(screen);
         Assert.Equal(LookRow.EyeColor, screen.Row);
-        AssertLook(Assert.Single(bus.SetLooks), 0, 0, 0, 2);
+        AssertLook(Assert.Single(bus.SetLooks), 0, Looks.NoHair, 0, 2);
 
         bus.ClearLookMessages();
         screen.Pick(LookRow.Skin, 5);
         screen.Pick(LookRow.HairColor, 6);                           // two clicks in one frame: one SetLook
         Tick(screen);
         Assert.Equal(LookRow.HairColor, screen.Row);
-        AssertLook(Assert.Single(bus.SetLooks), 5, 0, 6, 2);
+        AssertLook(Assert.Single(bus.SetLooks), 5, Looks.NoHair, 6, 2);
 
         bus.ClearLookMessages();
         screen.Pick(LookRow.Outfit, 0);
@@ -784,7 +807,7 @@ public class StartScreenModuleTests
     {
         var bus = new FakeBus();
         var screen = OnLookStep(bus);
-        PressAndTick(screen, StartButton.Right, StartButton.Down, StartButton.Right);   // skin 1, hair style 1
+        PressAndTick(screen, StartButton.Right, StartButton.Down, StartButton.Right);   // skin 1, hair style from No hair round to 0
         screen.Pick(LookRow.Outfit, 2);
         Tick(screen);
         PressAndTick(screen, StartButton.Back);
@@ -796,7 +819,7 @@ public class StartScreenModuleTests
         Assert.Equal(StartStep.Look, screen.Step);
         Assert.Equal(2, screen.Outfit);
         Assert.Equal(LookRow.Outfit, screen.Row);
-        AssertLook(Assert.Single(bus.SetLooks), 1, 1, 0, 0);
+        AssertLook(Assert.Single(bus.SetLooks), 1, 0, 0, 0);
         Assert.Equal("overalls_top", bus.Equips[0].ItemId);
 
         // The Boy now: the look stays, the outfit becomes his default.
@@ -805,7 +828,7 @@ public class StartScreenModuleTests
         PressAndTick(screen, StartButton.Confirm);
         Assert.Equal(0, screen.Outfit);
         Assert.Equal(LookRow.Skin, screen.Row);
-        AssertLook(Assert.Single(bus.SetLooks), 1, 1, 0, 0);
+        AssertLook(Assert.Single(bus.SetLooks), 1, 0, 0, 0);
         Assert.Equal("striped_tee", bus.Equips[0].ItemId);
 
         // Back from the pet step to the look step sends nothing.

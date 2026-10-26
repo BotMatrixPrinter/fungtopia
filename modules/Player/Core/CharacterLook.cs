@@ -5,7 +5,7 @@ using Fungtopia.Wardrobe;
 namespace Fungtopia.Player;
 
 /// <summary>
-/// The built-in pieces of girl.glb and boy.glb (the old fixed outfits and hair). Each is a set of
+/// The built-in pieces of girl.glb and boy.glb (the old fixed outfits; the models have no hair). Each is a set of
 /// nodes whose names start with <see cref="Rig.NodePrefix"/>, shown only while its slot is empty.
 /// </summary>
 [Flags]
@@ -13,19 +13,16 @@ public enum BuiltinPieces
 {
     None = 0,
 
-    /// <summary>The built-in hair (node "Hair" on the head), replaced by any chosen hair style.</summary>
-    Hair = 1,
-
-    /// <summary>The Girl's pink spotted dress (it colors her triangle body); the Boy's blue shirt and red bow tie.</summary>
+    /// <summary>The Girl's pink spotted dress (it colors her cone body); the Boy's blue shirt (his capsule body), big red bow tie and buttons.</summary>
     Top = 2,
 
-    /// <summary>The Boy's trousers, a band round the bottom of his triangle body (the Girl has none: her dress covers it).</summary>
+    /// <summary>The Boy's trousers, a band round the bottom of his capsule body (the Girl has none: her dress covers it).</summary>
     Bottom = 4,
 
-    /// <summary>The round brown shoes: the feet (the models have no legs).</summary>
+    /// <summary>The rounded brown shoes: the feet at the ends of the tube legs.</summary>
     Shoes = 8,
 
-    /// <summary>The Girl's ribbon bow on her head.</summary>
+    /// <summary>The Girl's ribbon bow on her round bald head.</summary>
     Head = 16,
 }
 
@@ -33,9 +30,10 @@ public enum BuiltinPieces
 /// The Player's modular rig (characters.py), the same for the Girl and the Boy: the parts the
 /// game animates and the attach points worn models go on. A worn model's objects are named like
 /// the part they go on (<see cref="Attach"/>) with their origin at its pivot: <see cref="Head"/>
-/// (hair, hats, glasses), <see cref="Body"/> (tops, dresses, the hips of bottoms, backpacks,
-/// scarves), <see cref="LegL"/> and <see cref="LegR"/> (the feet: shoes; the legs themselves are
-/// invisible pivots at the hips the feet hang from).
+/// (hair, hats, glasses), <see cref="Body"/> (tops, dresses, the bands of bottoms, backpacks,
+/// scarves; an item for both characters has one body object per body shape, <see cref="Attach.PartFor"/>),
+/// <see cref="LegL"/> and <see cref="LegR"/> (the tube legs, turning at the hips: the legs of
+/// bottoms, and shoes on the rounded feet at their ends).
 /// </summary>
 public static class Rig
 {
@@ -51,7 +49,6 @@ public static class Rig
     /// <summary>The name prefix of the nodes of one built-in piece (e.g. "DefaultTop", "DefaultShoesLegL").</summary>
     public static string NodePrefix(BuiltinPieces piece) => piece switch
     {
-        BuiltinPieces.Hair => "Hair",
         BuiltinPieces.Top => "DefaultTop",
         BuiltinPieces.Bottom => "DefaultBottom",
         BuiltinPieces.Shoes => "DefaultShoes",
@@ -61,10 +58,10 @@ public static class Rig
 
     /// <summary>The pieces girl.glb or boy.glb has.</summary>
     public static BuiltinPieces Pieces(CharacterKind kind) => kind == CharacterKind.Girl
-        ? BuiltinPieces.Hair | BuiltinPieces.Top | BuiltinPieces.Shoes | BuiltinPieces.Head
-        : BuiltinPieces.Hair | BuiltinPieces.Top | BuiltinPieces.Bottom | BuiltinPieces.Shoes;
+        ? BuiltinPieces.Top | BuiltinPieces.Shoes | BuiltinPieces.Head
+        : BuiltinPieces.Top | BuiltinPieces.Bottom | BuiltinPieces.Shoes;
 
-    /// <summary>The colors characters.py gives the skin, eyes and hair (RGB 0..1, like <see cref="Looks"/>).</summary>
+    /// <summary>The colors characters.py gives the skin and eyes, and the hair color used before one is chosen (RGB 0..1, like <see cref="Looks"/>).</summary>
     public static readonly Vector3 BuiltinSkin = new(0.98f, 0.68f, 0.52f);
     public static readonly Vector3 BuiltinEye = new(0.07f, 0.04f, 0.06f);
 
@@ -89,7 +86,7 @@ public readonly struct CharacterLook
     public readonly Vector3 HairColor;
     public readonly Vector3 EyeColor;
 
-    /// <summary>The hair style's .glb (res://), attached to the head; empty: the built-in hair.</summary>
+    /// <summary>The hair style's .glb (res://), attached to the head; empty: no hair (the round head bare, as drawn).</summary>
     public readonly string HairModel;
 
     /// <summary>The worn items' .glb paths (res://), empty for none.</summary>
@@ -130,14 +127,14 @@ public readonly struct CharacterLook
 
     public bool Shows(BuiltinPieces piece) => (Builtin & piece) == piece;
 
-    /// <summary>The character as characters.py drew it: built-in hair, colors and outfit.</summary>
+    /// <summary>The character as characters.py drew it: no hair, the built-in colors and outfit.</summary>
     public static CharacterLook Default(CharacterKind kind) =>
         new(false, kind, Rig.BuiltinSkin, Rig.BuiltinHair(kind), Rig.BuiltinEye, "", "", "", "", "", "", "",
             Rig.Pieces(kind));
 
     /// <summary>
     /// The character dressed by <paramref name="look"/>. Out-of-range looks keep the built-in
-    /// color (or hair). An item is worn only in its own slot and when it fits the character;
+    /// color (or no hair; so does <see cref="Looks.NoHair"/>). An item is worn only in its own slot and when it fits the character;
     /// unknown ids are nothing. A slot with nothing in it shows the built-in piece of that slot
     /// (the old fixed outfit), except that a catalog dress replaces the bottom (the built-in
     /// trousers or a worn bottom); the Girl's built-in dress, shown with no top, still lets a
@@ -161,8 +158,6 @@ public readonly struct CharacterLook
         string back = Worn(look.Back, Slot.Back, character);
 
         var builtin = Rig.Pieces(kind);
-        if (hairModel.Length > 0)
-            builtin &= ~BuiltinPieces.Hair;
         if (top.Length > 0)
             builtin &= ~BuiltinPieces.Top;
         if (bottom.Length > 0 || dress)

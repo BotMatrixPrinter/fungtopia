@@ -76,8 +76,11 @@ public sealed class StartScreenModule : IModule, IMessageHandler<SaveSlots>, IMe
     /// <summary>Index in <see cref="Looks.SkinTones"/>.</summary>
     public int Skin { get; private set; }
 
-    /// <summary>Index in <see cref="Looks.HairStyles"/>.</summary>
-    public int HairStyle { get; private set; }
+    /// <summary>
+    /// Index in <see cref="Looks.HairStyles"/>; starts on <see cref="Looks.NoHair"/> (the round head
+    /// bare, as the drawing has it), so a new character has no hair unless the player picks a style.
+    /// </summary>
+    public int HairStyle { get; private set; } = Looks.NoHair;
 
     /// <summary>Index in <see cref="Looks.HairColors"/>.</summary>
     public int HairColor { get; private set; }

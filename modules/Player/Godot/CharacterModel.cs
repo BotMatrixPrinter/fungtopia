@@ -9,11 +9,11 @@ namespace Fungtopia.Player.View;
 /// One player character (girl.glb or boy.glb from modules/Player/Models, the modular rig), dressed
 /// by a <see cref="CharacterLook"/> (<see cref="Apply"/>: skin, eye and hair tints, the hair style
 /// and each worn item's model on the rig's parts, the built-in outfit where nothing is worn),
-/// drawn toon-shaded with ink outlines and animated procedurally: walk bob, the floating hands and the feet swinging,
-/// jump stretch and landing squash, a white hit flash, and tipping over when defeated; and the archery pose
+/// drawn toon-shaded with ink outlines and animated procedurally: the tube legs swinging at the hips (the body dipping
+/// so both feet stay on the ground), the floating hands swinging, jump stretch and landing squash, a white hit flash, and tipping over when defeated; and the archery pose
 /// (<see cref="ArcheryPose"/>): the bow from the back over the right shoulder into the left hand
 /// at the hold point on the right, the right hand drawing the string with a nocked arrow to the
-/// right cheek, upper body and head toward the aim.
+/// right of the head (at chest height: the short invisible arms reach no higher), upper body and head toward the aim.
 /// Faces -Z at zero rotation.
 /// </summary>
 public partial class CharacterModel : Node3D
@@ -22,13 +22,13 @@ public partial class CharacterModel : Node3D
     private const string Shaders = "res://modules/Player/Godot/Shaders/";
 
     /// <summary>Surfaces drawn without an ink outline (small soft details).</summary>
-    private static readonly HashSet<string> NoOutline = new() { "EyeShine", "Blush", "Mouth", "String", Mushrooms.PoisonSpots };
+    private static readonly HashSet<string> NoOutline = new() { "EyeShine", "Blush", "Finger", "String", Mushrooms.PoisonSpots };
 
     /// <summary>Materials each character tints itself (so two characters can look different).</summary>
     private static readonly HashSet<string> Tinted = new() { "Skin", "Eye", "Hair" };
 
     private static readonly BuiltinPieces[] s_pieces =
-        { BuiltinPieces.Hair, BuiltinPieces.Top, BuiltinPieces.Bottom, BuiltinPieces.Shoes, BuiltinPieces.Head };
+        { BuiltinPieces.Top, BuiltinPieces.Bottom, BuiltinPieces.Shoes, BuiltinPieces.Head };
 
     private static readonly Dictionary<string, byte[]> s_bytes = new();
     private static Shader? s_toon;
@@ -48,8 +48,14 @@ public partial class CharacterModel : Node3D
     private MeshInstance3D? _stringTop, _stringBottom;
     private ShaderMaterial? _stringMaterial;
 
-    /// <summary>How far the body cone's bottom is below its pivot (the hips; characters.py's BODY_BOTTOM is 0.12 m): squash keeps it there.</summary>
-    private const float BodyBelowPivot = 0.17f;
+    /// <summary>How far the body's bottom is below its pivot (the hips, 0.42 m; characters.py's BODY_BOTTOM is 0.36 m): squash keeps it there.</summary>
+    private const float BodyBelowPivot = 0.06f;
+
+    /// <summary>The hips' height above the soles (characters.py's HIP_Z): a leg turned by a from straight down lifts its sole by this × (1 − cos a).</summary>
+    private const float LegReach = 0.42f;
+
+    /// <summary>How far the legs swing back and forth at the hips at a full walk, radians.</summary>
+    private const float LegSwing = 0.5f;
 
     /// <summary>How far the (invisible) arms turn out from their rest while standing and walking, radians.</summary>
     private const float HandsOut = 0.12f;
@@ -124,8 +130,8 @@ public partial class CharacterModel : Node3D
     /// <summary>
     /// Dresses the character: tints the skin parts, eyes and hair, hides the built-in pieces the
     /// look does not show, and attaches the hair style's and each worn item's model to the rig.
-    /// Each of their objects goes on the rig part of its name (<see cref="Rig.IsAttachPoint"/>) with
-    /// no offset, so it moves with it in every animation and the archery pose. Replaces what the
+    /// Each of their objects goes on the rig part of its name (<see cref="Attach.PartFor"/>: a
+    /// "BodyGirl" or "BodyBoy" object only on that character's body) with no offset, so it moves with it in every animation and the archery pose. Replaces what the
     /// last call attached; call it only when the look changes.
     /// </summary>
     public void Apply(in CharacterLook look)
@@ -180,7 +186,10 @@ public partial class CharacterModel : Node3D
             return;
         foreach (var child in model.GetChildren())
         {
-            if (child is not Node3D piece || !Rig.IsAttachPoint(piece.Name) || Find(_scene, piece.Name) is not Node3D part)
+            if (child is not Node3D piece)
+                continue;
+            string partName = Attach.PartFor(piece.Name, Kind == CharacterKind.Boy ? 1 : 0);
+            if (!Rig.IsAttachPoint(partName) || Find(_scene, partName) is not Node3D part)
                 continue;
             model.RemoveChild(piece);
             piece.Owner = null;
@@ -354,10 +363,12 @@ public partial class CharacterModel : Node3D
         _stretch = Mathf.Lerp(_stretch, stretchTarget, Math.Min(1f, delta * 14f));
         _tipOver = Mathf.MoveToward(_tipOver, alive ? 0f : 1f, delta * (alive ? 3f : 2.5f));
 
-        // The model has no arms or legs: ArmL/ArmR and LegL/LegR are invisible pivots, so these swing
-        // the floating hands (at the arms' ends) and the feet (hanging from the hips) back and forth.
+        // The tube legs swing back and forth at the hips, the whole character dipping just enough that
+        // both feet stay on the ground (each lifts its sole by LegReach × (1 − cos swing)); the arms
+        // are invisible pivots, so they swing the floating hands (at their ends) the other way.
         float swing = MathF.Sin(_walkPhase) * 0.65f * _walkAmount;
-        float bob = MathF.Abs(MathF.Sin(_walkPhase)) * 0.05f * _walkAmount;
+        float legSwing = MathF.Sin(_walkPhase) * LegSwing * _walkAmount;
+        float bob = grounded ? -LegReach * (1f - MathF.Cos(legSwing)) : 0f;
         float breathe = MathF.Sin(_time * 2.4f) * 0.012f * (1f - _walkAmount);
         float airLegs = grounded ? 0f : 0.35f;
 
@@ -372,14 +383,14 @@ public partial class CharacterModel : Node3D
         var lie = Basis.FromEuler(new Vector3(fall * Mathf.Pi * 0.5f, 0f, 0f));
         _rig.Transform = new Transform3D(lie, new Vector3(0f, bob, 0f));
 
-        _legL.Pose(new Vector3(swing + airLegs * 0.6f, 0f, 0f));
-        _legR.Pose(new Vector3(-swing - airLegs * 0.4f, 0f, 0f));
+        _legL.Pose(new Vector3(legSwing + airLegs * 0.6f, 0f, 0f));
+        _legR.Pose(new Vector3(-legSwing - airLegs * 0.4f, 0f, 0f));
         // The hands float a little out and up from the arms' rest, beside the middle of the body.
         float armsUp = grounded ? HandsOut : 0.9f;
         var walkBody = Basis.FromEuler(new Vector3(-0.08f * _walkAmount, MathF.Sin(_walkPhase) * 0.08f * _walkAmount, 0f));
         var walkHead = Basis.FromEuler(new Vector3(0.05f * _walkAmount - 0.06f * s, 0f, MathF.Sin(_walkPhase) * 0.05f * _walkAmount));
         var backRotation = new Vector3(-0.08f * _walkAmount, MathF.Sin(_walkPhase) * 0.08f * _walkAmount, 0f);
-        var backOffset = new Vector3(0f, bob * 0.3f, 0f) + _bowPush;
+        var backOffset = _bowPush;
         _backBow.Pose(backRotation, backOffset);
         PoseArchery(archery, aimYaw, aimPitch, walkBody, walkHead, new Vector3(-swing * 0.9f, 0f, -armsUp),
             new Vector3(swing * 0.9f, 0f, armsUp), new Vector3(wide, up, wide), backRotation, backOffset);

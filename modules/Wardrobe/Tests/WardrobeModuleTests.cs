@@ -71,6 +71,8 @@ public class CatalogTests
         }
         foreach (var hair in Looks.HairStyles)
         {
+            if (hair.Id == "none")
+                continue; // "No hair" has no model
             string glb = FileOf(hair.ModelPath);
             Assert.True(File.Exists(glb), $"missing hair model {glb}");
             Assert.True(File.Exists(Path.ChangeExtension(glb, ".py")), $"missing hair script for {hair.Id}");
@@ -136,7 +138,7 @@ public class CatalogTests
     public void LooksHaveTheDesignedChoices()
     {
         Assert.Equal(6, Looks.SkinTones.Length);
-        Assert.Equal(6, Looks.HairStyles.Length);
+        Assert.Equal(7, Looks.HairStyles.Length);
         Assert.Equal(8, Looks.HairColors.Length);
         Assert.Equal(6, Looks.EyeColors.Length);
         Assert.Equal(Looks.HairColors.Length, Looks.HairColorNames.Length);
@@ -146,7 +148,15 @@ public class CatalogTests
         var styles = new List<string>();
         foreach (var style in Looks.HairStyles)
             styles.Add(style.Id);
-        Assert.Equal(new[] { "short", "bob", "pigtails", "ponytail", "top_bun", "curly" }, styles);
+        // "No hair" appended last, so saved indices keep their meaning; it has no model.
+        Assert.Equal(new[] { "short", "bob", "pigtails", "ponytail", "top_bun", "curly", "none" }, styles);
+        Assert.Equal(6, Looks.NoHair);
+        Assert.Equal("No hair", Looks.HairStyles[Looks.NoHair].Name);
+        Assert.Equal("", Looks.HairStyles[Looks.NoHair].ModelPath);
+        Assert.True(Looks.Valid(0, Looks.NoHair, 0, 0));
+        Assert.False(Looks.Valid(0, Looks.HairStyles.Length, 0, 0));
+        for (int i = 0; i < Looks.NoHair; i++)
+            Assert.NotEqual("", Looks.HairStyles[i].ModelPath);
         // Light to deep.
         for (int i = 1; i < Looks.SkinTones.Length; i++)
         {
@@ -161,14 +171,15 @@ public class CatalogTests
 }
 
 /// <summary>
-/// The clothes and hair styles fit the Player's simple-shapes rig (modules/Player/Models/boy.glb
-/// and girl.glb, read back): a round head floating over a smooth cone body, round hands floating
-/// beside it, little round feet under it, no arms or legs. Godot's frame: Y up, -Z the front.
+/// The clothes and hair styles fit the Player's simple-shapes rig (modules/Player/Models/girl.glb
+/// and boy.glb, read back): a big round ball of a head floating over the body (the Girl's a tall
+/// cone, the Boy's a tall rounded capsule), big oval hands floating beside it, no arms, two
+/// straight tube legs coming out from under it down to rounded feet. Every body object is checked
+/// against the body of each character it is worn on (<see cref="Attach.PartFor"/>). Godot's
+/// frame: Y up, -Z the front.
 /// </summary>
 public class ModelFitTests
 {
-    private static readonly string[] Parts = { Attach.Head, Attach.Body, Attach.LegL, Attach.LegR };
-
     private static string RepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
@@ -180,18 +191,59 @@ public class ModelFitTests
 
     private static Glb Model(string resPath) => new(Path.Combine(RepoRoot(), resPath.Substring("res://".Length)));
 
-    private static readonly Glb s_rig = new(Path.Combine(RepoRoot(), "modules", "Player", "Models", "boy.glb"));
+    /// <summary>The two characters' rigs: 0 the Girl, 1 the Boy (like Fungtopia.Player.CharacterKind).</summary>
+    private static readonly Rig[] s_rigs = { new("girl.glb"), new("boy.glb") };
 
-    /// <summary>The body cone's skin: its radius at each height (rounding included), bottom and top.</summary>
-    private static class Cone
+    /// <summary>A character's rig read back, with the shapes the clothes go on.</summary>
+    private sealed class Rig
     {
-        public static readonly (float Y, float R)[] Rings = s_rig.Vertices("Body", "Skin")
-            .GroupBy(v => MathF.Round(v.Y, 4)).Select(g => (g.Key, g.Max(Radius))).OrderBy(r => r.Key).ToArray();
-        public static readonly float Bottom = Rings[0].Y;
-        public static readonly float Top = Rings[^1].Y;
-        public static readonly float HeadBottom = s_rig.VerticesUnder("Head").Min(v => v.Y);
+        public readonly string File;
+        public readonly Glb Glb;
+        /// <summary>The body's skin: its radius at each height (rounding included), bottom and top.</summary>
+        public readonly (float Y, float R)[] Rings;
+        public readonly float Bottom, Top, HeadBottom, MaxR;
+        /// <summary>The round head: its center and radius; the eyes' centers and how far out their fronts reach.</summary>
+        public readonly Vector3 HeadCenter;
+        public readonly float HeadRadius;
+        public readonly (Vector3 Center, float Front)[] Eyes;
+        public readonly (Vector3 Center, float Radius)[] Hands;
+        /// <summary>The leg tubes: each axis's x (they stand at z 0), their radius, and the span of their straight part.</summary>
+        public readonly float LegRadius, LegLow, LegHigh;
 
-        public static float R(float y)
+        public Rig(string file)
+        {
+            File = file;
+            Glb = new Glb(Path.Combine(RepoRoot(), "modules", "Player", "Models", file));
+            Rings = Glb.Vertices(Attach.Body, "Skin").GroupBy(v => MathF.Round(v.Y, 4))
+                .Select(g => (g.Key, g.Max(Radius))).OrderBy(r => r.Key).ToArray();
+            Bottom = Rings[0].Y;
+            Top = Rings[^1].Y;
+            MaxR = Rings.Max(r => r.R);
+            HeadBottom = Glb.VerticesUnder(Attach.Head).Min(v => v.Y);
+            var head = Glb.Vertices(Attach.Head, "Skin");
+            HeadCenter = (head.Aggregate(Vector3.Min) + head.Aggregate(Vector3.Max)) / 2;
+            HeadRadius = head.Max(v => Vector3.Distance(v, HeadCenter));
+            var eye = Glb.Vertices(Attach.Head, "Eye");
+            var center = HeadCenter;
+            Eyes = new[] { eye.Where(v => v.X < 0).ToList(), eye.Where(v => v.X > 0).ToList() }.Select(e =>
+            {
+                var c = (e.Aggregate(Vector3.Min) + e.Aggregate(Vector3.Max)) / 2;
+                var n = Vector3.Normalize(c - center);
+                return (c, e.Max(v => Vector3.Dot(v - center, n)));
+            }).ToArray();
+            Hands = new[] { "HandL", "HandR" }.Select(h =>
+            {
+                var c = Glb.Origin(h);
+                return (c, Glb.Vertices(h).Max(v => Vector3.Distance(v, c)));
+            }).ToArray();
+            var leg = Glb.Vertices(Attach.LegL, "Skin");
+            float x = Glb.Origin(Attach.LegL).X;
+            LegRadius = leg.Max(v => MathF.Sqrt((v.X - x) * (v.X - x) + v.Z * v.Z));
+            LegLow = leg.Min(v => v.Y) + LegRadius;
+            LegHigh = leg.Max(v => v.Y) - LegRadius;
+        }
+
+        public float R(float y)
         {
             if (y <= Bottom)
                 return Rings[0].R;
@@ -206,7 +258,7 @@ public class ModelFitTests
         }
 
         /// <summary>How far the point is from the body's outline (side, rim and top) in its half-plane through the axis.</summary>
-        public static float Distance(Vector3 v)
+        public float Distance(Vector3 v)
         {
             var p = new Vector2(Radius(v), v.Y);
             float best = float.MaxValue;
@@ -222,37 +274,87 @@ public class ModelFitTests
         }
 
         /// <summary>How far the point is out from the body's side (negative: inside the body).</summary>
-        public static float Gap(Vector3 v) => v.Y < Bottom || v.Y > Top ? float.PositiveInfinity : Radius(v) - R(v.Y);
+        public float Gap(Vector3 v) => v.Y < Bottom || v.Y > Top ? float.PositiveInfinity : Radius(v) - R(v.Y);
+
+        /// <summary>How far the point is out from the nearer leg tube's side (negative: inside it), along the tube's straight part.</summary>
+        public float LegGap(Vector3 v) => v.Y < LegLow - LegRadius || v.Y > LegHigh
+            ? float.PositiveInfinity
+            : MathF.Min(LegDistance(v, Attach.LegLPivot.X), LegDistance(v, Attach.LegRPivot.X)) - LegRadius;
+
+        /// <summary>The point's distance from the vertical axis of the leg at x.</summary>
+        public static float LegDistance(Vector3 v, float x) => MathF.Sqrt((v.X - x) * (v.X - x) + v.Z * v.Z);
     }
 
     private static float Radius(Vector3 v) => MathF.Sqrt(v.X * v.X + v.Z * v.Z);
 
     private static IEnumerable<ClothingItem> On(params Slot[] slots) => Catalog.Items.ToArray().Where(i => slots.Contains(i.Slot));
 
+    private static IEnumerable<string> HairModels() => Looks.HairStyles.ToArray().Where(h => h.ModelPath != "").Select(h => h.ModelPath);
+
+    /// <summary>The model's body object worn by each character the item fits, with that character's rig.</summary>
+    private static IEnumerable<(string Name, Rig Rig, List<Vector3> V)> Bodies(ClothingItem item, Glb glb)
+    {
+        for (int character = 0; character < s_rigs.Length; character++)
+        {
+            if (!Fits.Matches(item.Fit, character))
+                continue;
+            var names = glb.Nodes.Select(n => n.Name).Where(n => Attach.PartFor(n, character) == Attach.Body).ToList();
+            Assert.True(names.Count <= 1, $"{item.Id}: {names.Count} body objects for character {character}");
+            if (names.Count == 1)
+                yield return (names[0], s_rigs[character], glb.Vertices(names[0]));
+        }
+    }
+
+    /// <summary>The bodies of every item on the slots that has one.</summary>
+    private static IEnumerable<(ClothingItem Item, string Name, Rig Rig, List<Vector3> V)> BodiesOn(params Slot[] slots) =>
+        On(slots).SelectMany(item => Bodies(item, Model(item.ModelPath)).Select(b => (item, b.Name, b.Rig, b.V)));
+
     /// <summary>Whether vertices close round the body (within <paramref name="near"/> of its side) cover every heading between the heights.</summary>
-    private static bool AllRound(List<Vector3> v, float y0, float y1, float near = 0.04f)
+    private static bool AllRound(Rig rig, List<Vector3> v, float y0, float y1, float near = 0.04f)
     {
         var headings = new HashSet<int>();
         foreach (var p in v)
-            if (p.Y >= y0 && p.Y <= y1 && Radius(p) - Cone.R(p.Y) < near)
+            if (p.Y >= y0 && p.Y <= y1 && Radius(p) - rig.R(p.Y) < near)
                 headings.Add((int)MathF.Floor((MathF.Atan2(p.X, -p.Z) + MathF.PI) / (2 * MathF.PI) * 24) % 24);
         return headings.Count == 24;
     }
 
-    [Fact]
-    public void TheRigStillHasTheConeBodyThePartsAndThePivotsAttachNames()
+    /// <summary>Whether vertices round the leg at x (within <paramref name="near"/> of its axis) cover every heading between the heights.</summary>
+    private static bool AllRoundLeg(List<Vector3> v, float x, float y0, float y1, float near)
     {
-        Assert.InRange(Cone.Bottom, 0.1f, 0.16f);
-        Assert.InRange(Cone.Top, 0.58f, 0.64f);
-        Assert.True(Cone.R(Cone.Bottom + 0.05f) > 2.5f * Cone.R(Cone.Top - 0.1f), "a cone, wide at the bottom");
-        foreach (var file in new[] { "boy.glb", "girl.glb" })
+        var headings = new HashSet<int>();
+        foreach (var p in v)
+            if (p.Y >= y0 && p.Y <= y1 && Rig.LegDistance(p, x) < near)
+                headings.Add((int)MathF.Floor((MathF.Atan2(p.X - x, -p.Z) + MathF.PI) / (2 * MathF.PI) * 24) % 24);
+        return headings.Count == 24;
+    }
+
+    [Fact]
+    public void TheRigsHaveTheConeAndCapsuleBodiesThePartsAndThePivotsAttachNames()
+    {
+        foreach (var rig in s_rigs)
         {
-            var rig = new Glb(Path.Combine(RepoRoot(), "modules", "Player", "Models", file));
-            Assert.True(Vector3.Distance(Attach.HeadPivot, rig.Origin(Attach.Head)) < 0.001f, file);
-            Assert.True(Vector3.Distance(Attach.BodyPivot, rig.Origin(Attach.Body)) < 0.001f, file);
-            Assert.True(Vector3.Distance(Attach.LegLPivot, rig.Origin(Attach.LegL)) < 0.001f, file);
-            Assert.True(Vector3.Distance(Attach.LegRPivot, rig.Origin(Attach.LegR)) < 0.001f, file);
+            Assert.InRange(rig.Bottom, 0.34f, 0.38f);
+            Assert.InRange(rig.Top, 1.03f, 1.07f);
+            Assert.InRange(rig.HeadBottom - rig.Top, 0.02f, 0.06f);
+            Assert.InRange(rig.HeadRadius, 0.18f, 0.2f);
+            Assert.InRange(rig.HeadCenter.Y, 1.26f, 1.3f);
+            Assert.InRange(rig.LegRadius, 0.055f, 0.065f);
+            Assert.True(rig.LegLow < 0.12f && rig.LegHigh > rig.Bottom, $"{rig.File}: the legs come out from under the body down to the feet");
+            foreach (var (eye, _) in rig.Eyes)
+                Assert.True(eye.Z < -0.1f && eye.Y < rig.HeadCenter.Y && MathF.Abs(eye.X) > 0.04f, $"{rig.File}: an eye at {eye}");
+            foreach (var (hand, radius) in rig.Hands)
+                Assert.True(MathF.Abs(hand.X) - radius > rig.R(hand.Y) + 0.05f, $"{rig.File}: the hands float well out beside the body");
+            Assert.True(Vector3.Distance(Attach.HeadPivot, rig.Glb.Origin(Attach.Head)) < 0.001f, rig.File);
+            Assert.True(Vector3.Distance(Attach.BodyPivot, rig.Glb.Origin(Attach.Body)) < 0.001f, rig.File);
+            Assert.True(Vector3.Distance(Attach.LegLPivot, rig.Glb.Origin(Attach.LegL)) < 0.001f, rig.File);
+            Assert.True(Vector3.Distance(Attach.LegRPivot, rig.Glb.Origin(Attach.LegR)) < 0.001f, rig.File);
         }
+        var (girl, boy) = (s_rigs[0], s_rigs[1]);
+        Assert.True(girl.R(girl.Bottom + 0.06f) > 2.5f * girl.R(girl.Top - 0.12f), "the Girl's body is a cone, wide at the bottom");
+        float h = boy.Top - boy.Bottom;
+        Assert.True(MathF.Abs(boy.R(boy.Bottom + h * 0.3f) - boy.R(boy.Bottom + h * 0.7f)) < 0.003f, "the Boy's body is a capsule, straight up the side");
+        Assert.InRange(boy.R(boy.Bottom + h / 2), 0.14f, 0.18f);
     }
 
     [Fact]
@@ -261,17 +363,25 @@ public class ModelFitTests
         var pivots = new Dictionary<string, Vector3>
         {
             [Attach.Head] = Attach.HeadPivot, [Attach.Body] = Attach.BodyPivot,
+            [Attach.BodyGirl] = Attach.BodyPivot, [Attach.BodyBoy] = Attach.BodyPivot,
             [Attach.LegL] = Attach.LegLPivot, [Attach.LegR] = Attach.LegRPivot,
         };
-        string[] Expected(ClothingItem item) => item.Slot switch
+        string[] Expected(ClothingItem item)
         {
-            Slot.Top or Slot.Bottom or Slot.Back => new[] { Attach.Body },
-            Slot.Shoes => new[] { Attach.LegL, Attach.LegR },
-            Slot.Head => new[] { Attach.Head },
-            _ => item.Id == Catalog.SpiderSilkScarf ? new[] { Attach.Body } : new[] { Attach.Head },
-        };
+            // Body items hold a body object per body they are shaped over: both for an item that fits both.
+            var body = item.Fit == Fits.Both ? new[] { Attach.BodyGirl, Attach.BodyBoy } : new[] { Attach.Body };
+            return item.Slot switch
+            {
+                // Bottoms also go round the leg tubes; the skirt only flares round the body.
+                Slot.Bottom when item.Id != "skirt" => body.Concat(new[] { Attach.LegL, Attach.LegR }).ToArray(),
+                Slot.Top or Slot.Bottom or Slot.Back => body,
+                Slot.Shoes => new[] { Attach.LegL, Attach.LegR },
+                Slot.Head => new[] { Attach.Head },
+                _ => item.Id == Catalog.SpiderSilkScarf ? body : new[] { Attach.Head },
+            };
+        }
         var models = Catalog.Items.ToArray().Select(i => (i.ModelPath, Expected(i)))
-            .Concat(Looks.HairStyles.ToArray().Select(h => (h.ModelPath, new[] { Attach.Head })));
+            .Concat(HairModels().Select(path => (path, new[] { Attach.Head })));
         foreach (var (path, parts) in models)
         {
             var glb = Model(path);
@@ -283,136 +393,245 @@ public class ModelFitTests
                 Assert.True(glb.Vertices(part).Count > 50, $"{path}: {part} is empty");
             }
         }
+        // Every hair style but "No hair" has a model.
+        Assert.Equal(Looks.HairStyles.ToArray().Count(h => h.Id != "none"), HairModels().Count());
     }
 
     [Fact]
-    public void NothingOnTheBodyPokesThroughItReachesTheHeadOrTheHandsOrFloatsLoose()
+    public void NothingOnTheBodyPokesThroughItOrTheLegsReachesTheHeadOrTheHandsOrFloatsLoose()
     {
-        var hands = new[] { "HandL", "HandR" }.Select(h =>
-        {
-            var c = s_rig.Origin(h);
-            return (Center: c, Radius: s_rig.Vertices(h).Max(v => Vector3.Distance(v, c)));
-        }).ToList();
         foreach (var item in Catalog.Items)
         {
             var glb = Model(item.ModelPath);
-            if (!glb.Has(Attach.Body))
-                continue;
-            var v = glb.Vertices(Attach.Body);
-            var inside = v.Where(p => Cone.Gap(p) < -0.002f).ToList();
-            Assert.True(inside.Count == 0, $"{item.Id} pokes into the body at {(inside.Count > 0 ? inside[0] : default)}");
-            Assert.True(v.Max(p => p.Y) < Cone.HeadBottom - 0.03f, $"{item.Id} reaches up to the head");
-            foreach (var (center, radius) in hands)
-                Assert.True(v.Min(p => Vector3.Distance(p, center)) > radius + 0.02f, $"{item.Id} reaches the floating hands");
-            // It lies on the body: its inside touches the side.
-            Assert.True(v.Min(Cone.Gap) < 0.025f, $"{item.Id} floats off the body");
+            foreach (var (name, rig, v) in Bodies(item, glb))
+            {
+                string what = $"{item.Id} ({name} on {rig.File})";
+                var inside = v.Where(p => rig.Gap(p) < -0.002f).ToList();
+                Assert.True(inside.Count == 0, $"{what} pokes into the body at {(inside.Count > 0 ? inside[0] : default)}");
+                var inLegs = v.Where(p => rig.LegGap(p) < -0.002f).ToList();
+                Assert.True(inLegs.Count == 0, $"{what} pokes into the legs at {(inLegs.Count > 0 ? inLegs[0] : default)}");
+                Assert.True(v.Max(p => p.Y) < rig.HeadBottom - 0.03f, $"{what} reaches up to the head");
+                foreach (var (center, radius) in rig.Hands)
+                    Assert.True(v.Min(p => Vector3.Distance(p, center)) > radius + 0.02f, $"{what} reaches the floating hands");
+                // It lies on the body: its inside touches the side.
+                Assert.True(v.Min(rig.Gap) < 0.02f, $"{what} floats off the body");
+            }
+            // Leg objects (trouser legs, shoes) stay out of the body and away from the hands.
+            foreach (var leg in new[] { Attach.LegL, Attach.LegR }.Where(glb.Has))
+                foreach (var rig in s_rigs)
+                {
+                    var v = glb.Vertices(leg);
+                    Assert.True(v.Max(p => p.Y) < rig.Bottom, $"{item.Id}: {leg} reaches into {rig.File}'s body");
+                    foreach (var (center, radius) in rig.Hands)
+                        Assert.True(v.Min(p => Vector3.Distance(p, center)) > radius + 0.05f, $"{item.Id}: {leg} reaches the hands");
+                }
         }
     }
 
     [Fact]
-    public void TopsAndDressesCoverTheTriangleWithoutSleeves()
+    public void TopsAndDressesCoverTheBodyWithoutSleeves()
     {
-        float h = Cone.Top - Cone.Bottom;
-        foreach (var item in On(Slot.Top))
+        foreach (var (item, name, rig, v) in BodiesOn(Slot.Top))
         {
-            var v = Model(item.ModelPath).Vertices(Attach.Body);
-            Assert.True(v.Max(p => p.Y) >= Cone.Top, $"{item.Id} leaves the top of the triangle bare");
-            Assert.True(AllRound(v, Cone.Bottom + h * 0.45f, Cone.Bottom + h * 0.7f), $"{item.Id} does not go all round");
-            // No sleeves (no arms): nothing sticks out sideways from the cone.
-            Assert.True(v.All(p => Cone.Distance(p) < 0.09f), $"{item.Id} sticks out from the body (sleeves?)");
+            string what = $"{item.Id} ({name} on {rig.File})";
+            float h = rig.Top - rig.Bottom;
+            Assert.True(v.Max(p => p.Y) >= rig.Top, $"{what} leaves the top of the body bare");
+            Assert.True(AllRound(rig, v, rig.Bottom + h * 0.45f, rig.Bottom + h * 0.7f, 0.02f), $"{what} does not go all round");
+            // No sleeves (no arms): nothing sticks out sideways from the body.
+            Assert.True(v.All(p => rig.Distance(p) < 0.07f), $"{what} sticks out from the body (sleeves?)");
             if (item.Dress)
             {
-                Assert.True(v.Min(p => p.Y) <= Cone.Bottom, $"{item.Id}: a dress goes down to the bottom edge");
-                Assert.True(AllRound(v, Cone.Bottom + 0.01f, Cone.Bottom + h * 0.15f), $"{item.Id} does not go all round at the bottom");
+                Assert.True(v.Min(p => p.Y) <= rig.Bottom, $"{what}: a dress goes down to the bottom edge");
+                Assert.True(AllRound(rig, v, rig.Bottom + 0.01f, rig.Bottom + h * 0.15f, 0.02f), $"{what} does not go all round at the bottom");
             }
             else
             {
-                // Down into the lower band, under every bottom's top edge, so no skin shows between them.
+                // Down into the lower band, under every bottom's top edge (2 cm over it), so no skin shows between them.
                 float hem = v.Min(p => p.Y);
-                Assert.True(hem > Cone.Bottom + h * 0.1f, $"{item.Id} is as long as a dress");
-                foreach (var bottom in On(Slot.Bottom))
-                    Assert.True(Model(bottom.ModelPath).Vertices(Attach.Body).Max(p => p.Y) > hem + 0.02f, $"{item.Id} over {bottom.Id}");
+                Assert.True(hem > rig.Bottom + h * 0.1f, $"{what} is as long as a dress");
+                int character = Array.IndexOf(s_rigs, rig);
+                foreach (var bottom in On(Slot.Bottom).Where(b => Fits.Matches(b.Fit, character)))
+                {
+                    var band = Bodies(bottom, Model(bottom.ModelPath)).Single(b => b.Rig == rig).V;
+                    Assert.True(band.Max(p => p.Y) > hem + 0.02f, $"{what} over {bottom.Id}");
+                }
             }
         }
     }
 
     [Fact]
-    public void BottomsAreTheLowerBandOfTheTriangleAndShortsAreShorter()
+    public void BottomsAreABandRoundTheBodysLowerEdgeAndLegsRoundTheLegTubes()
     {
-        float h = Cone.Top - Cone.Bottom;
+        foreach (var (item, name, rig, v) in BodiesOn(Slot.Bottom))
+        {
+            string what = $"{item.Id} ({name} on {rig.File})";
+            float h = rig.Top - rig.Bottom;
+            float top = v.Max(p => p.Y);
+            Assert.InRange(top, rig.Bottom + h * 0.2f, rig.Bottom + h * 0.4f);
+            Assert.True(AllRound(rig, v, top - 0.06f, top - 0.02f, 0.04f), $"{what} does not go all round");
+            Assert.True(v.All(p => rig.Distance(p) < 0.08f), $"{what} sticks out from the body");
+            Assert.True(v.Min(p => p.Y) <= rig.Bottom, $"{what} goes down round the bottom edge");
+            Assert.True(AllRound(rig, v, rig.Bottom, rig.Bottom + 0.05f, 0.04f), $"{what} does not go all round the bottom edge");
+        }
         foreach (var item in On(Slot.Bottom))
         {
-            var v = Model(item.ModelPath).Vertices(Attach.Body);
-            float top = v.Max(p => p.Y), low = v.Min(p => p.Y);
-            Assert.InRange(top, Cone.Bottom + h * 0.2f, Cone.Bottom + h * 0.4f);
-            Assert.True(AllRound(v, top - 0.06f, top - 0.02f, 0.05f), $"{item.Id} does not go all round");
-            Assert.True(v.All(p => Cone.Distance(p) < 0.1f), $"{item.Id} sticks out from the body (trouser legs?)");
-            if (item.Id == "shorts")
-                Assert.True(low > Cone.Bottom + 0.04f, "shorts are shorter: they end above the bottom edge");
-            else
-                Assert.True(low <= Cone.Bottom, $"{item.Id} goes down to the bottom edge");
+            var glb = Model(item.ModelPath);
+            if (item.Id == "skirt")
+            {
+                // The skirt flares out round the cone past its bottom edge; the legs come out under it.
+                var (_, rig, v) = Bodies(item, glb).Single();
+                Assert.True(v.Where(p => p.Y < rig.Bottom + 0.01f).Max(Radius) > rig.R(rig.Bottom) + 0.03f, "the skirt flares");
+                Assert.False(glb.Has(Attach.LegL) || glb.Has(Attach.LegR), "the skirt has no legs");
+                continue;
+            }
+            var rigs = s_rigs.Where((_, c) => Fits.Matches(item.Fit, c)).ToList();
+            foreach (var (leg, pivot) in new[] { (Attach.LegL, Attach.LegLPivot), (Attach.LegR, Attach.LegRPivot) })
+            {
+                var v = glb.Vertices(leg);
+                string what = $"{item.Id}: {leg}";
+                foreach (var rig in rigs)
+                {
+                    // Round the leg tube, snug over it (not poking into it), from just under the body down.
+                    float inside = v.Min(p => Rig.LegDistance(p, pivot.X)) - rig.LegRadius;
+                    Assert.True(inside > -0.002f, $"{what} pokes into the leg ({inside})");
+                    Assert.True(v.All(p => Rig.LegDistance(p, pivot.X) < rig.LegRadius + 0.045f), $"{what} is not snug round the leg");
+                    float high = v.Max(p => p.Y), low = v.Min(p => p.Y);
+                    Assert.InRange(high, rig.Bottom - 0.03f, rig.Bottom);
+                    Assert.True(AllRoundLeg(v, pivot.X, low, high, rig.LegRadius + 0.025f), $"{what} does not go all round the leg");
+                    var foot = rig.Glb.Vertices("DefaultShoes" + leg);
+                    float footTop = foot.Max(p => p.Y);
+                    if (item.Id == "shorts")
+                        Assert.True(low > (rig.Bottom + footTop) / 2, $"{what}: shorts are short, ending above the knee");
+                    else
+                        Assert.InRange(low, footTop + 0.005f, footTop + 0.05f);
+                }
+            }
         }
     }
 
     [Fact]
-    public void ShoesFitTheRoundFeetUnderTheBody()
+    public void ShoesFitTheRoundedFeet()
     {
         foreach (var item in On(Slot.Shoes))
         {
             var glb = Model(item.ModelPath);
-            foreach (var leg in new[] { Attach.LegL, Attach.LegR })
-            {
-                var v = glb.Vertices(leg);
-                var foot = s_rig.Vertices("DefaultShoes" + leg);
-                Vector3 low = v.Aggregate(Vector3.Min), high = v.Aggregate(Vector3.Max);
-                Vector3 footLow = foot.Aggregate(Vector3.Min), footHigh = foot.Aggregate(Vector3.Max);
-                Assert.InRange(low.Y, -0.01f, 0.01f);
-                Assert.True(high.Y < Cone.Bottom, $"{item.Id} reaches into the body");
-                Assert.True(high.Y >= footHigh.Y - 0.005f, $"{item.Id} is lower than the foot");
-                // Over the foot: as wide and long as it (a little more), and not much more.
-                Assert.True(low.X <= footLow.X + 0.002f && high.X >= footHigh.X - 0.002f, $"{item.Id}: {leg} across");
-                Assert.True(low.Z <= footLow.Z + 0.002f && high.Z >= footHigh.Z - 0.002f, $"{item.Id}: {leg} along");
-                Assert.True(high.X - low.X < (footHigh.X - footLow.X) + 0.06f, $"{item.Id}: {leg} too wide");
-                Assert.True(high.Z - low.Z < (footHigh.Z - footLow.Z) + 0.08f, $"{item.Id}: {leg} too long");
-            }
+            foreach (var rig in s_rigs)
+                foreach (var leg in new[] { Attach.LegL, Attach.LegR })
+                {
+                    string what = $"{item.Id}: {leg} on {rig.File}";
+                    var v = glb.Vertices(leg);
+                    var foot = rig.Glb.Vertices("DefaultShoes" + leg);
+                    Vector3 low = v.Aggregate(Vector3.Min), high = v.Aggregate(Vector3.Max);
+                    Vector3 footLow = foot.Aggregate(Vector3.Min), footHigh = foot.Aggregate(Vector3.Max);
+                    Vector3 footCenter = (footLow + footHigh) / 2, footRadii = (footHigh - footLow) / 2;
+                    // Flat on the ground: a sole with many vertices at y 0.
+                    Assert.InRange(low.Y, -0.002f, 0.002f);
+                    Assert.True(v.Count(p => MathF.Abs(p.Y) < 0.001f) >= 16, $"{what} is not flat on the ground");
+                    Assert.True(high.Y >= footHigh.Y + 0.005f, $"{what} is lower than the foot");
+                    // Over the foot: nothing pokes into it, as wide and long as it (a little more), and not much more.
+                    var into = v.Where(p => Vector3.Divide(p - footCenter, footRadii).Length() < 0.98f).ToList();
+                    Assert.True(into.Count == 0, $"{what} pokes into the foot at {(into.Count > 0 ? into[0] : default)}");
+                    Assert.True(low.X <= footLow.X - 0.005f && high.X >= footHigh.X + 0.005f, $"{what} across");
+                    Assert.True(low.Z <= footLow.Z - 0.005f && high.Z >= footHigh.Z + 0.005f, $"{what} along");
+                    Assert.True(high.X - low.X < (footHigh.X - footLow.X) + 0.05f, $"{what} too wide");
+                    Assert.True(high.Z - low.Z < (footHigh.Z - footLow.Z) + 0.06f, $"{what} too long");
+                }
+            // Whatever a shoe has up the leg (a boot's shaft) goes under every trouser leg, inside it.
+            foreach (var bottom in On(Slot.Bottom).Select(b => Model(b.ModelPath)).Where(b => b.Has(Attach.LegL)))
+                foreach (var (leg, pivot) in new[] { (Attach.LegL, Attach.LegLPivot), (Attach.LegR, Attach.LegRPivot) })
+                {
+                    var trousers = bottom.Vertices(leg);
+                    float hem = trousers.Min(p => p.Y), inner = trousers.Min(p => Rig.LegDistance(p, pivot.X));
+                    float shaft = glb.Vertices(leg).Where(p => p.Y > hem).Select(p => Rig.LegDistance(p, pivot.X)).DefaultIfEmpty(0f).Max();
+                    Assert.True(shaft < inner - 0.001f, $"{item.Id}: {leg} does not go under the trouser legs ({shaft} out, inside {inner})");
+                }
         }
     }
 
     [Fact]
     public void HatsGlassesClipsAndHairSitOnTheHeadAboveTheBody()
     {
-        var head = s_rig.Vertices(Attach.Head, "Skin");
-        var center = (head.Aggregate(Vector3.Min) + head.Aggregate(Vector3.Max)) / 2;
-        var models = Catalog.Items.ToArray().Select(i => i.ModelPath).Concat(Looks.HairStyles.ToArray().Select(h => h.ModelPath));
+        var face = On(Slot.Face).Select(i => i.ModelPath).ToHashSet();
+        var models = Catalog.Items.ToArray().Select(i => i.ModelPath).Concat(HairModels());
         foreach (var path in models)
         {
             var glb = Model(path);
             if (!glb.Has(Attach.Head))
                 continue;
             var v = glb.Vertices(Attach.Head);
-            Assert.True(v.Min(p => p.Y) > Cone.Top + 0.03f, $"{path} hangs down onto the body");
-            Assert.True(v.Max(p => Vector3.Distance(p, center)) < 0.85f, $"{path} floats away from the head");
-            Assert.True(v.Min(p => Vector3.Distance(p, center)) < 0.45f, $"{path} does not touch the head");
+            foreach (var rig in s_rigs)
+            {
+                var (c, r) = (rig.HeadCenter, rig.HeadRadius);
+                Assert.True(v.Min(p => p.Y) > rig.Top + 0.03f, $"{path} hangs down onto the body");
+                Assert.True(v.Max(p => Vector3.Distance(p, c)) < r * 2.1f, $"{path} floats away from the head");
+                Assert.True(v.Min(p => Vector3.Distance(p, c)) < r * 1.1f, $"{path} does not touch the head");
+                // Only glasses go over the eyes.
+                if (!face.Contains(path))
+                    foreach (var (eye, _) in rig.Eyes)
+                        Assert.True(v.Min(p => Vector3.Distance(p, eye)) > 0.06f, $"{path} covers an eye");
+            }
+        }
+        // Hats and hair cover the top of the round head.
+        var girl = s_rigs[0];
+        foreach (var path in On(Slot.Head).Where(i => i.Id is "beanie" or "mushroom_hat").Select(i => i.ModelPath).Concat(HairModels()))
+        {
+            var v = Model(path).Vertices(Attach.Head);
+            var crown = v.Where(p => p.Y > girl.HeadCenter.Y + girl.HeadRadius * 0.7f && Vector3.Distance(p, girl.HeadCenter) > girl.HeadRadius).ToList();
+            Assert.True(v.Max(p => p.Y) > girl.HeadCenter.Y + girl.HeadRadius, $"{path} does not cover the top of the head");
+            var headings = crown.Select(p => (int)MathF.Floor((MathF.Atan2(p.X, -p.Z) + MathF.PI) / (2 * MathF.PI) * 12) % 12).ToHashSet();
+            Assert.True(headings.Count == 12, $"{path} leaves the crown bare");
         }
     }
 
     [Fact]
-    public void BackpacksSitOnTheTrianglesBackAndTheScarfRoundItsTop()
+    public void GlassesSitInFrontOfTheEyesWithFramesRoundThem()
     {
-        foreach (var item in On(Slot.Back))
+        foreach (var item in On(Slot.Face).Where(i => i.Id != Catalog.SpiderSilkScarf))
         {
-            var v = Model(item.ModelPath).Vertices(Attach.Body);
-            // The bag behind the body (Godot's +Z), most of it below the top, straps over the top.
-            var bag = v.Where(p => p.Z > Cone.R(p.Y) + 0.03f).ToList();
-            Assert.True(bag.Count > v.Count / 3, $"{item.Id}: the bag is not on the back");
-            Assert.True(bag.Average(p => p.Y) > Cone.Bottom + 0.08f && bag.Average(p => p.Y) < Cone.Top - 0.1f, $"{item.Id}: the bag is not on the back");
-            Assert.True(bag.Max(p => p.Z) < Cone.R(Cone.Bottom) + 0.25f, $"{item.Id} sticks out far behind");
-            Assert.Contains(v, p => p.Z < -0.05f && Cone.Gap(p) < 0.05f);
-            Assert.Contains(v, p => p.Y > Cone.Top - 0.1f);
+            var v = Model(item.ModelPath).Vertices(Attach.Head);
+            foreach (var rig in s_rigs)
+                foreach (var (eye, front) in rig.Eyes)
+                {
+                    var n = Vector3.Normalize(eye - rig.HeadCenter);
+                    var across = Vector3.Normalize(Vector3.Cross(Vector3.UnitY, n));
+                    var up = Vector3.Cross(n, across);
+                    // The vertices in front of the eye, by where they are round its axis.
+                    var near = v.Select(p => (Depth: Vector3.Dot(p - rig.HeadCenter, n), X: Vector3.Dot(p - eye, across), Y: Vector3.Dot(p - eye, up)))
+                        .Where(q => MathF.Sqrt(q.X * q.X + q.Y * q.Y) < 0.08f).ToList();
+                    var ring = near.Where(q => MathF.Sqrt(q.X * q.X + q.Y * q.Y) > 0.045f).ToList();
+                    var sectors = ring.Select(q => (int)MathF.Floor((MathF.Atan2(q.Y, q.X) + MathF.PI) / (2 * MathF.PI) * 8) % 8).ToHashSet();
+                    Assert.True(sectors.Count == 8, $"{item.Id}: the frame does not go round the eye on {rig.File}");
+                    Assert.True(ring.Average(q => q.Depth) > front, $"{item.Id}: the frame is not in front of the eye on {rig.File}");
+                    Assert.True(near.Where(q => MathF.Sqrt(q.X * q.X + q.Y * q.Y) < 0.07f).All(q => q.Depth > rig.HeadRadius * 0.95f), $"{item.Id}: the frame sinks into the face on {rig.File}");
+                    if (item.Id == "round_glasses")
+                        Assert.True(near.All(q => MathF.Sqrt(q.X * q.X + q.Y * q.Y) > 0.035f), "round_glasses: no lenses hide the eyes");
+                }
         }
-        var scarf = Model(Catalog.Items[Catalog.IndexOf(Catalog.SpiderSilkScarf)].ModelPath).Vertices(Attach.Body);
-        Assert.True(AllRound(scarf, Cone.Top - 0.15f, Cone.Top - 0.03f, 0.1f), "the scarf goes round the top");
-        Assert.True(scarf.Min(p => p.Y) > Cone.Bottom + (Cone.Top - Cone.Bottom) * 0.35f, "the scarf's tails hang down the front a little");
+    }
+
+    [Fact]
+    public void BackpacksSitOnTheBodysBackAndTheScarfRoundItsTop()
+    {
+        foreach (var (item, name, rig, v) in BodiesOn(Slot.Back))
+        {
+            string what = $"{item.Id} ({name} on {rig.File})";
+            // The bag behind the body (Godot's +Z), most of it below the top, straps over the top.
+            var bag = v.Where(p => p.Z > rig.R(p.Y) + 0.03f).ToList();
+            Assert.True(bag.Count > v.Count / 3, $"{what}: the bag is not on the back");
+            float y = bag.Average(p => p.Y);
+            Assert.True(y > rig.Bottom + 0.15f && y < rig.Top - 0.15f, $"{what}: the bag is not on the back");
+            Assert.True(bag.Max(p => p.Z) < rig.MaxR + 0.16f, $"{what} sticks out far behind");
+            Assert.Contains(v, p => p.Z < -0.05f && rig.Gap(p) < 0.05f);
+            Assert.Contains(v, p => p.Y > rig.Top - 0.15f);
+        }
+        foreach (var (item, name, rig, scarf) in BodiesOn(Slot.Face))
+        {
+            string what = $"the scarf ({name} on {rig.File})";
+            Assert.Equal(Catalog.SpiderSilkScarf, item.Id);
+            Assert.True(AllRound(rig, scarf, rig.Top - 0.15f, rig.Top - 0.06f, 0.06f), $"{what} goes round the top");
+            Assert.True(scarf.Min(p => p.Y) > rig.Bottom + (rig.Top - rig.Bottom) * 0.35f, $"{what}: its tails hang down the front a little");
+            Assert.True(scarf.Where(p => p.Y < rig.Top - 0.2f).All(p => p.Z < 0f), $"{what}: its tails hang down the front");
+        }
     }
 
     private static void Near(Vector3 expected, Vector3 actual, string what) =>
@@ -764,6 +983,26 @@ public class WardrobeModuleTests
         Assert.Equal("", look.Back);
     }
 
+    [Theory]
+    [InlineData(CharacterKind.Girl)]
+    [InlineData(CharacterKind.Boy)]
+    public void ANewCharacterHasNoHairUntilAStyleIsPicked(CharacterKind kind)
+    {
+        var bus = new FakeBus();
+        var wardrobe = Started(bus, kind);
+        wardrobe.Tick(Step);
+        Assert.Equal(Looks.NoHair, wardrobe.HairStyle);
+        Assert.Equal(Looks.NoHair, bus.Appearances[^1].HairStyle);
+        Assert.Equal("", Looks.HairStyles[bus.Appearances[^1].HairStyle].ModelPath);
+        // A style can still be picked, and "No hair" picked back.
+        bus.Publish(new SetLook(0, 3, 0, 0));
+        wardrobe.Tick(Step);
+        Assert.Equal(3, bus.Appearances[^1].HairStyle);
+        bus.Publish(new SetLook(0, Looks.NoHair, 0, 0));
+        wardrobe.Tick(Step);
+        Assert.Equal(Looks.NoHair, bus.Appearances[^1].HairStyle);
+    }
+
     [Fact]
     public void TheGirlStartsInTheMushroomDressWithNoBottomShown()
     {
@@ -850,7 +1089,7 @@ public class WardrobeModuleTests
 
         foreach (var bad in new[]
                  {
-                     new SetLook(6, 0, 0, 0), new SetLook(0, 6, 0, 0), new SetLook(0, 0, 8, 0),
+                     new SetLook(6, 0, 0, 0), new SetLook(0, Looks.HairStyles.Length, 0, 0), new SetLook(0, 0, 8, 0),
                      new SetLook(0, 0, 0, 6), new SetLook(-1, 0, 0, 0),
                  })
             bus.Publish(bad);

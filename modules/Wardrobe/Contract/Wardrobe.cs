@@ -230,6 +230,8 @@ public static class Looks
         new("ponytail", "Ponytail", Hair + "ponytail.glb"),
         new("top_bun", "Top Bun", Hair + "top_bun.glb"),
         new("curly", "Curly", Hair + "curly.glb"),
+        // Appended, so saved indices keep their meaning: the bald round head, a new character's default.
+        new("none", "No hair", ""),
     };
 
     private static readonly Vector3[] s_hairColors =
@@ -260,8 +262,14 @@ public static class Looks
     /// <summary>6 skin tones, light to deep.</summary>
     public static ReadOnlySpan<Vector3> SkinTones => s_skinTones;
 
-    /// <summary>6 hair styles: short, bob, pigtails, ponytail, top bun (like Abby's), curly.</summary>
+    /// <summary>
+    /// 7 hair styles: short, bob, pigtails, ponytail, top bun (like Abby's), curly, and
+    /// <see cref="NoHair"/> (no model: the round head bare, as the drawing has it).
+    /// </summary>
     public static ReadOnlySpan<HairStyle> HairStyles => s_hairStyles;
+
+    /// <summary>The "No hair" style's index in <see cref="HairStyles"/> (its ModelPath is empty): the default of a new character.</summary>
+    public const int NoHair = 6;
 
     /// <summary>8 hair colors, pink and mint among them.</summary>
     public static ReadOnlySpan<Vector3> HairColors => s_hairColors;
@@ -280,12 +288,17 @@ public static class Looks
 }
 
 /// <summary>
-/// How clothing and hair models sit on the Player rig (characters.py). Each .glb holds one object
+/// How clothing and hair models sit on the Player rig (characters.py: a round head floating over the
+/// Girl's cone or the Boy's capsule body, two tube legs into rounded feet). Each .glb holds one object
 /// per rig part it covers, named like the part (<see cref="Head"/>, <see cref="Body"/>,
 /// <see cref="LegL"/>, <see cref="LegR"/>), with its origin at that part's pivot: parent it to the
-/// part with no offset and it moves with it. Shoes are on the legs (the feet), backpacks and
-/// tops on the body, hats, glasses, scarves and hair on the head (scarves on the body).
-/// Pivots in meters from the feet, Godot axes (Y up, -Z forward).
+/// part with no offset and it moves with it. An item that fits both characters and goes on the body
+/// holds two body objects instead, one for each body's shape: <see cref="BodyGirl"/> (the cone) and
+/// <see cref="BodyBoy"/> (the capsule); each goes on the Body of its character only
+/// (<see cref="PartFor"/>). Shoes and the legs of bottoms are on the legs, tops, dresses, the
+/// bottoms' bands round the body's lower edge, backpacks and the scarf on the body, hats, glasses,
+/// clips and hair on the head. Pivots in meters from the feet, Godot axes (Y up, -Z forward): the
+/// neck, the hips, the hip joints.
 /// </summary>
 public static class Attach
 {
@@ -294,10 +307,28 @@ public static class Attach
     public const string LegL = "LegL";
     public const string LegR = "LegR";
 
-    public static readonly Vector3 HeadPivot = new(0f, 0.72f, 0f);
-    public static readonly Vector3 BodyPivot = new(0f, 0.3f, 0f);
-    public static readonly Vector3 LegLPivot = new(-0.125f, 0.32f, 0f);
-    public static readonly Vector3 LegRPivot = new(0.125f, 0.32f, 0f);
+    /// <summary>A body object shaped for the Girl's cone: worn on her <see cref="Body"/> only.</summary>
+    public const string BodyGirl = "BodyGirl";
+
+    /// <summary>A body object shaped for the Boy's capsule: worn on his <see cref="Body"/> only.</summary>
+    public const string BodyBoy = "BodyBoy";
+
+    public static readonly Vector3 HeadPivot = new(0f, 1.07f, 0f);
+    public static readonly Vector3 BodyPivot = new(0f, 0.42f, 0f);
+    public static readonly Vector3 LegLPivot = new(-0.08f, 0.42f, 0f);
+    public static readonly Vector3 LegRPivot = new(0.08f, 0.42f, 0f);
+
+    /// <summary>
+    /// The rig part a worn model's object named <paramref name="objectName"/> goes on for
+    /// <paramref name="character"/> (0 Girl, 1 Boy), or "" when it is not worn on that character.
+    /// </summary>
+    public static string PartFor(string objectName, int character) => objectName switch
+    {
+        Head or Body or LegL or LegR => objectName,
+        BodyGirl => character == 0 ? Body : "",
+        BodyBoy => character == 1 ? Body : "",
+        _ => "",
+    };
 }
 
 /// <summary>

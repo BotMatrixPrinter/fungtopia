@@ -25,11 +25,12 @@ and publishes one `CameraPose` per fixed tick.
     second) once the view clears.
   - **Aim camera.** While `BowState.Draw` > 0, and for `AimHoldSeconds` (0.4 s) after the shot,
     the camera eases (`AimTransitionSeconds`, 0.25 s, `Aiming` 0..1) to an orbit point
-    (`AimPivot`) `AimSide` (0.9 m) to the side of the head's center (`BowGeometry.HeadUp`) and
+    (`AimPivot`) `AimSide` (0.9 m) to the side of the head's center (`BowGeometry.HeadUp`, 1.28 m:
+    the round head of the 1.47 m character) and
     `AimRaise` (0.25 m) above it, `AimDistance` (2.75 m) behind it (`AimView`). The side is the
     hold point's (`AimSideSign`, from the sign of `BowGeometry.HoldRight`): the right, so the view
-    is over the right shoulder and the bow held on the right shows beside the big head instead of
-    behind it.
+    is over the right shoulder and the bow held on the right shows beside the round head instead
+    of behind it.
     It blends only the orbit point and the arm's length: the view direction (yaw, pitch) stays
     the normal camera's, it never swings sideways (the character faces the aim while drawing).
     The field of view follows the draw down to `AimFieldOfView` (62 degrees) at a full draw, no
