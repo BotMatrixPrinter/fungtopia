@@ -646,6 +646,9 @@ public sealed class TownsfolkModule : IModule, IMessageHandler<PlayerState>, IMe
                 float then = Vector2.Distance(at + d * MathF.Max(look, 0.4f), _player);
                 if (then < PlayerClearance && then < now)
                     continue;
+                // Already within the clearance: not even this step closer (a path curving round the player).
+                if (now < PlayerClearance && Vector2.Distance(next, _player) < now)
+                    continue;
             }
             position.X = next.X;
             position.Z = next.Y;

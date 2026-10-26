@@ -14,7 +14,9 @@ namespace Fungtopia.Townsfolk.View;
 /// little bus (two minutes simulated first, so everyone is about their business), draws the Map's
 /// ground and Pet City (the Map and PetCity modules' scenes, read-only) and its own simple sky and
 /// sun. TOWNSFOLK_PREVIEW picks the view: "plaza" (default, the plaza by day from above the avenue),
-/// "close" (down among the folk on the plaza), "night" (the plaza at 22:00), or "close,night".
+/// "close" (down among the folk on the plaza), "night" (the plaza at 22:00), or "close,night";
+/// "near" looks at the one out nearest the plaza's middle from 3 m, "sit" at one sitting on a bench
+/// from 2.4 m, "crowd" at the busiest group of folk from 5.5 m.
 /// </summary>
 public partial class TownsfolkPreview : Node3D
 {
@@ -70,10 +72,64 @@ public partial class TownsfolkPreview : Node3D
         var camera = new Camera3D { Fov = 55f, Current = true, Far = 900f };
         AddChild(camera);
         float ground = Ground.HeightAt(plaza.X, plaza.Y);
-        if (close)
+        if (mode.Contains("crowd") && Busiest() is { } middle)
+        {
+            var at = new Vector3(middle.Position.X, middle.Position.Y, middle.Position.Z);
+            var from = at + new Vector3(0f, 0f, 5.5f);
+            _player = new System.Numerics.Vector3(from.X, Ground.HeightAt(from.X, from.Z), from.Z);
+            camera.LookAtFromPosition(from + new Vector3(0f, 1.6f, 0f), at + new Vector3(0f, 0.7f, 0f), Vector3.Up);
+        }
+        else if ((mode.Contains("near") || mode.Contains("sit")) && Subject(mode.Contains("sit")) is { } folk)
+        {
+            // From in front of it (facing -Z turned by its yaw), a little to its right.
+            var at = new Vector3(folk.Position.X, folk.Position.Y, folk.Position.Z);
+            var front = new Vector3(-MathF.Sin(folk.Yaw + 0.5f), 0f, -MathF.Cos(folk.Yaw + 0.5f));
+            float distance = mode.Contains("sit") ? 2.4f : 3.2f;
+            var from = at + front * distance;
+            _player = new System.Numerics.Vector3(from.X, Ground.HeightAt(from.X, from.Z), from.Z);
+            camera.LookAtFromPosition(from + new Vector3(0f, 1.3f, 0f), at + new Vector3(0f, 0.75f, 0f), Vector3.Up);
+        }
+        else if (close)
             camera.LookAtFromPosition(new Vector3(eye.X, _player.Y + 2.6f, eye.Z), new Vector3(2f, ground + 0.6f, plaza.Y + 2f), Vector3.Up);
         else
             camera.LookAtFromPosition(new Vector3(0f, _player.Y + 11f, -172f), new Vector3(0f, ground + 1f, -222f), Vector3.Up);
+    }
+
+    /// <summary>The townsperson to look at closely: one sitting on a bench, or the one out nearest the plaza's middle.</summary>
+    private Folk? Subject(bool sitting)
+    {
+        var plaza = Buildings.CityPlaza;
+        Folk? best = null;
+        float bestDistance = float.MaxValue;
+        foreach (var f in _town.Folk)
+        {
+            if (!f.Visible || (sitting && f.State != FolkState.Sitting))
+                continue;
+            float d = new Vector2(f.Position.X - plaza.X, f.Position.Z - plaza.Y).Length();
+            if (d < bestDistance)
+                (best, bestDistance) = (f, d);
+        }
+        return best;
+    }
+
+    /// <summary>The townsperson out with the most others out within 4 m.</summary>
+    private Folk? Busiest()
+    {
+        var folk = _town.Folk;
+        Folk? best = null;
+        int most = -1;
+        foreach (var f in folk)
+        {
+            if (!f.Visible)
+                continue;
+            int near = 0;
+            foreach (var g in folk)
+                if (g.Visible && System.Numerics.Vector3.Distance(f.Position, g.Position) < 4f)
+                    near++;
+            if (near > most)
+                (best, most) = (f, near);
+        }
+        return best;
     }
 
     public override void _PhysicsProcess(double delta) => Tick();

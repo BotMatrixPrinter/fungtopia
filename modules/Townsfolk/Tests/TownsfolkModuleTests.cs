@@ -107,15 +107,73 @@ public class TownsfolkModuleTests
             Assert.Equal(a[i].Look, b[i].Look);
         var looks = a.Select(f => f.Look).ToList();
         Assert.True(looks.Select(l => l.Skin).Distinct().Count() >= 4);
-        Assert.True(looks.Select(l => l.Hair).Distinct().Count() >= 4);
-        Assert.True(looks.Select(l => l.HairColor).Distinct().Count() >= 5);
         Assert.True(looks.Select(l => l.Outfit).Distinct().Count() >= 6);
+        Assert.True(looks.Select(l => l.Legs).Distinct().Count() >= 4);
+        // Dresses (the triangle) and capsules, both plenty.
+        Assert.InRange(looks.Count(l => l.Shape == BodyShape.Dress), 6, 19);
+        // Bow ties only on capsules, most of them; bows only on heads without a hat.
+        Assert.All(looks.Where(l => l.Accessory == Accessory.BowTie), l => Assert.Equal(BodyShape.Capsule, l.Shape));
+        Assert.All(looks.Where(l => l.Accessory == Accessory.Bow), l => Assert.Equal(HatStyle.None, l.Hat));
+        Assert.True(looks.Count(l => l.Accessory == Accessory.BowTie) >= 4);
+        Assert.True(looks.Count(l => l.Accessory == Accessory.Bow) >= 2);
         Assert.True(looks.Select(l => l.Hat).Where(h => h != HatStyle.None).Distinct().Count() >= 3);
-        Assert.InRange(looks.Count(l => l.Hat != HatStyle.None), 10, 24);
-        Assert.Contains(looks, l => l.Trousers);
-        Assert.Contains(looks, l => !l.Trousers);
-        Assert.Equal(25, looks.Select(l => (l.Skin, l.Hair, l.HairColor, l.Outfit, l.Hat, l.HatColor)).Distinct().Count());
-        Assert.All(looks, l => Assert.InRange(l.Scale, 0.9f, 1.2f));
+        Assert.InRange(looks.Count(l => l.Hat != HatStyle.None), 5, 18);
+        Assert.Equal(25, looks.Select(l => (l.Skin, l.Shape, l.Outfit, l.Legs, l.Accessory, l.Hat, l.HatColor)).Distinct().Count());
+        // Heights between 1.35 and 1.55 m, spread out; the model is drawn scaled to them.
+        Assert.All(looks, l => Assert.InRange(l.Height, 1.35f, 1.55f));
+        Assert.True(looks.Max(l => l.Height) - looks.Min(l => l.Height) > 0.12f);
+        Assert.All(looks, l => Assert.Equal(l.Height / 1.47f, l.Scale, 4));
+    }
+
+    [Fact]
+    public void WalkingSwingsTheLegsInTurn()
+    {
+        // Standing still: straight legs.
+        var still = Stride.Walk(1.3f, 0f);
+        Assert.All(new[] { still.HipL, still.KneeL, still.HipR, still.KneeR }, a => Assert.Equal(0f, a, 5));
+        float maxSwing = 0f;
+        bool leftAhead = false, rightAhead = false;
+        for (int i = 0; i < 64; i++)
+        {
+            var legs = Stride.Walk(i * MathF.Tau / 64f, 1f);
+            // One leg forward while the other is back; knees only bend back.
+            Assert.Equal(-legs.HipL, legs.HipR, 4);
+            Assert.True(legs.KneeL <= 0f && legs.KneeR <= 0f);
+            maxSwing = MathF.Max(maxSwing, MathF.Abs(legs.HipL));
+            leftAhead |= legs.HipL > 0.3f;
+            rightAhead |= legs.HipR > 0.3f;
+            // Feet stay near the ground.
+            var (_, ankle) = Stride.Joints(legs.HipL, legs.KneeL, 1f);
+            Assert.InRange(ankle.Y, 0f, 0.2f);
+        }
+        Assert.True(leftAhead && rightAhead);
+        Assert.InRange(maxSwing, 0.35f, 0.7f);
+    }
+
+    [Fact]
+    public void SittingBendsTheLegsOverTheBenchEdge()
+    {
+        foreach (float scale in new[] { 1.35f / 1.47f, 1f, 1.55f / 1.47f })
+        {
+            float lift = Stride.SitLift(scale);
+            // The body's bottom on the seat.
+            Assert.Equal(Stride.SeatTop, Stride.BodyBottom * scale + lift, 3);
+            for (int i = 0; i < 20; i++)
+            {
+                var legs = Stride.Sit(i * 0.37f);
+                foreach (var (hip, knee) in new[] { (legs.HipL, legs.KneeL), (legs.HipR, legs.KneeR) })
+                {
+                    var (kneeAt, ankle) = Stride.Joints(hip, knee, scale, lift);
+                    // The thigh lies along the seat out past its front edge (forward is -Z) ...
+                    Assert.True(-kneeAt.Z > Stride.SeatEdge, $"knee {kneeAt}");
+                    Assert.InRange(kneeAt.Y, Stride.SeatTop, Stride.SeatTop + 0.12f);
+                    // ... and the shin hangs down in front of it, the foot off the ground.
+                    Assert.True(ankle.Y < kneeAt.Y - 0.1f * scale, $"ankle {ankle}");
+                    Assert.True(-ankle.Z > Stride.SeatEdge);
+                    Assert.True(ankle.Y > 0.1f);
+                }
+            }
+        }
     }
 
     [Fact]

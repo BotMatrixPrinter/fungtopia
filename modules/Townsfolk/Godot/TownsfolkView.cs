@@ -8,21 +8,18 @@ namespace Fungtopia.Townsfolk.View;
 /// <summary>
 /// Draws Pet City's townsfolk, their pets, the roaming pets and the butterflies from the Core,
 /// smoothly between ticks (each one between its previous and current tick's position and yaw), with
-/// simple procedural animation: folk bob as they walk, swinging their floating hands and little
-/// feet, gesture while chatting and sit on benches; cats and dogs trot, sniff, nap and chase;
+/// simple procedural animation: folk bob as they walk, swinging their floating hands and tube
+/// legs, gesture while chatting and sit on benches (legs bent over the edge); cats and dogs trot, sniff, nap and chase;
 /// crows hop, peck and flap; butterflies flutter. Nothing is drawn (or animated) while the Core is
 /// not <see cref="TownsfolkModule.Active"/> (the player far from Pet City).
 /// </summary>
 public partial class TownsfolkView : Node3D, IModuleView
 {
-    /// <summary>How high a bench seat is above the ground (meters).</summary>
-    private const float SeatHeight = 0.36f;
-
     private sealed class FolkFigure
     {
         public Node3D Root = null!;
-        public Figures.Part Body, Head, ArmL, ArmR, HandL, HandR, LegL, LegR;
-        public float Phase, Time;
+        public Figures.Part Body, Head, ArmL, ArmR, HandL, HandR, LegL, LegR, ShinL, ShinR;
+        public float Phase, Time, Scale;
     }
 
     private sealed class PetFigure
@@ -80,22 +77,23 @@ public partial class TownsfolkView : Node3D, IModuleView
         var tints = new Dictionary<string, Color>
         {
             ["Skin"] = Figures.ToColor(look.Skin),
-            ["Hair"] = Figures.ToColor(look.HairColor),
             ["Outfit"] = Figures.ToColor(look.Outfit),
-            ["Trim"] = Figures.ToColor(look.Trim),
-            ["Trousers"] = Figures.ToColor(look.TrousersColor),
+            ["Legs"] = Figures.ToColor(look.Legs),
+            ["Bow"] = Figures.ToColor(look.AccessoryColor),
             ["Hat"] = Figures.ToColor(look.HatColor),
         };
         var model = Figures.Make("folk.glb", tints);
         model.Scale = Vector3.One * look.Scale;
-        foreach (var hair in Enum.GetValues<HairStyle>())
-            if (model.FindChild("Hair" + hair, true, false) is Node3D node)
-                node.Visible = hair == look.Hair;
+        foreach (var shape in Enum.GetValues<BodyShape>())
+            if (model.FindChild(shape.ToString(), true, false) is Node3D node)
+                node.Visible = shape == look.Shape;
         foreach (var hat in Enum.GetValues<HatStyle>())
             if (hat != HatStyle.None && model.FindChild("Hat" + hat, true, false) is Node3D node)
                 node.Visible = hat == look.Hat;
-        if (model.FindChild("Trousers", true, false) is Node3D trousers)
-            trousers.Visible = look.Trousers;
+        if (model.FindChild("BowTie", true, false) is Node3D bowTie)
+            bowTie.Visible = look.Accessory == Accessory.BowTie;
+        if (model.FindChild("Bow", true, false) is Node3D bow)
+            bow.Visible = look.Accessory == Accessory.Bow;
         var root = new Node3D { Name = $"Folk{i}" };
         root.AddChild(model);
         AddChild(root);
@@ -106,7 +104,8 @@ public partial class TownsfolkView : Node3D, IModuleView
             ArmL = Figures.Find(model, "ArmL"), ArmR = Figures.Find(model, "ArmR"),
             HandL = Figures.Find(model, "HandL"), HandR = Figures.Find(model, "HandR"),
             LegL = Figures.Find(model, "LegL"), LegR = Figures.Find(model, "LegR"),
-            Time = i * 1.37f,
+            ShinL = Figures.Find(model, "ShinL"), ShinR = Figures.Find(model, "ShinR"),
+            Time = i * 1.37f, Scale = look.Scale,
         };
     }
 
@@ -192,7 +191,7 @@ public partial class TownsfolkView : Node3D, IModuleView
         fig.Time += dt;
         float t = fig.Time;
         bool sitting = f.State == FolkState.Sitting;
-        Place(fig.Root, f.Previous, f.Position, f.PreviousYaw, f.Yaw, alpha, sitting ? SeatHeight : 0f);
+        Place(fig.Root, f.Previous, f.Position, f.PreviousYaw, f.Yaw, alpha, sitting ? Stride.SitLift(fig.Scale) : 0f);
         // A stride every 0.7 m or so.
         float walk = Math.Clamp(f.Speed / 1.2f, 0f, 1.4f);
         fig.Phase += f.Speed * dt * 9f;
@@ -212,13 +211,13 @@ public partial class TownsfolkView : Node3D, IModuleView
 
         float swing = s * 0.55f * walk;
         float idle = MathF.Sin(t * 2.2f + 0.6f) * 0.07f;
+        LegPose legs;
         if (sitting)
         {
-            // Hands on the lap, feet forward over the bench's edge, swinging a little.
-            fig.ArmL.Pose(Vector3.Zero, new Vector3(0.7f, 0f, 0.1f));
-            fig.ArmR.Pose(Vector3.Zero, new Vector3(0.7f, 0f, -0.1f));
-            fig.LegL.Pose(new Vector3(0f, 0f, -0.08f), new Vector3(1.35f + MathF.Sin(t * 2.4f) * 0.15f, 0f, 0f));
-            fig.LegR.Pose(new Vector3(0f, 0f, -0.08f), new Vector3(1.35f - MathF.Sin(t * 2.4f + 0.7f) * 0.15f, 0f, 0f));
+            // Hands on the lap, thighs along the seat, shins bent down over its edge, swinging a little.
+            fig.ArmL.Pose(Vector3.Zero, new Vector3(0.6f, 0f, 0.15f));
+            fig.ArmR.Pose(Vector3.Zero, new Vector3(0.6f, 0f, -0.15f));
+            legs = Stride.Sit(t);
         }
         else
         {
@@ -227,9 +226,12 @@ public partial class TownsfolkView : Node3D, IModuleView
             float other = talk * MathF.Max(0f, MathF.Sin(t * 1.7f)) * 0.8f;
             fig.ArmL.Pose(new Vector3(0f, bob, 0f), new Vector3(swing + idle + other, 0f, -idle * 0.5f - other * 0.6f));
             fig.ArmR.Pose(new Vector3(0f, bob, 0f), new Vector3(-swing - idle + gesture, 0f, idle * 0.5f + gesture * 0.7f));
-            fig.LegL.Pose(Vector3.Zero, new Vector3(-s * 0.45f * walk, 0f, 0f));
-            fig.LegR.Pose(Vector3.Zero, new Vector3(s * 0.45f * walk, 0f, 0f));
+            legs = Stride.Walk(fig.Phase, walk);
         }
+        fig.LegL.Pose(Vector3.Zero, new Vector3(legs.HipL, 0f, 0f));
+        fig.LegR.Pose(Vector3.Zero, new Vector3(legs.HipR, 0f, 0f));
+        fig.ShinL.Pose(Vector3.Zero, new Vector3(legs.KneeL, 0f, 0f));
+        fig.ShinR.Pose(Vector3.Zero, new Vector3(legs.KneeR, 0f, 0f));
         Figures.FollowArm(fig.ArmL, fig.HandL);
         Figures.FollowArm(fig.ArmR, fig.HandR);
     }

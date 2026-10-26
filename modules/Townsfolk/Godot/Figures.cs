@@ -18,7 +18,7 @@ public static class Figures
     /// <summary>Surfaces drawn without an ink outline (small soft details).</summary>
     private static readonly HashSet<string> NoOutline = new()
     {
-        "EyeShine", "Blush", "Mouth", "HatSpots", "Spots", "Gills", "Nose", "WingSpot", "Eye", "Leg",
+        "EyeShine", "Blush", "Finger", "HatSpots", "Spots", "Gills", "Nose", "WingSpot", "Eye", "Leg",
     };
 
     private static readonly Dictionary<string, (GltfDocument Document, GltfState State)?> s_files = new();
