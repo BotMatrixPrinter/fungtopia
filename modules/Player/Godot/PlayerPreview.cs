@@ -8,7 +8,7 @@ namespace Fungtopia.Player.View;
 /// A stand-alone scene showing the Girl and the Boy side by side on a patch of grass, for
 /// screenshots: <c>./screenshot.sh modules/Player/Godot/Preview.tscn</c>. The environment
 /// variable PLAYER_PREVIEW picks the pose: "front" (default), "back" (shows the bow on the
-/// back), "walk", "jump", "hit", "draw" (at full draw, aiming a little up), "drawback" (the same
+/// back), "walk", "run", "jump", "hit", "draw" (at full draw, aiming a little up), "drawback" (the same
 /// from behind, like the game's camera), "release" (just after a shot) or "swing" (the bow on its
 /// way back onto the back); "aim", "side" and "facing" hold the draw PLAYER_PREVIEW_DRAW (0..1,
 /// default 1) at a level aim, seen from the Camera module's aim camera, from the character's left
@@ -166,6 +166,9 @@ public partial class PlayerPreview : Node3D
             {
                 case "walk":
                     model.Animate(dt, 5f, true, 0f, 0f, true);
+                    break;
+                case "run":
+                    model.Animate(dt, PlayerModule.RunSpeed, true, 0f, 0f, true, ArcheryState.Relaxed, 0f, 0f, true);
                     break;
                 case "jump":
                     model.Animate(dt, 0f, false, 3f, 0f, true);

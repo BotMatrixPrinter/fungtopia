@@ -36,6 +36,7 @@ public static class Prompts
         /* TurnRight */ { "key_e", "xbox_rb", "ps_r1", "ns_r" },
         /* Move      */ { "key_wasd", "xbox_ls", "ps_ls", "ns_ls" },
         /* Look      */ { "mouse_move", "xbox_rs", "ps_rs", "ns_rs" },
+        /* Run       */ { "key_shift", "xbox_lt", "ps_l2", "ns_zl" },
     };
 
     private static readonly string[,] s_texts =
@@ -58,6 +59,7 @@ public static class Prompts
         /* TurnRight */ { "E", "RB", "R1", "R" },
         /* Move      */ { "WASD", "Left Stick", "Left Stick", "Left Stick" },
         /* Look      */ { "Mouse", "Right Stick", "Right Stick", "Right Stick" },
+        /* Run       */ { "Shift", "LT", "L2", "ZL" },
     };
 
     private static readonly string[,] s_icons = Paths();

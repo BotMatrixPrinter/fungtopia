@@ -53,6 +53,9 @@ public readonly struct PlayerInput
     /// <summary>Food selection step during this tick: -1 (previous), +1 (next) or 0.</summary>
     public readonly int FoodCycle;
 
+    /// <summary>Run is held (left trigger or Shift).</summary>
+    public readonly bool Run;
+
     public PlayerInput(Vector2 move, Vector2 look, bool jump, bool fire, bool hasAim, Vector3 aimDirection)
         : this(move, look, jump, fire, hasAim, aimDirection, false, false)
     {
@@ -70,12 +73,18 @@ public readonly struct PlayerInput
     {
     }
 
+    public PlayerInput(Vector2 move, Vector2 look, bool jump, bool fire, bool hasAim, Vector3 aimDirection,
+        bool interact, bool openMap, Vector3 aimOrigin, bool eat, int foodSelect, int foodCycle)
+        : this(move, look, jump, fire, hasAim, aimDirection, interact, openMap, aimOrigin, eat, foodSelect, foodCycle, false)
+    {
+    }
+
     /// <summary>
     /// Full constructor. <paramref name="foodSelect"/> outside 0..2 means none (-1);
     /// <paramref name="foodCycle"/> is reduced to its sign (-1, 0 or +1).
     /// </summary>
     public PlayerInput(Vector2 move, Vector2 look, bool jump, bool fire, bool hasAim, Vector3 aimDirection,
-        bool interact, bool openMap, Vector3 aimOrigin, bool eat, int foodSelect, int foodCycle)
+        bool interact, bool openMap, Vector3 aimOrigin, bool eat, int foodSelect, int foodCycle, bool run)
     {
         Move = move;
         Look = look;
@@ -89,5 +98,6 @@ public readonly struct PlayerInput
         Eat = eat;
         _foodSelectPlusOne = foodSelect is >= 0 and <= 2 ? foodSelect + 1 : 0;
         FoodCycle = Math.Sign(foodCycle);
+        Run = run;
     }
 }

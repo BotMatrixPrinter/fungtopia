@@ -112,7 +112,8 @@ public partial class PlayerView : Node3D, IModuleView
         archery.Weight = Mathf.Lerp(_previousArchery.Weight, _currentArchery.Weight, alpha);
         // The nocked arrow points from the hold point at the Bow module's target (the crosshair's point).
         var (aimYaw, aimPitch) = ArcheryPose.ArrowAim(_current.Position, _current.Facing, _player.BowTarget, _player.AimDirection, _player.HasAim);
-        _model.Animate((float)delta, speed, _current.Grounded, velocity.Y, flash, _current.Alive, archery, aimYaw, aimPitch);
+        _model.Animate((float)delta, speed, _current.Grounded, velocity.Y, flash, _current.Alive, archery, aimYaw, aimPitch,
+            _player.Running);
     }
 
     private static Vector3 ToGodot(System.Numerics.Vector3 v) => new(v.X, v.Y, v.Z);

@@ -82,7 +82,11 @@ Each tick:
 - **Camera yaw.** When the input has an aim (`HasAim`), the camera's yaw is the aim direction's
   horizontal part; otherwise `Look.X` (yaw right) is added up (on the tick, only in play).
 - **Walking.** `Move` (x right, y forward, clamped to length 1) is turned by the camera yaw:
-  5 m/s at full deflection. While `DialogueState.Open` is true, `Move` and `Jump` are ignored.
+  `WalkSpeed`, 5 m/s, at full deflection. While `DialogueState.Open` is true, `Move` and `Jump` are ignored.
+- **Running.** While `PlayerInput.Run` is held (the left trigger or Shift) and the player moves,
+  the speed is `RunSpeed` = 1.25 × `WalkSpeed` (6.25 m/s at full deflection, scaled by the stick
+  the same way) instead; `Running` is true on such ticks. Turning, jumping, the ground, collisions
+  and what stops walking (dialogue, screens, defeat) are the same as walking.
 - **Facing.** Turns at up to 10 rad/s the short way round: toward the aim while `Fire` is held,
   else toward the move direction; it keeps its facing when standing still.
 - **Jump.** On `Jump` while grounded: 1.2 m high under 20 m/s² gravity (about 0.7 s in the air).
@@ -145,7 +149,7 @@ the built-in colors.
 Settings and helpers: `Character` (the character setting, Girl by default, until `GameStart`
 picks it), `PlaceAt(feet,
 facing)` puts the player on the ground somewhere. The view also reads `CameraYaw`,
-`Visible`, `ShownFacing`, `InvulnerableSeconds`, `DefeatedSeconds`, `Ticks`, `Archery`, `BowTarget`, `AimDirection` and `HasAim` (the
+`Visible`, `ShownFacing`, `Running`, `InvulnerableSeconds`, `DefeatedSeconds`, `Ticks`, `Archery`, `BowTarget`, `AimDirection` and `HasAim` (the
 latest input's aim). No allocations per tick.
 
 ## View
@@ -179,7 +183,10 @@ sway, the whole character dipping by `LegReach` × (1 − cos swing) so both rou
 the ground; in the air the hands go up and the legs tuck; the body (squashed and stretched about
 its bottom, which stays put on the legs) stretches rising and squashes on landing, the floating
 head riding 4 cm above it; a blinking white flash on every part while invulnerable, and tipping
-over on its back when defeated.
+over on its back when defeated. While `Running` (passed to `Animate`, blended in and out over
+about 0.25 s) the stride is quicker (`RunCadence`, 20% more steps per meter) and wider
+(`RunSwing`, 30% more leg and hand swing), the whole character bounces up to `RunBounce` (5 cm) off
+each step and leans forward about its feet by `RunLean` (0.12 rad).
 
 **Archery** (the Bow module draws only the arrows in flight; the character holds and draws the
 bow). `ArcheryPose` (Core, pure functions, positions in the model frame: X right, Y up, -Z the
@@ -278,7 +285,7 @@ its own frame points forward). Feet at the origin, facing -Z in Godot.
 ## Screenshots
 
 `./screenshot.sh modules/Player/Godot/Preview.tscn` shows both characters; the environment
-variable `PLAYER_PREVIEW` picks the pose: `front` (default), `back`, `walk`, `jump`, `hit`,
+variable `PLAYER_PREVIEW` picks the pose: `front` (default), `back`, `walk`, `run`, `jump`, `hit`,
 `draw` (full draw), `drawback` (full draw from behind, like the game camera), `release` (just
 after a shot), `swing` (the bow on its way back), or `aim`, `side` and `facing`: a held draw
 (`PLAYER_PREVIEW_DRAW`, 0..1, default 1) at a level aim from the Camera module's aim camera (0.9 m

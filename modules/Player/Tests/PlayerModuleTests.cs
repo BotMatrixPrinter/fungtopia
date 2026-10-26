@@ -70,8 +70,12 @@ public class PlayerModuleTests
         bus.Publish(new StartScreenState(false));
     }
 
-    private static PlayerInput Moving(float x, float y, bool fire = false, Vector3? aim = null, bool jump = false) =>
-        new(new Vector2(x, y), Vector2.Zero, jump, fire, aim.HasValue, aim.HasValue ? Vector3.Normalize(aim.Value) : Vector3.Zero);
+    private static PlayerInput Moving(float x, float y, bool fire = false, Vector3? aim = null, bool jump = false, bool run = false) =>
+        new(new Vector2(x, y), Vector2.Zero, jump, fire, aim.HasValue, aim.HasValue ? Vector3.Normalize(aim.Value) : Vector3.Zero,
+            false, false, Vector3.Zero, false, -1, 0, run);
+
+    /// <summary>Moving with Run held (the left trigger or Shift).</summary>
+    private static PlayerInput Running(float x, float y, bool jump = false) => Moving(x, y, jump: jump, run: true);
 
     private static PlayerInput Idle => default;
 
@@ -299,6 +303,95 @@ public class PlayerModuleTests
         AssertDirection(new Vector2(0f, -1f), Flat(s.Velocity)); // camera yaw 0 looks along -Z
         Assert.Equal(5f, Flat(s.Velocity).Length(), 2);
         Assert.Equal(5f, Vector2.Distance(Flat(Middle), Flat(s.Position)), 1);
+        Assert.False(_player.Running);
+    }
+
+    // ---- Running ----
+
+    [Fact]
+    public void RunSpeedIsAQuarterFasterThanWalking()
+    {
+        Assert.Equal(5f, PlayerModule.WalkSpeed);
+        Assert.Equal(6.25f, PlayerModule.RunSpeed);
+    }
+
+    [Fact]
+    public void RunsForwardAlongTheCameraAtSixPointTwoFiveMetersPerSecond()
+    {
+        _player.PlaceAt(Middle);
+        Run(1.0, Running(0f, 1f));
+        var s = _bus.States[^1];
+        AssertDirection(new Vector2(0f, -1f), Flat(s.Velocity));
+        Assert.Equal(6.25f, Flat(s.Velocity).Length(), 3);
+        Assert.Equal(6.25f, Vector2.Distance(Flat(Middle), Flat(s.Position)), 2);
+        Assert.True(_player.Running);
+    }
+
+    [Fact]
+    public void LettingGoOfRunWalksAgainAtFiveMetersPerSecond()
+    {
+        _player.PlaceAt(Middle);
+        Run(0.5, Running(0f, 1f));
+        Assert.Equal(6.25f, Flat(_bus.States[^1].Velocity).Length(), 3);
+        var from = _player.Position;
+        Run(1.0, Moving(0f, 1f));
+        Assert.Equal(5f, Flat(_bus.States[^1].Velocity).Length(), 3);
+        Assert.Equal(5f, Vector2.Distance(Flat(from), Flat(_player.Position)), 2);
+        Assert.False(_player.Running);
+    }
+
+    [Theory]
+    [InlineData(0.5f, 0f, 3.125f)]
+    [InlineData(0f, -0.4f, 2.5f)]
+    [InlineData(1f, 1f, 6.25f)]
+    public void RunningScalesWithTheStickAndIsNeverFasterThanRunSpeed(float x, float y, float expected)
+    {
+        _player.PlaceAt(Middle);
+        Run(0.5, Running(x, y));
+        var v = Flat(_bus.States[^1].Velocity);
+        Assert.Equal(expected, v.Length(), 3);
+        AssertDirection(new Vector2(x, -y), v);
+    }
+
+    [Fact]
+    public void HoldingRunWithoutMovingStandsStill()
+    {
+        _player.PlaceAt(Middle);
+        Run(0.5, Running(0f, 0f));
+        Assert.Equal(Vector3.Zero, _bus.States[^1].Velocity);
+        Assert.Equal(Flat(Middle), Flat(_player.Position));
+        Assert.False(_player.Running);
+    }
+
+    [Fact]
+    public void RunningTurnsAtTheSameRateAsWalking()
+    {
+        _player.PlaceAt(Middle, facing: 0f);
+        TickWith(Moving(1f, 0f));
+        float walked = _bus.States[^1].Facing;
+        _player.PlaceAt(Middle, facing: 0f);
+        TickWith(Running(1f, 0f));
+        Assert.Equal(walked, _bus.States[^1].Facing);
+    }
+
+    [Fact]
+    public void JumpsAsHighWhileRunningAndKeepsRunning()
+    {
+        _player.PlaceAt(Middle);
+        float ground = _player.Position.Y;
+        TickWith(Running(0f, 1f, jump: true));
+        float apex = float.MinValue;
+        for (int i = 0; i < 18; i++)
+        {
+            TickWith(Running(0f, 1f));
+            apex = MathF.Max(apex, _player.Position.Y);
+        }
+        var s = _bus.States[^1];
+        Assert.False(s.Grounded);
+        Assert.Equal(6.25f, Flat(s.Velocity).Length(), 2);
+        Run(1.0, Running(0f, 1f));
+        Assert.True(_bus.States[^1].Grounded);
+        Assert.InRange(apex - ground, 1.1f, 1.35f);
     }
 
     [Fact]
@@ -488,14 +581,16 @@ public class PlayerModuleTests
         throw new InvalidOperationException("no lone trunk in the forest");
     }
 
-    [Fact]
-    public void NeverWalksIntoATrunk()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void NeverWalksIntoATrunk(bool run)
     {
         var trunk = LoneTrunk();
         _player.PlaceAt(new Vector3(trunk.X, 0f, trunk.Z + trunk.Radius + 3f));
         for (int i = 0; i < 180; i++)
         {
-            TickWith(Moving(0f, 1f)); // straight north at its center
+            TickWith(Moving(0f, 1f, run: run)); // straight north at its center
             Assert.True(Vector2.Distance(trunk.Center, Flat(_player.Position)) >= trunk.Radius + PlayerModule.Radius - 0.001f);
         }
         // Pressed against it and stopped.
@@ -715,8 +810,9 @@ public class PlayerModuleTests
         _player.PlaceAt(Middle);
         _bus.Publish(new DialogueState(true, 3));
         var at = _player.Position;
-        Run(1.0, Moving(1f, 1f, jump: true));
+        Run(1.0, Moving(1f, 1f, jump: true, run: true));
         Assert.Equal(at, _player.Position);
+        Assert.False(_player.Running);
         Assert.Equal(Vector3.Zero, _bus.States[^1].Velocity);
         Assert.True(_bus.States[^1].Grounded);
         // A jump pressed while talking is not kept for later.
@@ -726,6 +822,8 @@ public class PlayerModuleTests
         // Closed: walks and jumps again.
         Run(0.5, Moving(0f, 1f));
         Assert.True(Flat(_bus.States[^1].Velocity).Length() > 4f);
+        Run(0.5, Running(0f, 1f));
+        Assert.Equal(6.25f, Flat(_bus.States[^1].Velocity).Length(), 3);
         TickWith(Moving(0f, 1f, jump: true));
         Assert.False(_bus.States[^1].Grounded);
     }
@@ -748,9 +846,10 @@ public class PlayerModuleTests
 
     private void CloseWardrobe() => _bus.Publish(new WardrobeState(false, false));
 
-    /// <summary>Every kind of input at once: move, look, jump, fire with an aim.</summary>
+    /// <summary>Every kind of input at once: move, look, jump, run, fire with an aim.</summary>
     private static PlayerInput Everything(float x, float y) =>
-        new(new Vector2(x, y), new Vector2(0.3f, 0.1f), true, true, true, Vector3.Normalize(new Vector3(1f, -0.2f, -1f)));
+        new(new Vector2(x, y), new Vector2(0.3f, 0.1f), true, true, true, Vector3.Normalize(new Vector3(1f, -0.2f, -1f)),
+            false, false, Vector3.Zero, false, -1, 0, true);
 
     [Theory]
     [InlineData(false, true)]
@@ -783,6 +882,7 @@ public class PlayerModuleTests
                 Assert.Equal(Ground.HeightAt(at.X, at.Z), state.Position.Y);
                 Assert.Equal(Vector3.Zero, state.Velocity);
                 Assert.True(state.Grounded);
+                Assert.False(_player.Running);
                 // No turning toward the move or the aim, no camera turn from Look.
                 Assert.Equal(facing, state.Facing);
                 Assert.Equal(cameraYaw, _player.CameraYaw);

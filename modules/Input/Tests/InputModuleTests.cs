@@ -308,6 +308,89 @@ public class InputModuleTests
         Assert.True(TickOnce(input, bus, 1).Fire);
     }
 
+    // --- run ---
+
+    [Fact]
+    public void ShiftRunsWhileHeld()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        Assert.False(TickOnce(input, bus).Run);
+        input.SetRunKey(true);
+        Assert.True(TickOnce(input, bus, 1).Run);
+        Assert.True(TickOnce(input, bus, 2).Run);
+        input.SetRunKey(false);
+        Assert.False(TickOnce(input, bus, 3).Run);
+    }
+
+    [Fact]
+    public void LeftTriggerRunsPastTheFireThreshold()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        input.SetRunTrigger(input.TriggerThreshold - 0.1f);
+        Assert.False(TickOnce(input, bus).Run);
+        input.SetRunTrigger(input.TriggerThreshold);
+        Assert.True(TickOnce(input, bus, 1).Run);
+        input.SetRunTrigger(0.9f);
+        var msg = TickOnce(input, bus, 2);
+        Assert.True(msg.Run);
+        Assert.False(msg.Fire);
+        input.SetRunTrigger(0f);
+        Assert.False(TickOnce(input, bus, 3).Run);
+        input.SetRunTrigger(float.NaN);
+        Assert.False(TickOnce(input, bus, 4).Run);
+    }
+
+    [Fact]
+    public void RightTriggerFiresButDoesNotRun()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        input.SetFireTrigger(1f);
+        var msg = TickOnce(input, bus);
+        Assert.True(msg.Fire);
+        Assert.False(msg.Run);
+    }
+
+    [Fact]
+    public void OlderConstructorsLeaveRunFalse()
+    {
+        var aim = new Vector3(0, 0, -1);
+        foreach (var msg in new[]
+        {
+            default(PlayerInput),
+            new PlayerInput(Vector2.One, Vector2.One, true, true, true, aim),
+            new PlayerInput(Vector2.One, Vector2.One, true, true, true, aim, true, true),
+            new PlayerInput(Vector2.One, Vector2.One, true, true, true, aim, true, true, Vector3.One),
+            new PlayerInput(Vector2.One, Vector2.One, true, true, true, aim, true, true, Vector3.One, true, 1, 1),
+        })
+            Assert.False(msg.Run);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void FullConstructorSetsRun(bool run)
+    {
+        var msg = new PlayerInput(new Vector2(0, 1), Vector2.Zero, false, false, true, new Vector3(0, 0, -1),
+            false, false, Vector3.One, true, 2, -1, run);
+        Assert.Equal(run, msg.Run);
+        Assert.True(msg.Eat);
+        Assert.Equal(2, msg.FoodSelect);
+        Assert.Equal(-1, msg.FoodCycle);
+        Assert.Equal(Vector3.One, msg.AimOrigin);
+    }
+
+    [Fact]
+    public void ViewReadsShiftAndTheLeftTriggerForRun()
+    {
+        var source = ViewSource();
+        Assert.Contains("_input.SetRunKey(GodotInput.IsPhysicalKeyPressed(Godot.Key.Shift));", source);
+        Assert.Contains("_input.SetRunTrigger(GodotInput.GetJoyAxis(Pad, JoyAxis.TriggerLeft));", source);
+        Assert.Contains("_input.SetFireTrigger(GodotInput.GetJoyAxis(Pad, JoyAxis.TriggerRight));", source);
+    }
+
     // --- interact and map ---
 
     [Fact]
@@ -663,6 +746,8 @@ public class InputModuleTests
         input.SetLookStick(new Vector2(1, 0));
         input.AddMouseMotion(new Vector2(10, 0));
         input.SetFireButton(true);
+        input.SetRunKey(true);
+        input.SetRunTrigger(1f);
         input.PressJump();
         input.PressInteract();
         input.PressOpenMap();
@@ -678,6 +763,7 @@ public class InputModuleTests
         Assert.Equal(Vector2.Zero, msg.Look);
         Assert.False(msg.Jump);
         Assert.False(msg.Fire);
+        Assert.False(msg.Run);
         Assert.False(msg.Eat);
         Assert.Equal(-1, msg.FoodSelect);
         Assert.Equal(0, msg.FoodCycle);
@@ -691,6 +777,7 @@ public class InputModuleTests
         Assert.True(msg.Look.X > 0);
         Assert.True(msg.Jump);
         Assert.True(msg.Fire);
+        Assert.True(msg.Run);
         Assert.True(msg.Eat);
         Assert.Equal(1, msg.FoodSelect);
         Assert.Equal(1, msg.FoodCycle);
@@ -884,6 +971,23 @@ public class InputModuleTests
         Assert.False(msg.Eat);
         Assert.Equal(-1, msg.FoodSelect);
         Assert.Equal(0, msg.FoodCycle);
+    }
+
+    [Theory]
+    [InlineData(true, 0f)]
+    [InlineData(false, 1f)]
+    public void RunIsFalseWhileAMenuIsOpenAndComesBackAfter(bool shift, float trigger)
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        input.SetRunKey(shift);
+        input.SetRunTrigger(trigger);
+        Assert.True(TickOnce(input, bus).Run);
+        bus.Focus(ShopMenu, true);
+        Assert.False(TickOnce(input, bus, 1).Run);
+        Assert.False(input.Latest.Run);
+        bus.Focus(ShopMenu, false);
+        Assert.True(TickOnce(input, bus, 2).Run);
     }
 
     [Fact]
@@ -1109,7 +1213,7 @@ public class InputModuleTests
     {
         Assert.Equal(new[] { "KeyboardMouse", "Xbox", "PlayStation", "Nintendo", "Generic" }, Enum.GetNames<DeviceKind>());
         Assert.Equal(new[] { "Interact", "Jump", "Fire", "Back", "Confirm", "OpenMap", "Eat", "FoodPrev", "FoodNext",
-            "Pause", "MenuUp", "MenuDown", "MenuLeft", "MenuRight", "TurnLeft", "TurnRight", "Move", "Look" },
+            "Pause", "MenuUp", "MenuDown", "MenuLeft", "MenuRight", "TurnLeft", "TurnRight", "Move", "Look", "Run" },
             Enum.GetNames<PromptAction>());
     }
 
@@ -1164,6 +1268,7 @@ public class InputModuleTests
     [InlineData(PromptAction.TurnRight, "key_e", "xbox_rb", "ps_r1", "ns_r")]
     [InlineData(PromptAction.Move, "key_wasd", "xbox_ls", "ps_ls", "ns_ls")]
     [InlineData(PromptAction.Look, "mouse_move", "xbox_rs", "ps_rs", "ns_rs")]
+    [InlineData(PromptAction.Run, "key_shift", "xbox_lt", "ps_l2", "ns_zl")]
     public void BindingsMatchTheControls(PromptAction action, string keyboard, string xbox, string playStation, string nintendo)
     {
         Assert.Equal(keyboard, Prompts.Glyph(action, DeviceKind.KeyboardMouse));
@@ -1186,6 +1291,10 @@ public class InputModuleTests
         Assert.Equal("Circle", Prompts.Text(PromptAction.Back, DeviceKind.PlayStation));
         Assert.Equal("Options", Prompts.Text(PromptAction.Pause, DeviceKind.PlayStation));
         Assert.Equal("+", Prompts.Text(PromptAction.Pause, DeviceKind.Nintendo));
+        Assert.Equal("Shift", Prompts.Text(PromptAction.Run, DeviceKind.KeyboardMouse));
+        Assert.Equal("LT", Prompts.Text(PromptAction.Run, DeviceKind.Xbox));
+        Assert.Equal("L2", Prompts.Text(PromptAction.Run, DeviceKind.PlayStation));
+        Assert.Equal("ZL", Prompts.Text(PromptAction.Run, DeviceKind.Nintendo));
     }
 
     [Fact]

@@ -31,6 +31,8 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
     IMessageHandler<WardrobeState>, IMessageHandler<PreviewYaw>, IMessageHandler<CollectSave>, IMessageHandler<RestorePart>
 {
     public const float WalkSpeed = 5f;
+    /// <summary>Speed at full deflection while <c>PlayerInput.Run</c> is held: 25% faster than walking.</summary>
+    public const float RunSpeed = 1.25f * WalkSpeed;
     public const float JumpHeight = 1.2f;
     public const float Gravity = 20f;
     /// <summary>Fastest turn, radians per second.</summary>
@@ -113,6 +115,9 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
 
     /// <summary>Number of ticks run; the view uses it to see new ticks.</summary>
     public long Ticks { get; private set; }
+
+    /// <summary>True on a tick the player moved at <see cref="RunSpeed"/> (Run held while walking); the view runs.</summary>
+    public bool Running { get; private set; }
 
     /// <summary>The archery pose, advanced every tick from the latest <see cref="BowState.Draw"/>.</summary>
     public ArcheryState Archery { get; private set; } = ArcheryState.Relaxed;
@@ -429,6 +434,7 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
             Position = new Vector3(Position.X, Ground.HeightAt(Position.X, Position.Z), Position.Z);
             Velocity = Vector3.Zero;
             Grounded = true;
+            Running = false;
         }
         else
         {
@@ -463,10 +469,12 @@ public sealed class PlayerModule : IModule, IMessageHandler<PlayerInput>, IMessa
         float length = move.Length();
         if (length > 1f)
             move /= length;
+        Running = canWalk && _input.Run && length > 0.05f;
+        float speed = Running ? RunSpeed : WalkSpeed;
         float sin = MathF.Sin(CameraYaw), cos = MathF.Cos(CameraYaw);
         // Camera forward is (-sin, -cos) in (x, z); its right is (cos, -sin).
-        float wantX = (move.X * cos - move.Y * sin) * WalkSpeed;
-        float wantZ = (-move.X * sin - move.Y * cos) * WalkSpeed;
+        float wantX = (move.X * cos - move.Y * sin) * speed;
+        float wantZ = (-move.X * sin - move.Y * cos) * speed;
 
         // Facing: toward the aim while Fire is held, else toward the move direction.
         if (Alive)

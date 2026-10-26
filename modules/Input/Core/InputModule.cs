@@ -22,7 +22,7 @@ public sealed class InputModule : IModule, IMessageHandler<UiFocus>, IMessageHan
     /// <summary>Mouse look, radians per pixel of mouse motion.</summary>
     public float MouseRadiansPerPixel { get; set; } = 0.003f;
 
-    /// <summary>Right trigger value (0..1) at and above which it counts as firing.</summary>
+    /// <summary>Trigger value (0..1) at and above which it counts as held: the right one fires, the left one runs.</summary>
     public float TriggerThreshold { get; set; } = 0.5f;
 
     /// <summary>Mouse motion of at least this many pixels in one event switches to keyboard and mouse.</summary>
@@ -48,6 +48,8 @@ public sealed class InputModule : IModule, IMessageHandler<UiFocus>, IMessageHan
     private int _foodCyclePressed;
     private bool _fireButton;
     private float _fireTrigger;
+    private bool _runKey;
+    private float _runTrigger;
     private bool _hasAim;
     private Vector3 _aim;
     private Vector3 _aimOrigin;
@@ -198,6 +200,12 @@ public sealed class InputModule : IModule, IMessageHandler<UiFocus>, IMessageHan
     /// <summary>The fire trigger's value, 0..1.</summary>
     public void SetFireTrigger(float value) => _fireTrigger = float.IsFinite(value) ? value : 0f;
 
+    /// <summary>Whether the run key (Shift) is held.</summary>
+    public void SetRunKey(bool held) => _runKey = held;
+
+    /// <summary>The run trigger's (left trigger's) value, 0..1.</summary>
+    public void SetRunTrigger(float value) => _runTrigger = float.IsFinite(value) ? value : 0f;
+
     /// <summary>
     /// The ray from the camera through the screen center: <paramref name="origin"/> is the camera's
     /// world position, <paramref name="direction"/> any length (normalized here).
@@ -233,6 +241,7 @@ public sealed class InputModule : IModule, IMessageHandler<UiFocus>, IMessageHan
         move = ClampLength(move);
         Vector2 look = _mouseLook + ApplyDeadZone(_lookStick, StickDeadZone) * (StickLookRadiansPerSecond * (float)context.StepSeconds);
         bool fire = _fireButton || _fireTrigger >= TriggerThreshold;
+        bool run = _runKey || _runTrigger >= TriggerThreshold;
         bool jump = _jumpPressed;
         bool interact = _interactPressed;
         if (_gamepadAPressed)
@@ -251,13 +260,14 @@ public sealed class InputModule : IModule, IMessageHandler<UiFocus>, IMessageHan
             look = Vector2.Zero;
             jump = false;
             fire = false;
+            run = false;
             eat = false;
             foodSelect = -1;
             foodCycle = 0;
         }
 
         Latest = new PlayerInput(move, look, jump, fire, _hasAim, _aim, interact, _openMapPressed, _aimOrigin,
-            eat, foodSelect, foodCycle);
+            eat, foodSelect, foodCycle, run);
         _mouseLook = Vector2.Zero;
         _jumpPressed = false;
         _interactPressed = false;

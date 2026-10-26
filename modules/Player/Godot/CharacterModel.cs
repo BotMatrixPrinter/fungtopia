@@ -57,6 +57,18 @@ public partial class CharacterModel : Node3D
     /// <summary>How far the legs swing back and forth at the hips at a full walk, radians.</summary>
     private const float LegSwing = 0.5f;
 
+    /// <summary>How much quicker the stride's cadence is at a full run than walking at the same speed.</summary>
+    private const float RunCadence = 0.2f;
+
+    /// <summary>How much wider the legs and hands swing at a full run.</summary>
+    private const float RunSwing = 0.3f;
+
+    /// <summary>How high the whole character bounces off the ground on each running step, meters.</summary>
+    private const float RunBounce = 0.05f;
+
+    /// <summary>How far the whole character leans forward (about its feet) at a full run, radians.</summary>
+    private const float RunLean = 0.12f;
+
     /// <summary>How far the (invisible) arms turn out from their rest while standing and walking, radians.</summary>
     private const float HandsOut = 0.12f;
 
@@ -66,6 +78,7 @@ public partial class CharacterModel : Node3D
     private Vector3 _bowPush;
     private float _walkPhase;
     private float _walkAmount;
+    private float _runAmount;
     private float _squash;
     private float _stretch;
     private float _tipOver;
@@ -347,13 +360,22 @@ public partial class CharacterModel : Node3D
     /// <param name="aimYaw">Aim yaw from the facing, from <see cref="ArcheryPose.AimAngles"/>.</param>
     /// <param name="aimPitch">Aim pitch, from <see cref="ArcheryPose.AimAngles"/>.</param>
     public void Animate(float delta, float speed, bool grounded, float verticalSpeed, float flash, bool alive,
-        in ArcheryState archery, float aimYaw, float aimPitch)
+        in ArcheryState archery, float aimYaw, float aimPitch) =>
+        Animate(delta, speed, grounded, verticalSpeed, flash, alive, archery, aimYaw, aimPitch, false);
+
+    /// <inheritdoc cref="Animate(float, float, bool, float, float, bool, in ArcheryState, float, float)"/>
+    /// <param name="running">Running (<see cref="PlayerModule.Running"/>): a quicker, bouncier stride with a little forward lean.</param>
+    public void Animate(float delta, float speed, bool grounded, float verticalSpeed, float flash, bool alive,
+        in ArcheryState archery, float aimYaw, float aimPitch, bool running)
     {
         _time += delta;
         float walkTarget = grounded && alive ? Math.Clamp(speed / 5f, 0f, 1f) : 0f;
         _walkAmount = Mathf.MoveToward(_walkAmount, walkTarget, delta * 6f);
-        // About two steps per meter and a half: the feet keep up with the ground.
-        _walkPhase = (_walkPhase + delta * speed * 2.6f) % Mathf.Tau;
+        // The run blends in and out over about a quarter of a second, and only while striding.
+        _runAmount = Mathf.MoveToward(_runAmount, running && alive ? 1f : 0f, delta * 4f);
+        float run = _runAmount * _walkAmount;
+        // About two steps per meter and a half: the feet keep up with the ground; running steps are quicker.
+        _walkPhase = (_walkPhase + delta * speed * 2.6f * (1f + RunCadence * run)) % Mathf.Tau;
 
         if (grounded && !_wasGrounded)
             _squash = 1f; // landing
@@ -366,9 +388,11 @@ public partial class CharacterModel : Node3D
         // The tube legs swing back and forth at the hips, the whole character dipping just enough that
         // both feet stay on the ground (each lifts its sole by LegReach × (1 − cos swing)); the arms
         // are invisible pivots, so they swing the floating hands (at their ends) the other way.
-        float swing = MathF.Sin(_walkPhase) * 0.65f * _walkAmount;
-        float legSwing = MathF.Sin(_walkPhase) * LegSwing * _walkAmount;
-        float bob = grounded ? -LegReach * (1f - MathF.Cos(legSwing)) : 0f;
+        float swing = MathF.Sin(_walkPhase) * 0.65f * _walkAmount * (1f + RunSwing * run);
+        float legSwing = MathF.Sin(_walkPhase) * LegSwing * _walkAmount * (1f + RunSwing * run);
+        // Running bounces up off each step (twice per stride), highest as the legs pass each other.
+        float bounce = RunBounce * run * MathF.Abs(MathF.Cos(_walkPhase));
+        float bob = grounded ? -LegReach * (1f - MathF.Cos(legSwing)) + bounce : 0f;
         float breathe = MathF.Sin(_time * 2.4f) * 0.012f * (1f - _walkAmount);
         float airLegs = grounded ? 0f : 0.35f;
 
@@ -380,7 +404,8 @@ public partial class CharacterModel : Node3D
         float up = 1f - 0.28f * s + 0.12f * _stretch + breathe;
         float wide = 1f + 0.18f * s - 0.05f * _stretch;
         float fall = Mathf.SmoothStep(0f, 1f, _tipOver);
-        var lie = Basis.FromEuler(new Vector3(fall * Mathf.Pi * 0.5f, 0f, 0f));
+        // Tipping over turns about X onto the back; the run's lean turns the other way, forward.
+        var lie = Basis.FromEuler(new Vector3(fall * Mathf.Pi * 0.5f - RunLean * run * (1f - fall), 0f, 0f));
         _rig.Transform = new Transform3D(lie, new Vector3(0f, bob, 0f));
 
         _legL.Pose(new Vector3(legSwing + airLegs * 0.6f, 0f, 0f));

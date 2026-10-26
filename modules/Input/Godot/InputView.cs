@@ -148,6 +148,8 @@ public partial class InputView : Control, IModuleView
             _ignoreFireUntilRelease = false;
         _input.SetFireButton(captured && held && !_ignoreFireUntilRelease);
         _input.SetFireTrigger(GodotInput.GetJoyAxis(Pad, JoyAxis.TriggerRight));
+        _input.SetRunKey(GodotInput.IsPhysicalKeyPressed(Godot.Key.Shift));
+        _input.SetRunTrigger(GodotInput.GetJoyAxis(Pad, JoyAxis.TriggerLeft));
 
         var camera = GetViewport().GetCamera3D();
         if (camera == null)

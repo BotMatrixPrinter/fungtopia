@@ -12,6 +12,8 @@ prompts use `ActiveDevice` with `Prompts` to show only the buttons of the device
   - `Jump`: true on the one tick after a jump press (Space; the gamepad's bottom button only when
     nothing can be interacted with, see `InteractAvailable`).
   - `Fire`: true while fire is held.
+  - `Run`: true while run is held: the gamepad's left trigger at or past `TriggerThreshold` (the
+    same threshold the right trigger uses for `Fire`), or Shift on the keyboard.
   - `Interact`: true on the one tick after an interact press (talk, signposts, doors): E, X / Square,
     or the gamepad's bottom button while something can be interacted with or a menu is open.
   - `OpenMap`: true on the one tick after a map press.
@@ -23,6 +25,7 @@ prompts use `ActiveDevice` with `Prompts` to show only the buttons of the device
   - The six-argument constructor still works and leaves `Interact` and `OpenMap` false. The six-,
     eight- and nine-argument constructors leave `Eat` false, `FoodSelect` -1 and `FoodCycle` 0; the
     twelve-argument one sets them (`FoodSelect` outside 0..2 becomes -1, `FoodCycle` becomes its sign).
+    Every constructor but the full thirteen-argument one (which adds `run` last) leaves `Run` false.
   - `HasAim` / `AimDirection`: the world-space unit ray from the current 3D camera through the
     screen center (where the HUD's crosshair sits). When there is no camera, `HasAim` is false and `AimDirection` is zero.
   - `AimOrigin`: the world-space start of that ray, the current 3D camera's position, published with
@@ -31,7 +34,7 @@ prompts use `ActiveDevice` with `Prompts` to show only the buttons of the device
 - `Contract/` also has `UiFocus` (`int Owner`, `bool Open`): a module publishes `Open` true while one
   of its menus is open and false when it closes (`Owner` is any number unique to that menu, for
   example a hash of its name). While any owner is open, `PlayerInput` has `Move` and `Look` zero and
-  `Jump`, `Fire` and `Eat` false, `FoodSelect` -1 and `FoodCycle` 0; `Interact` and `OpenMap` are still reported, so menus and dialogue can use
+  `Jump`, `Fire`, `Run` and `Eat` false, `FoodSelect` -1 and `FoodCycle` 0; `Interact` and `OpenMap` are still reported, so menus and dialogue can use
   them. Owners are tracked one by one: an owner that opens twice needs one close, closing an owner
   that is not open changes nothing, and the controls come back when the last open owner closes.
 - `Contract/` also has `InteractAvailable` (`int Owner`, `bool Available`), tracked per owner like
@@ -62,7 +65,8 @@ prompts use `ActiveDevice` with `Prompts` to show only the buttons of the device
 published as `ActiveDevice` every tick (also while a menu is open): `NoteKeyboardMouse()` (a key,
 mouse button or wheel press), `NoteMouseMotion(pixels)` (switches from `MouseSwitchPixels`, 2, in one
 event), `NoteGamepadButton(family)` and `NoteGamepadAxis(family, value)` (switches only past
-`StickDeadZone`). `SetMenuButtons(vertical, horizontal)` takes the held D-pad / arrow / WASD menu
+`StickDeadZone`). `SetFireButton` / `SetFireTrigger` and `SetRunKey` / `SetRunTrigger` take the held
+fire and run buttons and triggers. `SetMenuButtons(vertical, horizontal)` takes the held D-pad / arrow / WASD menu
 directions; the menu stick is the left stick from `SetMoveStick`, and `LatestMenuNav` is the last step.
 `JoypadFamily.Detect(name, guid)` tells the family from Godot's joypad name
 (PlayStation / DualShock / DualSense / Sony / PS3-5, Nintendo / Switch / Joy-Con / Pro Controller,
@@ -95,6 +99,7 @@ Xbox / XInput / Microsoft) or else the USB vendor in its SDL GUID (054c Sony, 05
 | Look | Mouse (when captured) | Right stick |
 | Jump | Space | A / Cross (when nothing can be interacted with) |
 | Fire (hold) | Left mouse button | Right trigger |
+| Run (hold, while moving) | Shift | Left trigger |
 | Interact | E (physical key) | A / Cross while something can be interacted with or a menu is open; X / Square always |
 | Open map | M (physical key) | Back / Select or Touchpad |
 | Eat the selected food | F (physical key) | D-pad Up |
@@ -132,5 +137,6 @@ Nintendo pad's bottom button is B and its right one A.
 | TurnRight | E | RB | R1 | R | wardrobe |
 | Move | W A S D | Left stick | Left stick | Left stick | this module |
 | Look | Mouse | Right stick | Right stick | Right stick | this module |
+| Run | Shift | LT | L2 | ZL | this module |
 
 Test it with `./test.sh Input` from the repository root.

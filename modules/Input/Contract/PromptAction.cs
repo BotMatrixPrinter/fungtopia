@@ -21,4 +21,5 @@ public enum PromptAction
     TurnRight,
     Move,
     Look,
+    Run,
 }
