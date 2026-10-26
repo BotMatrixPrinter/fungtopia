@@ -118,27 +118,27 @@ public partial class PlayerPreview : Node3D
             var head = new Vector3(spread, Fungtopia.Bow.BowGeometry.HeadUp, 0f);
             if (_pose == "aim")
             {
-                // The Camera module's aim camera: 0.9 m right of and 0.25 m above the head, 2.75 m behind, pitched -12 degrees.
+                // The Camera module's aim camera: 0.7 m right of and 0.25 m above the head, 2.75 m behind, pitched -12 degrees.
                 camera.Fov = 62f;
-                var pivot = head + new Vector3(0.9f, 0.25f, 0f);
+                var pivot = head + new Vector3(0.7f, 0.25f, 0f);
                 float pitch = Mathf.DegToRad(-12f);
                 camera.LookAtFromPosition(pivot + new Vector3(0f, -MathF.Sin(pitch), MathF.Cos(pitch)) * 2.75f, pivot, Vector3.Up);
             }
             else if (_pose == "side")
-                camera.LookAtFromPosition(new Vector3(4.2f, 1.1f, -0.25f), new Vector3(0f, 0.8f, -0.25f), Vector3.Up); // the bow's side
+                camera.LookAtFromPosition(new Vector3(5.2f, 1.5f, -0.25f), new Vector3(0f, 1.05f, -0.25f), Vector3.Up); // the bow's side
             else
-                camera.LookAtFromPosition(new Vector3(-0.2f, 1.2f, -4.4f), new Vector3(-0.2f, 0.8f, 0f), Vector3.Up);
+                camera.LookAtFromPosition(new Vector3(-0.2f, 1.5f, -5.2f), new Vector3(-0.2f, 1.05f, 0f), Vector3.Up);
         }
         else if (_pose == "drawback")
             // Like the game's camera: over the right shoulder, from behind and a little above.
-            camera.LookAtFromPosition(new Vector3(0.5f + (_models.Length == 1 ? 0f : 0.9f), 1.9f, 3.4f),
-                new Vector3(0.4f, 1.1f, -1f), Vector3.Up);
+            camera.LookAtFromPosition(new Vector3(0.5f + (_models.Length == 1 ? 0f : 0.9f), 2.4f, 4.0f),
+                new Vector3(0.4f, 1.35f, -1f), Vector3.Up);
         else if (looks)
-            camera.LookAtFromPosition(new Vector3(0f, 1.5f, 6.6f), new Vector3(0f, 0.7f, 0f), Vector3.Up);
+            camera.LookAtFromPosition(new Vector3(0f, 1.7f, 7.4f), new Vector3(0f, 0.92f, 0f), Vector3.Up);
         else if (_models.Length == 1)
-            camera.LookAtFromPosition(new Vector3(0f, 1.4f, 3.2f), new Vector3(0f, 0.85f, 0f), Vector3.Up);
+            camera.LookAtFromPosition(new Vector3(0f, 1.5f, 3.9f), new Vector3(0f, 0.95f, 0f), Vector3.Up);
         else
-            camera.LookAtFromPosition(new Vector3(0f, 1.3f, 4.6f), new Vector3(0f, 0.68f, 0f), Vector3.Up);
+            camera.LookAtFromPosition(new Vector3(0f, 1.5f, 5.0f), new Vector3(0f, 0.92f, 0f), Vector3.Up);
 
         // The archery poses: a full draw held (the Bow module's 0.6 s draw), then maybe a release.
         if (archery)

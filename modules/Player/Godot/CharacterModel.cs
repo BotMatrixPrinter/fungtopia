@@ -9,8 +9,8 @@ namespace Fungtopia.Player.View;
 /// One player character (girl.glb or boy.glb from modules/Player/Models, the modular rig), dressed
 /// by a <see cref="CharacterLook"/> (<see cref="Apply"/>: skin, eye and hair tints, the hair style
 /// and each worn item's model on the rig's parts, the built-in outfit where nothing is worn),
-/// drawn toon-shaded with ink outlines and animated procedurally: walk bob, the floating hands and the feet swinging,
-/// jump stretch and landing squash, a white hit flash, and tipping over when defeated; and the archery pose
+/// drawn toon-shaded with ink outlines and animated procedurally: the legs swinging from the hips in a walk with the
+/// feet on the ground, the floating hands swinging, jump stretch and landing squash, a white hit flash, and tipping over when defeated; and the archery pose
 /// (<see cref="ArcheryPose"/>): the bow from the back over the right shoulder into the left hand
 /// at the hold point on the right, the right hand drawing the string with a nocked arrow to the
 /// right cheek, upper body and head toward the aim.
@@ -48,8 +48,14 @@ public partial class CharacterModel : Node3D
     private MeshInstance3D? _stringTop, _stringBottom;
     private ShaderMaterial? _stringMaterial;
 
-    /// <summary>How far the body cone's bottom is below its pivot (the hips; characters.py's BODY_BOTTOM is 0.12 m): squash keeps it there.</summary>
-    private const float BodyBelowPivot = 0.17f;
+    /// <summary>How far the torso's bottom is below its pivot (the hips at 0.90 m; characters.py's TORSO_BOTTOM is 0.88 m): squash keeps it there.</summary>
+    private const float BodyBelowPivot = 0.02f;
+
+    /// <summary>Hip to sole, meters: a leg swung by an angle lifts its foot by this × (1 - cos angle), so the body drops that much to keep the feet on the ground.</summary>
+    private const float LegLength = 0.9f;
+
+    /// <summary>How far the legs swing forward and back from the hips at a full walk, radians.</summary>
+    private const float LegSwing = 0.5f;
 
     /// <summary>How far the (invisible) arms turn out from their rest while standing and walking, radians.</summary>
     private const float HandsOut = 0.12f;
@@ -343,8 +349,8 @@ public partial class CharacterModel : Node3D
         _time += delta;
         float walkTarget = grounded && alive ? Math.Clamp(speed / 5f, 0f, 1f) : 0f;
         _walkAmount = Mathf.MoveToward(_walkAmount, walkTarget, delta * 6f);
-        // About two steps per meter and a half: the feet keep up with the ground.
-        _walkPhase = (_walkPhase + delta * speed * 2.6f) % Mathf.Tau;
+        // A stride of about 0.7 m (two per walk cycle): the feet keep up with the ground.
+        _walkPhase = (_walkPhase + delta * speed * 4.4f) % Mathf.Tau;
 
         if (grounded && !_wasGrounded)
             _squash = 1f; // landing
@@ -354,10 +360,11 @@ public partial class CharacterModel : Node3D
         _stretch = Mathf.Lerp(_stretch, stretchTarget, Math.Min(1f, delta * 14f));
         _tipOver = Mathf.MoveToward(_tipOver, alive ? 0f : 1f, delta * (alive ? 3f : 2.5f));
 
-        // The model has no arms or legs: ArmL/ArmR and LegL/LegR are invisible pivots, so these swing
-        // the floating hands (at the arms' ends) and the feet (hanging from the hips) back and forth.
-        float swing = MathF.Sin(_walkPhase) * 0.65f * _walkAmount;
-        float bob = MathF.Abs(MathF.Sin(_walkPhase)) * 0.05f * _walkAmount;
+        // The legs swing from the hips (the shoes on their ends); the body drops as they spread, so
+        // the feet stay on the ground. The arms are invisible pivots: they swing the floating hands
+        // (at their ends) against the legs.
+        float swing = MathF.Sin(_walkPhase) * LegSwing * _walkAmount;
+        float bob = -LegLength * (1f - MathF.Cos(swing)) + MathF.Abs(MathF.Cos(_walkPhase)) * 0.02f * _walkAmount;
         float breathe = MathF.Sin(_time * 2.4f) * 0.012f * (1f - _walkAmount);
         float airLegs = grounded ? 0f : 0.35f;
 
@@ -381,8 +388,8 @@ public partial class CharacterModel : Node3D
         var backRotation = new Vector3(-0.08f * _walkAmount, MathF.Sin(_walkPhase) * 0.08f * _walkAmount, 0f);
         var backOffset = new Vector3(0f, bob * 0.3f, 0f) + _bowPush;
         _backBow.Pose(backRotation, backOffset);
-        PoseArchery(archery, aimYaw, aimPitch, walkBody, walkHead, new Vector3(-swing * 0.9f, 0f, -armsUp),
-            new Vector3(swing * 0.9f, 0f, armsUp), new Vector3(wide, up, wide), backRotation, backOffset);
+        PoseArchery(archery, aimYaw, aimPitch, walkBody, walkHead, new Vector3(-swing * 0.8f, 0f, -armsUp),
+            new Vector3(swing * 0.8f, 0f, armsUp), new Vector3(wide, up, wide), backRotation, backOffset);
 
         if (MathF.Abs(flash - _shownFlash) > 0.01f)
         {
@@ -461,26 +468,29 @@ public partial class CharacterModel : Node3D
             }
         }
 
-        // The arms turn at the shoulders (which ride on the body) toward the grip and the string.
+        // The arms turn at the shoulders (which ride on the body) toward the grip and the string;
+        // the drawing arm bends, so its hand comes in closer to the shoulder (up to the cheek).
         PoseArm(_armL, _handL, OnBody(ArcheryPose.ShoulderLRest), Basis.FromEuler(armLWalk).GetRotationQuaternion(),
-            ToPartsRotation(G(frame.ArmL)), w);
+            ToPartsRotation(G(frame.ArmL)), w, 1f);
+        float bend = System.Numerics.Vector3.Distance(frame.ShoulderR, frame.HandR) / ArcheryPose.ArmLength;
         PoseArm(_armR, _handR, OnBody(new System.Numerics.Vector3(-ArcheryPose.ShoulderLRest.X, ArcheryPose.ShoulderLRest.Y, ArcheryPose.ShoulderLRest.Z)),
-            Basis.FromEuler(armRWalk).GetRotationQuaternion(), ToPartsRotation(G(frame.ArmR)), w);
+            Basis.FromEuler(armRWalk).GetRotationQuaternion(), ToPartsRotation(G(frame.ArmR)), w, Mathf.Lerp(1f, bend, w));
     }
 
     /// <summary>
     /// An arm at <paramref name="shoulder"/> (parts' frame), turned from its walking rotation
-    /// toward the pose's by <paramref name="w"/>; never scaled: the hand stays at its end.
+    /// toward the pose's by <paramref name="w"/>; never scaled: the hand stays at its end, or
+    /// <paramref name="reach"/> of the way out where the (invisible) arm bends at the elbow.
     /// </summary>
-    private static void PoseArm(Part arm, Part hand, Vector3 shoulder, Quaternion walk, Quaternion pose, float w)
+    private static void PoseArm(Part arm, Part hand, Vector3 shoulder, Quaternion walk, Quaternion pose, float w, float reach)
     {
         if (arm.Node == null)
             return;
         var rotation = walk.Slerp(pose, w);
-        var reach = hand.Node != null ? hand.Rest.Origin - arm.Rest.Origin : new Vector3(0f, -ArcheryPose.ArmLength, 0f);
+        var toHand = hand.Node != null ? hand.Rest.Origin - arm.Rest.Origin : new Vector3(0f, -ArcheryPose.ArmLength, 0f);
         arm.Node.Transform = new Transform3D(new Basis(rotation) * arm.Rest.Basis, shoulder);
         if (hand.Node != null)
-            hand.Node.Transform = new Transform3D(hand.Rest.Basis, shoulder + new Basis(rotation) * reach);
+            hand.Node.Transform = new Transform3D(hand.Rest.Basis, shoulder + new Basis(rotation) * toHand * reach);
     }
 
     /// <summary>A straight piece of the string from <paramref name="from"/> to <paramref name="to"/> in the bow's frame.</summary>

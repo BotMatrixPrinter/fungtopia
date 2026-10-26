@@ -3,25 +3,27 @@
 # Run from the repository root:
 #   blender -b --factory-startup --python modules/Player/Models/characters.py
 #
-# Kids made of simple shapes, from Saria's drawings (2026-10-25), with floating hands and head
-# like Animal Crossing: a big round head with large dark oval eyes floating a few cm above a
-# smooth cone body (a triangle from the front, no neck), two round hands floating beside it, two
-# little round shoes under it, no arms or legs, and a bow carried on the back (its tips little mushroom-red caps). The Girl has a
-# ribbon bow on her head and a pink spotted dress coloring the cone; the Boy a bow tie, a blue
-# shirt coloring the cone and trousers as a band round its bottom. Both
-# share one modular rig (skin body parts) with the outfit and hair as separate child objects, so
-# the game can swap them for the Wardrobe's hair styles and clothes (see build()).
+# People made of simple shapes, from Saria's drawings (2026-10-25), grown up and about 1.8 m tall
+# (Tony, 2026-10-25: "they do have legs in the drawings", "make them look more normal"), with a
+# floating head and floating round hands like Animal Crossing: a round head with large dark oval
+# eyes floating about 5 cm above a smooth tapered torso (no neck, no visible arms), two round hands
+# floating at the ends of invisible arms, two real legs (rounded tubes from the hips) in rounded
+# shoes, and a bow carried on the back (its tips little mushroom-red caps). The Girl has a ribbon
+# bow on her head, pigtail puffs and a pink white-spotted dress; the Boy a blue shirt with a red
+# bow tie and trousers on his legs. Both share one modular rig (skin body parts) with the outfit
+# and hair as separate child objects, so the game can swap them for the Wardrobe's hair styles and
+# clothes (see build()).
 #
 # Meters, feet at the origin, facing Blender +Y (Godot's -Z, forward, after the glTF export).
 # Separate objects, each with its pivot where it moves, so the game can animate them:
-#   Body, Head (pivot at the neck), LegL / LegR (pivot at the hip; empty, the feet hang from
-#   them), ArmL / ArmR (pivot at the shoulder; empty, invisible), HandL / HandR (pivot at the hand's center; the game keeps them at the end of the
+#   Body (pivot at the hips), Head (pivot at the neck), LegL / LegR (pivot at the hip: a skin leg,
+#   the shoe and trouser leg its children, so they swing), ArmL / ArmR (pivot at the shoulder; empty, invisible), HandL / HandR (pivot at the hand's center; the game keeps them at the end of the
 #   arms), BackBow, and for shooting: HandBow (the same bow without its string, which the game
 #   draws; pivot at the grip) and NockArrow (the nocked arrow; pivot at its nock). HandBow rests
 #   exactly where BackBow is; its rotation is the sling, so its own frame is the held bow's: grip
 #   at the origin, tips up and down (Godot +-Y), arc bulging forward (Godot -Z), tips behind.
 #   NockArrow's own frame points forward (Godot -Z) from the nock; at rest it stands upright,
-#   hidden inside the body. Materials carry plain colors only; the game draws them toon-shaded
+#   hidden inside the left leg and the torso (the game hides it until it is nocked). Materials carry plain colors only; the game draws them toon-shaded
 #   with ink outlines.
 import math
 import os
@@ -52,20 +54,45 @@ COLORS = {
     "Fletch": (0.5, 0.85, 0.45),
 }
 
+# The body, for a 1.80 m character (feet at 0, top of the head at 1.80); a character of another
+# height is this rig scaled by height / 1.80. The game keeps ArcheryPose.cs, BowGeometry.cs and the
+# Wardrobe's kit.py in step.
+HEIGHT = 1.8
+HIP_Z = 0.90                 # Body's pivot and the legs' (LegL / LegR at x -/+LEG_X)
+LEG_X, LEG_R = 0.10, 0.065   # the legs: rounded tubes from the hips down into the shoes
+ANKLE_Z = 0.09               # where a leg's tube ends, inside its shoe
+# The shoes: rounded, about 0.12 m tall and 0.25 m long, a little ahead of the leg.
+SHOE_C = (0.03, 0.05)        # center (y, z) under the leg
+SHOE_R = (0.075, 0.125, 0.07)
+# The torso: a smooth tapered shape with oval cross-sections from TORSO_BOTTOM to TORSO_TOP:
+# hips about 0.34 m wide, waist 0.30, shoulders 0.40, about 0.22 m deep.
+TORSO_BOTTOM, TORSO_TOP = 0.88, 1.44
+TORSO_WIDTH = ((0.88, 0.15), (0.95, 0.17), (1.10, 0.15), (1.32, 0.20), (1.44, 0.185))  # (z, half width)
+SHOULDER_Z, SHOULDER_X = 1.40, 0.22
+# The head: its pivot at the neck, a round shape 0.27 m wide and 0.30 m tall centered at HEAD_Z,
+# floating about 5 cm above the torso.
+NECK_Z = 1.48
+HEAD_Z = 1.64
+HEAD_SIZE = (0.135, 0.13, 0.15)  # radii: across, front to back, up
+# The face and hair are drawn on a head of radius 0.4 (the old chibi head, center DESIGN_C) and
+# mapped onto the real one (head_space), so they keep their shapes at the new size.
+DESIGN_R = 0.4
+DESIGN_C = Vector((0, 0, 0.72 + DESIGN_R * 0.92))
+DESIGN_SCALE = (HEAD_SIZE[0] / DESIGN_R, HEAD_SIZE[0] / DESIGN_R, HEAD_SIZE[2] / (DESIGN_R * 0.94))
+
 # Shoulder to hand center; the game keeps ArcheryPose.cs in step.
-ARM_LENGTH = 0.42
-# The held bow is this much bigger than the slung one, so it reads in the hand.
+ARM_LENGTH = 0.66
+# The hands hang down and a little out and forward from the shoulders (ArcheryPose.ArmLRestDirection).
+ARM_REST = (0.08, 0.03, -0.64)   # the right arm; the left one is its mirror (Blender: x right, y forward, z up)
+HAND_R = 0.055
+# The bow (slung on the back) is this much bigger than the old one, for the taller body; the held
+# bow is HAND_BOW_SCALE times bigger again, so it reads in the hand: about as tall as from the hip
+# to above the head.
+BOW_SCALE = 1.1
 HAND_BOW_SCALE = 1.3
 
-# The body: a cone, a triangle from the front, from BODY_BOTTOM (radius BODY_R0) to BODY_TOP
-# (radius BODY_R1, rounded off), a few cm below the head (its bottom is at about 0.71 m).
-BODY_BOTTOM, BODY_TOP = 0.13, 0.61
-BODY_R0, BODY_R1 = 0.3, 0.05
-# The Boy's trousers: a band round the bottom of the body, up to here.
-TROUSERS_TOP = 0.24
-
 # The nocked arrow, nock to tip; the game keeps CharacterModel.cs and ArcheryPose.cs in step.
-NOCK_ARROW_LENGTH = 0.78
+NOCK_ARROW_LENGTH = 0.95
 
 KINDS = {
     "girl": {
@@ -110,11 +137,13 @@ def new_mesh_object(name, bm):
 class Part:
     """Gathers shapes into one mesh object with several materials."""
 
-    def __init__(self, name, pivot, rotation=Matrix.Identity(4)):
-        """rotation: the object's rotation; shapes are still given in world coordinates."""
+    def __init__(self, name, pivot, rotation=Matrix.Identity(4), space=None):
+        """rotation: the object's rotation; shapes are still given in world coordinates. space: a
+        world-to-world matrix every shape goes through first (head_space for the head's pieces)."""
         self.name = name
         self.pivot = Vector(pivot)
         self.rotation = rotation
+        self.space = space
         self.unrotate = rotation.inverted()
         self.bm = bmesh.new()
         self.materials = []
@@ -127,6 +156,8 @@ class Part:
     def _add(self, make, mat, matrix):
         geom = bmesh.new()
         make(geom)
+        if self.space is not None:
+            matrix = Matrix.Translation(-self.pivot) @ self.space @ Matrix.Translation(self.pivot) @ matrix
         geom.transform(self.unrotate @ matrix)
         slot = self._slot(mat)
         for face in geom.faces:
@@ -236,7 +267,7 @@ class Part:
 
 def piece(name, part):
     """A built-in piece of the default outfit (or the hair) on a part: same pivot, its own object."""
-    return Part(name, part.pivot, rotation=part.rotation)
+    return Part(name, part.pivot, rotation=part.rotation, space=part.space)
 
 
 def ribbon_bow(part, mat, center, size):
@@ -275,41 +306,123 @@ def rounded(corners, radii, steps=6):
     return points
 
 
-def body_radius(z):
-    """The body cone's radius at height z (its straight side, before the rounding)."""
-    return BODY_R0 + (BODY_R1 - BODY_R0) * (z - BODY_BOTTOM) / (BODY_TOP - BODY_BOTTOM)
+def head_space():
+    """The matrix taking a point drawn on the design head (radius DESIGN_R, center DESIGN_C) onto
+    the real head (HEAD_SIZE, centered at HEAD_Z)."""
+    return (Matrix.Translation((0, 0, HEAD_Z)) @ Matrix.Diagonal((*DESIGN_SCALE, 1.0)) @
+            Matrix.Translation(-DESIGN_C))
 
 
-def body_profile(offset=0.0, z0=BODY_BOTTOM, z1=BODY_TOP):
-    """The outline of the body cone (offset out by offset, for the clothes over it) from z0 to z1;
-    rounded at its true bottom rim and top, flat where it is cut off."""
-    bottom, top = z0 <= BODY_BOTTOM, z1 >= BODY_TOP
-    z0, z1 = (z0 - offset if bottom else z0), (z1 + offset if top else z1)
-    corners = [(0, z0), (body_radius(z0) + offset, z0), (body_radius(z1) + offset, z1), (0, z1)]
-    points = rounded(corners, [0, 0.06 if bottom else 0, 0.11 if top else 0, 0], steps=8)
-    # Rings every few cm up the straight side, for smooth shading (and the toon outline).
-    dense = [points[0]]
-    for p, q in zip(points, points[1:]):
-        n = max(1, int(math.dist(p, q) / 0.03))
-        dense += [(p[0] + (q[0] - p[0]) * k / n, p[1] + (q[1] - p[1]) * k / n) for k in range(1, n + 1)]
-    return dense
+def smooth(knots, z):
+    """The value at z of a smooth curve through (z, value) knots (eased between them, no overshoot)."""
+    if z <= knots[0][0]:
+        return knots[0][1]
+    for (z0, v0), (z1, v1) in zip(knots, knots[1:]):
+        if z <= z1:
+            t = (z - z0) / (z1 - z0)
+            return v0 + (v1 - v0) * (3 - 2 * t) * t * t
+    return knots[-1][1]
+
+
+def torso_size(z):
+    """The torso's half width and half depth at height z (zero at its rounded bottom and top)."""
+    w = smooth(TORSO_WIDTH, z)
+    for end, length in ((TORSO_BOTTOM, 0.05), (TORSO_TOP, 0.09)):
+        u = abs(z - end) / length
+        if u < 1:
+            w *= math.sqrt(max(0.0, 1 - (1 - u) ** 2))
+    return w, (0.06 + 0.3 * w) * (w / max(smooth(TORSO_WIDTH, z), 1e-6))
+
+
+def torso_rings(out=0.0, z0=TORSO_BOTTOM, z1=TORSO_TOP):
+    """The torso's outline as (half width, half depth, z) rings from z0 to z1, offset out by out
+    (along the outline's normal); closed on the axis where it reaches the true bottom or top."""
+    n = 80
+    rings = []
+    for i in range(n + 1):
+        # Denser near the rounded ends.
+        t = i / n
+        z = TORSO_BOTTOM + (TORSO_TOP - TORSO_BOTTOM) * (0.5 - 0.5 * math.cos(math.pi * t))
+        if z < z0 - 1e-6 or z > z1 + 1e-6:
+            continue
+        w, d = torso_size(z)
+        dz = 1e-4
+        slope = (torso_size(min(z + dz, TORSO_TOP))[0] - torso_size(max(z - dz, TORSO_BOTTOM))[0]) / (
+            min(z + dz, TORSO_TOP) - max(z - dz, TORSO_BOTTOM))
+        length = math.hypot(1.0, slope)
+        nh, nz = 1 / length, -slope / length
+        if w < 1e-6:
+            nh, nz = 0.0, (-1.0 if z < (TORSO_BOTTOM + TORSO_TOP) / 2 else 1.0)
+        rings.append((w + out * nh, d + out * nh, z + out * nz))
+    for z in (z0, z1):
+        if TORSO_BOTTOM + 1e-6 < z < TORSO_TOP - 1e-6 and all(abs(r[2] - z) > 1e-5 for r in rings):
+            w, d = torso_size(z)
+            rings.append((w + out, d + out, z))
+    rings.sort(key=lambda r: r[2])
+    return rings
+
+
+def oval_lathe(part, mat, rings, cuts=(), segments=48):
+    """A surface through oval rings (half width x, half depth y, z); a ring of size 0 is a point."""
+    def make(g):
+        verts = []
+        for w, d, z in rings:
+            if w < 1e-6:
+                verts.append([g.verts.new((0, 0, z))])
+            else:
+                verts.append([g.verts.new((w * math.cos(i / segments * 2 * math.pi),
+                                           d * math.sin(i / segments * 2 * math.pi), z)) for i in range(segments)])
+        for a, b in zip(verts, verts[1:]):
+            for i in range(segments):
+                j = (i + 1) % segments
+                if len(a) == 1 and len(b) > 1:
+                    g.faces.new((a[0], b[j], b[i]))
+                elif len(b) == 1 and len(a) > 1:
+                    g.faces.new((a[i], a[j], b[0]))
+                elif len(a) > 1:
+                    g.faces.new((a[i], a[j], b[j], b[i]))
+        bmesh.ops.recalc_face_normals(g, faces=g.faces)
+        for point, normal in cuts:
+            bmesh.ops.bisect_plane(g, geom=g.verts[:] + g.edges[:] + g.faces[:],
+                                   plane_co=Vector(point), plane_no=Vector(normal), clear_outer=True)
+    part._add(make, mat, Matrix.Translation(-part.pivot))
+
+
+def torso_point(angle, z, out=0.0):
+    """A point out from the torso's surface at a heading (degrees, 0 = front, +Y; 90 = +X) and
+    height, and the surface's normal there."""
+    w, d = torso_size(z)
+    t = math.radians(angle)
+    p = Vector((math.sin(t) * w, math.cos(t) * d, z))
+    normal = Vector((math.sin(t) / max(w, 1e-6) * d, math.cos(t), 0)).normalized()
+    return p + normal * out, normal
 
 
 def strap_cuts(half_width):
-    """The two planes that leave a slanted band (the bow's strap) round the body."""
+    """The two planes that leave a slanted band (the bow's strap) round the torso."""
     n = Vector((math.sin(math.radians(35)), 0, math.cos(math.radians(35))))
-    c = Vector((0, 0, 0.47))
+    c = Vector((0, 0, 1.18))
     return ((c + n * half_width, n), (c - n * half_width, -n))
 
 
-def spot_on_body(part, mat, angle, z, size):
-    """A flat round spot on the body's cloth, angle degrees round from the front, at height z."""
-    t = math.radians(angle + 90)
-    normal = Vector((math.cos(t), math.sin(t), (BODY_R0 - BODY_R1) / (BODY_TOP - BODY_BOTTOM))).normalized()
-    r = body_radius(z) + 0.008
-    center = Vector((math.cos(t) * r, math.sin(t) * r, z)) + normal * 0.003
+def spot_on_torso(part, mat, angle, z, size, out):
+    """A flat round spot on the torso's cloth, angle degrees round from the front, at height z."""
+    center, normal = torso_point(angle, z, out + 0.003)
     part.sphere(mat, center, (size, size, size * 0.3), rotation=normal.to_track_quat("Z", "Y").to_matrix().to_4x4(),
                 segments=16, rings=8)
+
+
+def dress_rings(out, hem_z, hem_flare):
+    """A dress: the torso's outline from its top down to the hips, flaring below them over the
+    legs' tops to a round hem at hem_z, hem_flare out from the hips."""
+    rings = [r for r in torso_rings(out) if r[2] >= 0.97]
+    w, d, _ = rings[0]
+    for k in range(1, 9):
+        t = k / 8
+        z = 0.97 + (hem_z - 0.97) * t
+        grow = hem_flare * t ** 1.4
+        rings.insert(0, (w + grow, d + grow * 1.6, z))
+    return rings
 
 
 def build(kind):
@@ -318,19 +431,20 @@ def build(kind):
     mats.update({name: material(name, color) for name, color in KINDS[kind].items()})
     girl = kind == "girl"
 
-    hip_z = 0.3
-    neck_z = 0.72
-    head_r = 0.4
-    head_c = Vector((0, 0, neck_z + head_r * 0.92))
+    # The face and hair are drawn on the design head (radius DESIGN_R at DESIGN_C) and mapped onto
+    # the real one by head_space(), so they keep their shapes.
+    head_r = DESIGN_R
+    head_c = DESIGN_C
 
     # The modular rig, the same for both: skin parts (material "Skin", tinted with the chosen skin
     # tone in the game), dark eyes ("Eye", tinted with the eye color), and the default outfit and
     # hair as separate objects parented to their part, which the game hides when something else
     # is worn there: Hair, DefaultTop (the Girl's dress; the Boy's shirt and bow tie),
-    # DefaultBottom (the Boy's trousers), DefaultShoes* (the feet), DefaultHead (the Girl's ribbon bow).
+    # DefaultBottom* (the Boy's trousers: a waist band on Body, a leg on each of LegL / LegR),
+    # DefaultShoes* (the shoes, on the legs), DefaultHead (the Girl's ribbon bow).
 
-    # Head: big and round, large dark oval eyes with sparkles, rosy cheeks, a small smile, hair.
-    head = Part("Head", (0, 0, neck_z))
+    # Head: round, large dark oval eyes with sparkles, rosy cheeks, a small smile, hair.
+    head = Part("Head", (0, 0, NECK_Z), space=head_space())
     head.sphere(mats["Skin"], head_c, (head_r, head_r * 0.96, head_r * 0.94), segments=40, rings=24)
     for side in (-1, 1):
         ex = side * 0.15
@@ -352,9 +466,9 @@ def build(kind):
         hair.sphere(mats["Hair"], head_c + Vector((x, head_r * 0.8 - abs(x) * 0.35, 0.24 - abs(x) * 0.3)),
                     (0.1, 0.07, 0.075), segments=16, rings=8)
     if girl:
-        # Two little pigtail puffs, and a big ribbon bow on top.
+        # Two pigtail puffs, and a big ribbon bow on top.
         for side in (-1, 1):
-            hair.sphere(mats["Hair"], head_c + Vector((side * 0.4, -0.08, -0.12)), (0.12, 0.12, 0.16), segments=16, rings=8)
+            hair.sphere(mats["Hair"], head_c + Vector((side * 0.42, -0.08, -0.12)), (0.13, 0.13, 0.17), segments=16, rings=8)
         ribbon = piece("DefaultHead", head)
         ribbon_bow(ribbon, mats["Ribbon"], head_c + Vector((0.12, 0.05, head_r * 0.98)), 0.13)
         ribbon.build(head_obj)
@@ -364,66 +478,84 @@ def build(kind):
                     rotation=Matrix.Rotation(math.radians(25), 4, "Y"), segments=12, rings=6)
     hair.build(head_obj)
 
-    # Body: a smooth skin cone, a triangle from the front (wide at the bottom, narrow and round at
-    # the top), floating a little above the feet and a few cm below the head (no neck), with the
-    # bow's strap across it. The outfit colors it (a slightly bigger cone over it).
-    body = Part("Body", (0, 0, hip_z))
-    body.lathe(mats["Skin"], body_profile())
-    body.lathe(mats["Wood"], body_profile(0.012, BODY_BOTTOM + 0.1, BODY_TOP - 0.03), cuts=strap_cuts(0.035))
+    # Body: a smooth tapered skin torso (hips, waist, shoulders; oval, deeper at the chest), a few
+    # cm below the head (no neck), with the bow's strap across it. The outfit covers it.
+    body = Part("Body", (0, 0, HIP_Z))
+    oval_lathe(body, mats["Skin"], torso_rings())
+    oval_lathe(body, mats["Wood"], torso_rings(0.017, 0.96, 1.42), cuts=strap_cuts(0.028))
     body_obj = body.build()
     top = piece("DefaultTop", body)
     if girl:
-        # The dress colors the whole triangle, with white spots like a mushroom cap.
-        top.lathe(mats["Cloth"], body_profile(0.008))
-        for a, z in ((20, 0.2), (-40, 0.18), (75, 0.24), (-95, 0.2), (140, 0.22), (-150, 0.23), (180, 0.17),
-                     (5, 0.38), (-70, 0.36), (110, 0.38), (-130, 0.4), (40, 0.5), (-15, 0.52)):
-            spot_on_body(top, mats["Spots"], a, z, 0.04)
+        # The dress: the torso's shape down to the hips, flaring over the legs' tops to a hem at
+        # about 0.62 m, with white spots like a mushroom cap.
+        oval_lathe(top, mats["Cloth"], dress_rings(0.01, 0.62, 0.12))
+        for a, z in ((5, 1.33), (-60, 1.30), (70, 1.28), (130, 1.32), (-140, 1.31), (180, 1.27),
+                     (30, 1.16), (-35, 1.14), (100, 1.17), (-100, 1.18), (160, 1.15), (-170, 1.12)):
+            spot_on_torso(top, mats["Spots"], a, z, 0.03, 0.01)
+        for k in range(10):
+            a = k / 10 * 360 + 18
+            z = 0.72 + 0.1 * (k % 2)
+            t = math.radians(a)
+            grow = 0.12 * ((z - 0.97) / (0.62 - 0.97)) ** 1.4
+            w, d = torso_size(0.97)
+            w, d = w + 0.01 + grow, d + 0.01 + grow * 1.6
+            normal = Vector((math.sin(t) * d / w, math.cos(t), -0.35)).normalized()
+            c = Vector((math.sin(t) * w, math.cos(t) * d, z)) + normal * 0.004
+            top.sphere(mats["Spots"], c, (0.035, 0.035, 0.01), rotation=normal.to_track_quat("Z", "Y").to_matrix().to_4x4(),
+                       segments=16, rings=8)
     else:
-        # The shirt colors the triangle above the trousers, with a bow tie at the top and two buttons.
-        top.lathe(mats["Cloth"], body_profile(0.008, TROUSERS_TOP - 0.03, BODY_TOP + 0.008))
-        ribbon_bow(top, mats["Ribbon"], (0, body_radius(0.56) + 0.03, 0.56), 0.065)
-        for z in (0.45, 0.36):
-            spot_on_body(top, mats["Spots"], 0, z, 0.018)
+        # The shirt covers the torso down over the waist band, with a bow tie at the top and two buttons.
+        oval_lathe(top, mats["Cloth"], torso_rings(0.01, 0.97))
+        ribbon_bow(top, mats["Ribbon"], torso_point(0, 1.36, 0.022)[0], 0.045)
+        for z in (1.28, 1.18):
+            spot_on_torso(top, mats["Spots"], 0, z, 0.014, 0.01)
     top.build(body_obj)
     if not girl:
-        # The trousers: a band round the bottom of the triangle.
-        trousers = piece("DefaultBottom", body)
-        trousers.lathe(mats["Legs"], body_profile(0.016, BODY_BOTTOM - 0.008, TROUSERS_TOP))
-        trousers.build(body_obj)
+        # The trousers' waist band, over the torso's bottom.
+        band = piece("DefaultBottom", body)
+        oval_lathe(band, mats["Legs"], torso_rings(0.018, TORSO_BOTTOM, 1.02))
+        band.build(body_obj)
 
-    # Legs: no meshes, only pivots at the hips; the feet (round shoe-like blobs under the triangle)
-    # hang from them, so they swing as the game turns the legs.
+    # Legs: rounded skin tubes from the hips down into the shoes, each its own object at the hip's
+    # pivot; the shoe (and the Boy's trouser leg) is its child, so they swing as the game turns it.
     for side, name in ((-1, "LegL"), (1, "LegR")):
-        x = side * 0.125
-        leg_obj = empty(name, (x, 0, hip_z + 0.02))
-        shoe = Part("DefaultShoes" + name, leg_obj.location)
-        shoe.sphere(mats["Shoe"], (x, 0.085, 0.062), (0.095, 0.125, 0.064), segments=24, rings=12)
+        x = side * LEG_X
+        leg = Part(name, (x, 0, HIP_Z))
+        leg.capsule(mats["Skin"], (x, 0, HIP_Z), (x, 0, ANKLE_Z), LEG_R, segments=24)
+        leg_obj = leg.build()
+        shoe = piece("DefaultShoes" + name, leg)
+        shoe.sphere(mats["Shoe"], (x, SHOE_C[0], SHOE_C[1]), SHOE_R, segments=24, rings=12, cut=((x, 0, 0), (0, 0, -1)))
         shoe.build(leg_obj)
+        if not girl:
+            trousers = piece("DefaultBottom" + name, leg)
+            trousers.capsule(mats["Legs"], (x, 0, HIP_Z + 0.02), (x, 0, 0.16), LEG_R + 0.014, segments=24)
+            trousers.build(leg_obj)
 
-    # Arms: no meshes, only invisible pivots at the shoulders; the round hands float beside the
-    # body at the ends of the arms (ARM_LENGTH from the shoulder), where the game keeps them: it
-    # only turns the arms at the shoulder (ArcheryPose.ArmLength, ShoulderLRest, ArmLRestDirection).
-    shoulder_z = neck_z - 0.07
+    # Arms: no meshes, only invisible pivots at the shoulders; the round hands float at the ends of
+    # the arms (ARM_LENGTH from the shoulder, hanging down beside the hips), where the game keeps
+    # them: it only turns the arms at the shoulder (ArcheryPose.ArmLength, ShoulderLRest, ArmLRestDirection).
     for side, name in ((-1, "ArmL"), (1, "ArmR")):
-        sx = side * 0.23
-        empty(name, (sx, 0, shoulder_z))
-        hand = Vector((sx, 0, shoulder_z)) + Vector((side * 0.13, 0.02, -0.22)).normalized() * ARM_LENGTH
+        shoulder = Vector((side * SHOULDER_X, 0, SHOULDER_Z))
+        empty(name, shoulder)
+        hand = shoulder + Vector((side * ARM_REST[0], ARM_REST[1], ARM_REST[2])).normalized() * ARM_LENGTH
         hand_part = Part("Hand" + name[-1], hand)
-        hand_part.sphere(mats["Skin"], hand, (0.082, 0.078, 0.085), segments=24, rings=12)
+        hand_part.sphere(mats["Skin"], hand, (HAND_R, HAND_R * 0.96, HAND_R * 1.02), segments=24, rings=12)
         hand_part.build()
 
-    # A little wooden bow carried on the back, slung diagonally: the middle of its arc rests
-    # against the back, its tips and string stick out behind.
+    # A wooden bow carried on the back, slung diagonally: the middle of its arc rests against the
+    # back, its tips and string stick out behind.
     # HandBow is the same bow without the string (the game draws it, bent by the draw), with the
     # sling as its rotation: its own frame is the arc frame below, Godot's held-bow frame.
-    grip = (0, -0.25, (hip_z + neck_z) / 2 + 0.04)
-    major, half_arc = 0.42, 0.34 * math.pi
+    grip = (0, -0.17, 1.16)
+    major, half_arc = 0.42 * BOW_SCALE, 0.34 * math.pi
+    tip_r = (0.045 * BOW_SCALE, 0.045 * BOW_SCALE, 0.04 * BOW_SCALE)
+    wood_r = 0.028 * BOW_SCALE
     # Arc frame: local x is depth (the arc's middle at x = 0, tips toward -x), local y the span.
     frame = Matrix(((0, 0, 1, 0), (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 0, 1)))  # x->+Y, y->+Z, z->+X
     slant = Matrix.Rotation(math.radians(38), 4, "Y")
     sling = slant @ frame
     bow = Part("BackBow", grip)
-    bow.torus(mats["Wood"], bow.pivot, major, 0.028,
+    bow.torus(mats["Wood"], bow.pivot, major, wood_r,
               rotation=sling @ Matrix.Translation((-major, 0, 0)), arc=half_arc / math.pi)
     tips = []
     for sign in (-1, 1):
@@ -431,7 +563,7 @@ def build(kind):
         tips.append(bow.pivot + (sling @ local).to_3d())
     bow.capsule(mats["String"], tips[0], tips[1], 0.009, segments=6)
     for tip in tips:
-        bow.sphere(mats["MushroomRed"], tip, (0.045, 0.045, 0.04), segments=12, rings=6)
+        bow.sphere(mats["MushroomRed"], tip, tip_r, segments=12, rings=6)
     bow.build()
     # HandBow: HAND_BOW_SCALE times the size, a grip wrap at its pivot, and its two limbs as child
     # objects at the same pivot (HandBowLimbTop / HandBowLimbBottom), which the game bends back
@@ -439,27 +571,27 @@ def build(kind):
     k = HAND_BOW_SCALE
     hmajor = major * k
     held = Part("HandBow", grip, rotation=slant)
-    wrap_a = held.pivot + (sling @ Vector((0, -0.06, 0, 1))).to_3d() - held.pivot
-    wrap_b = held.pivot + (sling @ Vector((0, 0.06, 0, 1))).to_3d() - held.pivot
-    held.capsule(mats["Ribbon"], held.pivot + wrap_a, held.pivot + wrap_b, 0.04 * k, segments=12)
+    wrap_a = held.pivot + (sling @ Vector((0, -0.06 * BOW_SCALE, 0, 1))).to_3d() - held.pivot
+    wrap_b = held.pivot + (sling @ Vector((0, 0.06 * BOW_SCALE, 0, 1))).to_3d() - held.pivot
+    held.capsule(mats["Ribbon"], held.pivot + wrap_a, held.pivot + wrap_b, 0.04 * BOW_SCALE * k, segments=12)
     held_obj = held.build()
     for sign, name in ((1, "HandBowLimbTop"), (-1, "HandBowLimbBottom")):
         limb = piece(name, held)
-        limb.torus(mats["Wood"], limb.pivot, hmajor, 0.028 * k,
+        limb.torus(mats["Wood"], limb.pivot, hmajor, wood_r * k,
                    rotation=sling @ Matrix.Translation((-hmajor, 0, 0)) @ Matrix.Rotation(sign * half_arc / 2, 4, "Z"),
                    arc=half_arc / (2 * math.pi), segments=120)
         local = Vector((hmajor * math.cos(half_arc) - hmajor, sign * hmajor * math.sin(half_arc), 0, 1))
-        limb.sphere(mats["MushroomRed"], limb.pivot + (sling @ local).to_3d(), (0.045 * k, 0.045 * k, 0.04 * k), segments=12, rings=6)
+        limb.sphere(mats["MushroomRed"], limb.pivot + (sling @ local).to_3d(), tuple(r * k for r in tip_r), segments=12, rings=6)
         limb.build(held_obj)
 
     # The nocked arrow: a poison mushroom tip (a purple cap with glowing green spots on a cream
     # stem), a wooden shaft and soft green fletching. Built pointing up (+Z) from its nock inside
     # the body, where it hides until the game nocks it; its own frame points +Y (Godot -Z).
-    nock = Vector((0, 0, 0.2))
+    nock = Vector((-LEG_X, 0, 0.42))
     arrow = Part("NockArrow", nock, rotation=Matrix.Rotation(math.pi / 2, 4, "X"))
     top = nock.z + NOCK_ARROW_LENGTH
     cap = (0.05, 0.05, 0.055)
-    cap_c = Vector((0, 0, top - cap[2]))
+    cap_c = Vector((nock.x, 0, top - cap[2]))
     arrow.sphere(mats["PoisonCap"], cap_c, cap, cut=(cap_c + Vector((0, 0, -0.012)), Vector((0, 0, -1))))
     golden = math.pi * (3 - math.sqrt(5))
     for i in range(6):
@@ -469,8 +601,8 @@ def build(kind):
         p = cap_c + Vector((n.x * cap[0], n.y * cap[1], n.z * cap[2]))
         rot = n.to_track_quat("Z", "Y").to_matrix().to_4x4()
         arrow.sphere(mats["PoisonSpots"], p, (0.013, 0.013, 0.006), rotation=rot, segments=8, rings=4)
-    arrow.capsule(mats["Stem"], (0, 0, top - cap[2] - 0.04), (0, 0, top - cap[2]), 0.024, segments=12)
-    arrow.capsule(mats["Shaft"], nock, (0, 0, top - cap[2] - 0.04), 0.011, segments=8)
+    arrow.capsule(mats["Stem"], (nock.x, 0, top - cap[2] - 0.04), (nock.x, 0, top - cap[2]), 0.024, segments=12)
+    arrow.capsule(mats["Shaft"], nock, (nock.x, 0, top - cap[2] - 0.04), 0.011, segments=8)
     for k in range(3):
         a = k * 2 * math.pi / 3
         rot = Matrix.Rotation(a, 4, "Z") @ Matrix.Rotation(math.pi / 2, 4, "Y")

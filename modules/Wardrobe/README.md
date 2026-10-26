@@ -23,8 +23,10 @@ Some clothes are rewards. Adding a piece of clothing is one `Catalog` entry plus
   the prompt device, the menu steps: a held direction moves the focus one item per 0.2 s, a short
   flick exactly one), `WardrobePromptsTests` (each device's hints show its own icons only) and
   `ModelFitTests` (the models read back against the Player's rig: their parts and pivots, nothing
-  inside the body or reaching the head or hands, tops and dresses cover the cone without sleeves,
-  bottoms are its lower band, shoes fit the feet, head pieces sit on the head, backpacks on the back;
+  inside the oval torso or the leg tubes or reaching the head or hands, tops and dresses cover the
+  torso without sleeves, dresses and the skirt flare over the legs and leave them room to swing,
+  bottoms are a waist band plus legs round the leg tubes, shoes fit over the rig's shoes, head
+  pieces sit on the head, backpacks on the back, cloth faces out for the ink outline;
   the mushrooms use `MushroomLook`'s vivid colors and every other color is unchanged).
 
 Test it with `./test.sh Wardrobe` from the repository root.
@@ -168,30 +170,42 @@ Run a script from the repository root, e.g. `blender -b --factory-startup --pyth
 modules/Wardrobe/Models/Clothes/striped_tee.py`, or all of them with
 `for f in modules/Wardrobe/Models/*/*.py; do [ "$(basename "$f")" = kit.py ] || blender -b --factory-startup --python "$f"; done`.
 
-Sized for the Player's simple-shapes rig (`modules/Player/Models/characters.py`): a round head
-floating over a smooth cone body (a triangle from the front: 0.3 m round at its bottom, 0.13 m up,
-narrowing to a rounded top at about 0.61 m), round hands floating beside it, little round feet
-under it, no arms, legs or neck. Each .glb holds one object per rig part it covers, named like the
-part and with its origin at that part's pivot, so the Player module parents it to the part with no
-offset and it moves with it: `Head` (pivot at the neck, 0.72 m: hats, glasses, the flower clip,
-hair), `Body` (hip, 0.3 m: everything on the cone), `LegL` / `LegR` (hip pivots at x ∓0.125,
-0.32 m: the shoes, over the round feet hanging from them).
+Sized for the Player's simple-shapes rig (`modules/Player/Models/characters.py`): a 1.80 m person
+with normal proportions, a round head (0.27 m wide, 0.30 m tall, bottom at about 1.49 m) floating
+over a smooth tapered torso with oval cross-sections (0.88–1.44 m; hips about 0.34 m wide, waist
+0.30, shoulders 0.40, half depth 0.06 + 0.3 × half width), round hands floating at the ends of
+invisible arms beside the hips (centers at about x ±0.30, 0.75 m up), two legs (skin tubes of radius
+0.065 m from the hips down to 0.09 m) in rounded shoes. Each .glb holds one object per rig part it
+covers, named like the part and with its origin at that part's pivot, so the Player module parents
+it to the part with no offset and it moves with it: `Head` (pivot at the neck, 1.48 m: hats,
+glasses, the flower clip, hair), `Body` (the hips, 0.9 m: tops, dresses, the skirt, bottoms' waist
+bands, backpacks, the scarf), `LegL` / `LegR` (hip pivots at x ∓0.1, 0.9 m: trouser, jean, short
+and overall legs, and the shoes).
 
-`kit.py` holds the rig's sizes and the cone's outline (`body_profile`, the same as characters.py
-draws) with helpers that follow it: `cloth` (a layer over the cone between two heights),
-`on_body` / `ring` (cords lying on it: hems, belts, straps), `spot`, `body_point` / `body_frame`
-(a point on it and its slant, for pockets and backpacks) and `shoe`. Everything on the body sits a
-little out from the cone (tops and dresses 1 cm, bottoms 2 cm over them), so nothing pokes through
-it, and stays clear of the head and the floating hands:
+`kit.py` holds the rig's sizes and the torso's outline (`torso_size` / `torso_rings`, the same as
+characters.py draws) with helpers that follow it: `cloth` (a layer over the torso between two
+heights), `waist_band` (a bottom's band, closed under the torso), `flared` / `dress` / `hem_point` /
+`hem_ring` / `on_skirt` (skirts flaring below the hips), `on_body` / `ring` (cords lying on the
+torso: hems, belts, straps), `spot`, `body_point` / `body_frame` (a point on it and its slant),
+`leg_tube` / `leg_cuff` / `leg_seam` (cloth round a leg) and `shoe`. Head pieces are drawn on the
+old design head (radius `HEAD_R` 0.4 at `HEAD_C`) and `Part("Head")` maps them onto the real head
+(`head_space`), as characters.py draws the face and hair. Open surfaces are turned to face out
+(`face_out`), or the ink outline would draw them black. Everything sits a little out from the body
+(tops and dresses 1 cm, bottoms 2 cm, leg cloth 1.4 cm round the leg), so nothing pokes through it,
+and stays clear of the head and the floating hands:
 
-- **Tops** cover the triangle from its top down into the lower band (`TOP_HEM`), under the bottom;
-  no sleeves (no arms). **Dresses** cover the whole triangle down to its bottom edge.
-- **Bottoms** are the lower band of the triangle up to `BAND_TOP` (0.27 m): jeans, overalls and the
-  flared skirt down to the bottom edge, the shorts shorter (they end at 0.2 m).
-- **Shoes** are round shoes over the round feet, under the body's bottom.
-- **Hats, glasses, the clip and hair** sit on the head as before (it did not move).
-- **Backpacks** sit on the triangle's back with straps over its top; the **scarf** wraps round its
-  top with its tails down the front.
+- **Tops** cover the torso from its top down to `TOP_HEM` (0.97 m), under the bottom's band; no
+  sleeves (no arms). **Dresses** (`dress`) follow the torso down to the hips, then flare over the
+  legs' tops to a hem at 0.62 m, about 0.28 m out at the sides (the flare grows slowly at first so
+  the hands stay more than 2 cm clear) and deep enough for the legs to swing half a radian.
+- **Bottoms**: a waist band on `Body` up to `BAND_TOP` (1.02 m) and a leg on each of `LegL` / `LegR`
+  down to `TROUSER_HEM` (0.15 m; the shorts to `SHORTS_HEM`, 0.64 m, above the knee). The **skirt**
+  is on `Body` only, flaring from the band over the upper legs to 0.62 m.
+- **Shoes** sit over the rig's shoes on the ground (the rain boots go up the shins to 0.34 m; the
+  Mary-Janes have a sock round the ankle).
+- **Hats, glasses, the clip and hair** sit on the head.
+- **Backpacks** sit on the torso's back with straps over the shoulders; the **scarf** wraps round
+  its top with its tails down the front.
 
 Materials carry plain colors; a hair style's material `Hair` takes the hair color. No eyes or faces
 on clothes.

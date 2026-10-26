@@ -30,16 +30,19 @@ Test it with `./test.sh Bow` from the repository root.
 `BowGeometry` (a static class, not a message) is where the character holds the bow, for the Player
 module to put the bow hand there and for the Bow module to shoot from:
 
-- `HoldRight` 0.45 (0.45 m to the right), `HoldUp` 0.80, `HoldForward` 0.45 (`HoldOffset` as a
+- `HoldRight` 0.40 (0.40 m to the right), `HoldUp` 1.30, `HoldForward` 0.55 (`HoldOffset` as a
   `Vector3`, X Right, Y Up, Z Forward): the hold point, an offset in meters from the player's feet
-  in the player's facing frame: the bow held on the player's right side by the left hand (reaching
-  across the chest), while the right hand draws the string to the right cheek.
+  in the player's facing frame: about chest height of the 1.80 m character, the bow held on the
+  player's right side by the left hand (reaching across the chest), while the right hand draws
+  the string back toward the right cheek.
   Forward is the facing (-sin Facing, 0, -cos Facing), Right is (cos Facing, 0, -sin Facing).
-- `HeadUp` 1.09: the chibi head's center (about 0.86 m wide) above the feet. The hold point is
-  about 0.70 m from it, at least `MinHeadClearance` 0.6 m, and outside the head's outline seen from
-  behind, so the over-the-right-shoulder aim camera (right of the head) sees the bow.
+- `HeadUp` 1.64: the round head's center above the feet; `HeadRadius` 0.15 (the head is 0.27 m
+  wide and 0.30 m tall). The hold point is about 0.76 m from its center, at least
+  `MinHeadClearance` 0.45 m (the head's radius and the held bow's half width with room to spare),
+  below the chin and outside the head's outline seen from behind, so the over-the-right-shoulder
+  aim camera (right of the head) sees the bow.
 - `HoldPoint(feet, facing)`: that point in the world.
-- `FullDrawPull` 0.26: how far the string (and the nocked arrow) comes back toward the character
+- `FullDrawPull` 0.36: how far the string (and the nocked arrow) comes back toward the character
   at a full draw, meters; a draw of `Draw` pulls `Draw` × this.
 
 ## Core

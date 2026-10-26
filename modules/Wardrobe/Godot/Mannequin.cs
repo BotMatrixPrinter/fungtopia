@@ -4,13 +4,15 @@ using Godot;
 namespace Fungtopia.Wardrobe.View;
 
 /// <summary>
-/// For previews only: the Player module's simple-shapes rig (its boy.glb, read as a file: a round
-/// head over a cone body, floating hands, round feet) dressed from an <see cref="AppearanceState"/>:
-/// skin and eye colors, the hair style in its color, and each worn item's objects parented to the
-/// rig part of the same name with no offset (<see cref="Attach"/>). The rig's own outfit objects
-/// (its hair, shirt and bow tie, trousers), its bows, its nocked arrow and its strap are hidden, so the body is
-/// bare skin under the clothes; its round shoes show while no shoes are worn. The game's character
-/// is drawn by the Player module; this shows how the pieces fit it.
+/// For previews only: the Player module's simple-shapes rig (its boy.glb, read as a file: a 1.80 m
+/// person, a round head floating over a smooth tapered torso, floating round hands, two legs in
+/// rounded shoes) dressed from an <see cref="AppearanceState"/>: skin and eye colors, the hair style
+/// in its color, and each worn item's objects parented to the rig part of the same name with no
+/// offset (<see cref="Attach"/>: Head, Body, LegL, LegR). The rig's own outfit objects (its hair,
+/// shirt and bow tie, the trousers' waist band and legs: DefaultBottom, DefaultBottomLegL,
+/// DefaultBottomLegR), its bows, its nocked arrow and its strap are hidden, so the body is bare
+/// skin under the clothes; its shoes show while no shoes are worn. The game's character is drawn
+/// by the Player module; this shows how the pieces fit it.
 /// </summary>
 public partial class Mannequin : Node3D
 {
@@ -32,7 +34,7 @@ public partial class Mannequin : Node3D
         if (_rig == null)
             return;
         AddChild(_rig);
-        foreach (var name in new[] { "Hair", "DefaultTop", "DefaultBottom", "DefaultHead", "BackBow", "HandBow", "NockArrow" })
+        foreach (var name in new[] { "Hair", "DefaultTop", "DefaultBottom*", "DefaultHead", "BackBow", "HandBow", "NockArrow" })
             Show(name, false);
         Hide(_rig, "Wood");
     }
@@ -59,10 +61,14 @@ public partial class Mannequin : Node3D
         Show("DefaultShoesLegR", !shoes);
     }
 
+    /// <summary>Shows or hides the rig's node of that name, or every node matching a pattern ("DefaultBottom*").</summary>
     private void Show(string node, bool visible)
     {
-        if (_rig?.FindChild(node, true, false) is Node3D piece)
-            piece.Visible = visible;
+        if (_rig == null)
+            return;
+        foreach (var found in _rig.FindChildren(node, "", true, false))
+            if (found is Node3D piece)
+                piece.Visible = visible;
     }
 
     private void Put(string path, Color? hair)

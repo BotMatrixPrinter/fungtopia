@@ -1,4 +1,4 @@
-# Mary-Janes (Shoes, starter): round shiny cherry-red shoes over the round feet, with a strap, a button and a white frilly sock cuff.
+# Mary-Janes (Shoes, starter): round shiny cherry-red shoes over the rig's shoes, with a strap, a button and white socks with a frilly cuff round the ankle.
 # Run from the repository root (writes mary_janes.glb next to this script):
 #   blender -b --factory-startup --python modules/Wardrobe/Models/Clothes/mary_janes.py
 # Shapes and rig sizes: ../kit.py.
@@ -15,15 +15,21 @@ red = material("Cloth", (0.8, 0.15, 0.22))
 sole = material("Sole", (0.4, 0.2, 0.18))
 sock = material("Sock", (1.0, 0.98, 0.95))
 button = material("Button", (1.0, 0.85, 0.4))
+SIZE = (0.084, 0.134, 0.075)
 for name in ("LegL", "LegR"):
     leg = Part(name)
     x = leg.pivot.x
-    c = shoe(leg, red, sole, size=(0.098, 0.13, 0.062))
-    # The sock's frill round the shoe's opening, and the strap across the top.
-    leg.torus(sock, c + Vector((0, -0.035, 0.046)), 0.055, 0.012, segments=24, scale=(1.1, 0.9))
-    leg.torus(red, c + Vector((0, 0.03, 0.0)), 0.098, 0.011, rotation=Matrix.Rotation(math.radians(90), 4, "Y"), arc=0.5,
-              scale=(0.62, 1.01))
+    c = shoe(leg, red, sole, size=SIZE)
+    # The sock round the ankle, with its frill.
+    leg_tube(leg, sock, 0.06, 0.17, out=0.004)
+    leg_cuff(leg, sock, 0.17, 0.012, out=0.004)
+    # The strap over the instep, a button at its outer end.
+    dy = 0.045
+    k = math.sqrt(1 - (dy / SIZE[1]) ** 2)
+    strap_x, strap_z = SIZE[0] * k + 0.006, SIZE[2] * k + 0.006
+    leg.torus(red, c + Vector((0, dy, 0)), strap_z, 0.009, arc=0.5, segments=24, scale=(1, strap_x / strap_z),
+              rotation=Matrix.Rotation(math.radians(90), 4, "X") @ Matrix.Rotation(math.radians(90), 4, "Z"))
     side = 1 if x > 0 else -1
-    leg.sphere(button, c + Vector((side * 0.096, 0.03, 0.0)), (0.008, 0.014, 0.014), segments=10, rings=5)
+    leg.sphere(button, c + Vector((side * (strap_x + 0.004), dy, 0.012)), (0.008, 0.014, 0.014), segments=10, rings=5)
     leg.build()
 export(__file__)

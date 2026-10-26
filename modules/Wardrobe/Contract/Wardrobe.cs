@@ -283,9 +283,10 @@ public static class Looks
 /// How clothing and hair models sit on the Player rig (characters.py). Each .glb holds one object
 /// per rig part it covers, named like the part (<see cref="Head"/>, <see cref="Body"/>,
 /// <see cref="LegL"/>, <see cref="LegR"/>), with its origin at that part's pivot: parent it to the
-/// part with no offset and it moves with it. Shoes are on the legs (the feet), backpacks and
-/// tops on the body, hats, glasses, scarves and hair on the head (scarves on the body).
-/// Pivots in meters from the feet, Godot axes (Y up, -Z forward).
+/// part with no offset and it moves with it. Shoes and the legs of trousers, jeans, shorts and
+/// overalls are on the legs, tops, dresses, skirts, waist bands, backpacks and the scarf on the
+/// body, hats, glasses, clips and hair on the head. Pivots in meters from the feet of the 1.80 m
+/// character, Godot axes (Y up, -Z forward): the neck, the hips, the hip joints.
 /// </summary>
 public static class Attach
 {
@@ -294,10 +295,10 @@ public static class Attach
     public const string LegL = "LegL";
     public const string LegR = "LegR";
 
-    public static readonly Vector3 HeadPivot = new(0f, 0.72f, 0f);
-    public static readonly Vector3 BodyPivot = new(0f, 0.3f, 0f);
-    public static readonly Vector3 LegLPivot = new(-0.125f, 0.32f, 0f);
-    public static readonly Vector3 LegRPivot = new(0.125f, 0.32f, 0f);
+    public static readonly Vector3 HeadPivot = new(0f, 1.48f, 0f);
+    public static readonly Vector3 BodyPivot = new(0f, 0.9f, 0f);
+    public static readonly Vector3 LegLPivot = new(-0.1f, 0.9f, 0f);
+    public static readonly Vector3 LegRPivot = new(0.1f, 0.9f, 0f);
 }
 
 /// <summary>

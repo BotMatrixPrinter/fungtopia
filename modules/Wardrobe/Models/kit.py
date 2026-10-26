@@ -2,18 +2,24 @@
 # each exporting <its name>.glb next to itself). Not run on its own.
 #
 # Meters, feet at the origin, facing Blender +Y (Godot's -Z after the glTF export), sized for the
-# Player module's simple-shapes rig (modules/Player/Models/characters.py): a round head floating
-# over a smooth cone body (a triangle from the front), round hands floating beside it, little
-# round feet under it, no arms, legs or neck. Each piece is one object per rig part it covers,
+# Player module's simple-shapes rig (modules/Player/Models/characters.py): a 1.80 m grown-up with
+# normal proportions, a round head (0.27 m wide, 0.30 m tall) floating about 5 cm over a smooth
+# tapered torso (oval, about 0.22 m deep: hips 0.34 m wide, waist 0.30, shoulders 0.40), round hands
+# floating at the ends of invisible arms, two real legs (rounded tubes, radius LEG_R) from the hips
+# into rounded shoes, no visible arms or neck. Each piece is one object per rig part it covers,
 # named like the part and with its origin at that part's pivot, so the game parents it to the part
 # with no offset (Fungtopia.Wardrobe.Attach):
-#   Head (pivot at the neck, z 0.72: hats, glasses, clips, hair),
-#   Body (pivot at the hip, z 0.3: tops and dresses over the cone, bottoms round its lower band,
-#         backpacks on its back, the scarf round its top),
-#   LegL / LegR (pivots at the hips, x -0.125 / +0.125, z 0.32; the round feet hang from them:
-#         the shoes go on these).
-# Clothes on the body follow the cone's outline (body_profile) a little out from it, so nothing
-# pokes through it; there are no sleeves or trouser legs (no arms or legs to put them on).
+#   Head (pivot at the neck, z 1.48: hats, glasses, clips, hair),
+#   Body (pivot at the hips, z 0.90: tops and dresses over the torso, dresses flaring below the
+#         hips over the legs' tops, skirts over the upper legs, bottoms' waist bands, backpacks on
+#         its back, the scarf round its top),
+#   LegL / LegR (pivots at the hips, x -0.10 / +0.10, z 0.90: trouser, jean, short and overall legs
+#         round the leg's tube, the shoes on the feet at the legs' ends).
+# Clothes follow the torso's outline (torso_rings) or the leg's tube a little out from it, so
+# nothing pokes through it; there are no sleeves (no visible arms).
+# The head's pieces are drawn on the design head of the old rig (radius HEAD_R 0.4, center HEAD_C,
+# the neck at z 0.72) and Part("Head") maps them onto the real head (head_space), as characters.py
+# draws its face and hair, so every hat, clip and hair style keeps its shape at the new size.
 # Materials carry plain colors only; the game draws them toon-shaded with ink outlines. A hair
 # style's main material is named "Hair" so the game can tint it with the chosen hair color.
 # No eyes or faces on clothes: only creatures have eyes.
@@ -26,31 +32,40 @@ import bpy
 from mathutils import Matrix, Vector
 
 # The rig, from characters.py.
-HIP_Z = 0.3
-NECK_Z = 0.72
-HEAD_R = 0.4
-HEAD_C = Vector((0, 0, NECK_Z + HEAD_R * 0.92))
-LEG_X = 0.125
+HIP_Z = 0.90
+NECK_Z = 1.48
+LEG_X, LEG_R = 0.10, 0.065
+ANKLE_Z = 0.09
 PIVOTS = {
     "Head": (0, 0, NECK_Z),
     "Body": (0, 0, HIP_Z),
-    "LegL": (-LEG_X, 0, HIP_Z + 0.02),
-    "LegR": (LEG_X, 0, HIP_Z + 0.02),
+    "LegL": (-LEG_X, 0, HIP_Z),
+    "LegR": (LEG_X, 0, HIP_Z),
 }
-# The body cone: radius BODY_R0 at BODY_BOTTOM narrowing to BODY_R1 at BODY_TOP (rounded off at
-# its bottom rim and its top). The head's bottom is at about 0.71 m: clothes stay below HEAD_GAP.
-BODY_BOTTOM, BODY_TOP = 0.13, 0.61
-BODY_R0, BODY_R1 = 0.3, 0.05
-HEAD_GAP = 0.68
-# Bottoms are the lower band of the triangle, up to BAND_TOP; tops come down to TOP_HEM, under it.
-BAND_TOP = 0.27
-TOP_HEM = BAND_TOP - 0.04
-# How far out from the body clothes sit: tops and dresses, then bottoms over them.
+# The torso: oval rings from TORSO_BOTTOM to TORSO_TOP (rounded off at both ends), half widths
+# through TORSO_WIDTH, half depth 0.06 + 0.3 x the half width.
+TORSO_BOTTOM, TORSO_TOP = 0.88, 1.44
+TORSO_WIDTH = ((0.88, 0.15), (0.95, 0.17), (1.10, 0.15), (1.32, 0.20), (1.44, 0.185))
+# The head: the real one is HEAD_SIZE (radii) centered at HEAD_Z; its bottom is at about 1.49 m:
+# clothes on the body stay below HEAD_GAP. Head pieces are drawn on the design head (HEAD_R at HEAD_C).
+HEAD_Z = 1.64
+HEAD_SIZE = (0.135, 0.13, 0.15)
+HEAD_R = 0.4
+HEAD_C = Vector((0, 0, 0.72 + HEAD_R * 0.92))
+HEAD_GAP = 1.46
+# The rig's shoes (each under its leg): center (y, z) and radii, cut flat at the ground.
+SHOE_C = (0.03, 0.05)
+SHOE_R = (0.075, 0.125, 0.07)
+# Bottoms: a waist band round the torso's bottom up to BAND_TOP, legs down to TROUSER_HEM (shorts
+# to SHORTS_HEM); tops come down to TOP_HEM, under the band's top.
+BAND_TOP = 1.02
+TOP_HEM = 0.97
+TROUSER_HEM = 0.15
+SHORTS_HEM = 0.64
+# How far out from the body clothes sit: tops and dresses, then bottoms over them; legs.
 TOP_OUT = 0.01
 BOTTOM_OUT = 0.02
-# The round feet (each under its leg's pivot): center y, z and radii, from characters.py.
-FOOT_C = (0.085, 0.062)
-FOOT_R = (0.095, 0.125, 0.064)
+LEG_OUT = 0.014
 
 # Vivid mushrooms (the game's rule; the same values as Core/MushroomLook.cs): a saturated cherry-red
 # cap, crisp pure white spots, a clean light cream stem and gills.
@@ -75,12 +90,25 @@ def material(name, color):
     return mat
 
 
+def face_out(g, axis_point):
+    """Turns an open surface's faces (made consistent by recalc_face_normals, but either way out
+    as it is not closed) to face away from its axis: axis_point(p) is the axis point nearest p.
+    The game's ink outline is an inverted hull grown along the normals, so a surface facing in
+    would draw black."""
+    bmesh.ops.recalc_face_normals(g, faces=g.faces)
+    out = sum(f.normal.dot(f.calc_center_median() - axis_point(f.calc_center_median())) * f.calc_area() for f in g.faces)
+    if out < 0:
+        bmesh.ops.reverse_faces(g, faces=g.faces)
+
+
 class Part:
     """Gathers shapes into one mesh object (named like a rig part) with several materials."""
 
     def __init__(self, name):
         self.name = name
         self.pivot = Vector(PIVOTS[name])
+        # The head's pieces are drawn on the design head and mapped onto the real one.
+        self.space = head_space() if name == "Head" else None
         self.bm = bmesh.new()
         self.materials = []
 
@@ -92,6 +120,8 @@ class Part:
     def _add(self, make, mat, matrix):
         geom = bmesh.new()
         make(geom)
+        if self.space is not None:
+            matrix = Matrix.Translation(-self.pivot) @ self.space @ Matrix.Translation(self.pivot) @ matrix
         geom.transform(matrix)
         slot = self._slot(mat)
         for face in geom.faces:
@@ -189,7 +219,7 @@ class Part:
                         g.faces.new((a[i], a[j], b[0]))
                     elif len(a) > 1:
                         g.faces.new((a[i], a[j], b[j], b[i]))
-            bmesh.ops.recalc_face_normals(g, faces=g.faces)
+            face_out(g, lambda p: Vector((0, 0, p.z)))
             for point, normal in cuts:
                 bmesh.ops.bisect_plane(g, geom=g.verts[:] + g.edges[:] + g.faces[:],
                                        plane_co=Vector(point), plane_no=Vector(normal), clear_outer=True)
@@ -217,7 +247,7 @@ class Part:
                     k = (j + 1) % ring
                     i2 = (i + 1) % n
                     g.faces.new((rings[i][j], rings[i2][j], rings[i2][k], rings[i][k]))
-            bmesh.ops.recalc_face_normals(g, faces=g.faces)
+            face_out(g, lambda p: min(pts, key=lambda q: (q - p).length))
         self._add(make, mat, Matrix.Identity(4))
         if not closed:
             for p in (points[0], points[-1]):
@@ -239,95 +269,200 @@ class Part:
 
 
 
-# The body and shapes that sit on it.
-
-def rounded(corners, radii, steps=6):
-    """The polyline through corners, each corner cut round (a quadratic curve) radii[i] along its edges."""
-    points = [corners[0]]
-    for i in range(1, len(corners) - 1):
-        c, d = Vector(corners[i]), radii[i]
-        if d <= 0:
-            points.append(corners[i])
-            continue
-        a = c + (Vector(corners[i - 1]) - c).normalized() * d
-        b = c + (Vector(corners[i + 1]) - c).normalized() * d
-        for k in range(steps + 1):
-            t = k / steps
-            p = a * (1 - t) ** 2 + c * 2 * t * (1 - t) + b * t * t
-            points.append((p.x, p.y))
-    points.append(corners[-1])
-    return points
+def head_space():
+    """The matrix taking a point drawn on the design head (radius HEAD_R, center HEAD_C) onto the
+    real head (HEAD_SIZE, centered at HEAD_Z), as characters.py maps the face and hair."""
+    scale = (HEAD_SIZE[0] / HEAD_R, HEAD_SIZE[0] / HEAD_R, HEAD_SIZE[2] / (HEAD_R * 0.94))
+    return Matrix.Translation((0, 0, HEAD_Z)) @ Matrix.Diagonal((*scale, 1.0)) @ Matrix.Translation(-HEAD_C)
 
 
-def body_radius(z):
-    """The body cone's radius at height z (its straight side, before the rounding)."""
-    return BODY_R0 + (BODY_R1 - BODY_R0) * (z - BODY_BOTTOM) / (BODY_TOP - BODY_BOTTOM)
+# The torso and shapes that sit on it.
+
+def smooth(knots, z):
+    """The value at z of a smooth curve through (z, value) knots (eased between them, no overshoot)."""
+    if z <= knots[0][0]:
+        return knots[0][1]
+    for (z0, v0), (z1, v1) in zip(knots, knots[1:]):
+        if z <= z1:
+            t = (z - z0) / (z1 - z0)
+            return v0 + (v1 - v0) * (3 - 2 * t) * t * t
+    return knots[-1][1]
 
 
-def body_profile(offset=0.0, z0=BODY_BOTTOM, z1=BODY_TOP):
-    """The outline of the body cone (as characters.py draws it) offset out by offset, from z0 to
-    z1: rounded at its true bottom rim and top. Cut off at z0 or z1 it ends there, open; at the
-    true top it closes on the axis; at the true bottom it wraps under the rim and ends open, clear
-    of the feet."""
-    bottom, top = z0 <= BODY_BOTTOM, z1 >= BODY_TOP
-    z0, z1 = (z0 - offset if bottom else z0), (z1 + offset if top else z1)
-    corners = [(0, z0), (body_radius(z0) + offset, z0), (body_radius(z1) + offset, z1), (0, z1)]
-    radii = [0, 0.06 if bottom else 0, 0.11 if top else 0, 0]
-    if bottom:
-        corners[0] = (BODY_R0 - 0.08, z0)
-    else:
-        corners, radii = corners[1:], radii[1:]
-    if not top:
-        corners, radii = corners[:-1], radii[:-1]
-    points = rounded(corners, radii, steps=8)
-    # Rings every few cm up the straight side, for smooth shading (and the toon outline).
-    dense = [points[0]]
-    for p, q in zip(points, points[1:]):
-        n = max(1, int(math.dist(p, q) / 0.03))
-        dense += [(p[0] + (q[0] - p[0]) * k / n, p[1] + (q[1] - p[1]) * k / n) for k in range(1, n + 1)]
-    return dense
+def torso_size(z):
+    """The torso's half width and half depth at height z (as characters.py draws it; zero at its
+    rounded bottom and top)."""
+    base = smooth(TORSO_WIDTH, z)
+    w = base
+    for end, length in ((TORSO_BOTTOM, 0.05), (TORSO_TOP, 0.09)):
+        u = abs(z - end) / length
+        if u < 1:
+            w *= math.sqrt(max(0.0, 1 - (1 - u) ** 2))
+    return w, (0.06 + 0.3 * base) * (w / base)
 
 
-def surface_r(z):
-    """The body's radius at height z, rounding included."""
-    pts = [(max(r, 0.0), h) for r, h in body_profile()]
-    for (r0, z0), (r1, z1) in zip(pts, pts[1:]):
-        if z1 > z0 and z0 <= z <= z1:
-            return r0 + (r1 - r0) * (z - z0) / (z1 - z0)
-    return 0.0
+def torso_rings(out=0.0, z0=0.92, z1=TORSO_TOP):
+    """The torso's outline as (half width, half depth, z) oval rings from z0 to z1, offset out by
+    out along its normal; closed on the axis at the true top, open at z0 (never below 0.92, clear
+    of the legs, which come out of the torso's bottom) unless z0 is TORSO_BOTTOM: then it closes
+    under the torso's rounded bottom too (a waist band's seat, the legs coming out through it)."""
+    if z0 > TORSO_BOTTOM + 1e-6:
+        z0 = max(z0, 0.92)
+    n = 80
+    zs = [TORSO_BOTTOM + (TORSO_TOP - TORSO_BOTTOM) * (0.5 - 0.5 * math.cos(math.pi * i / n)) for i in range(n + 1)]
+    zs = [z for z in zs if z0 + 1e-6 < z < z1 - 1e-6] + [z0] + ([z1] if z1 < TORSO_TOP - 1e-6 else [TORSO_TOP])
+    rings = []
+    for z in sorted(zs):
+        w, d = torso_size(z)
+        dz = 1e-4
+        lo, hi = max(z - dz, TORSO_BOTTOM), min(z + dz, TORSO_TOP)
+        slope = (torso_size(hi)[0] - torso_size(lo)[0]) / (hi - lo)
+        length = math.hypot(1.0, slope)
+        nh, nz = 1 / length, -slope / length
+        if w < 1e-6:
+            nh, nz = 0.0, (1.0 if z > (TORSO_BOTTOM + TORSO_TOP) / 2 else -1.0)
+        if z in (z0, z1) and w > 1e-6:
+            nh, nz = 1.0, 0.0  # a cut edge stays at its height
+        rings.append((w + out * nh, d + out * nh, z + out * nz))
+    return rings
+
+
+def oval_lathe(part, mat, rings, cuts=(), segments=48):
+    """A surface through oval rings (half width x, half depth y, z); a ring of size 0 is a point on
+    the axis (closing it), elsewhere the ends are left open. cuts = (point, normal) planes, each
+    removing the part on its normal's side (world coordinates)."""
+    def make(g):
+        verts = []
+        for w, d, z in rings:
+            if w < 1e-6:
+                verts.append([g.verts.new((0, 0, z))])
+            else:
+                verts.append([g.verts.new((w * math.cos(i / segments * 2 * math.pi),
+                                           d * math.sin(i / segments * 2 * math.pi), z)) for i in range(segments)])
+        for a, b in zip(verts, verts[1:]):
+            for i in range(segments):
+                j = (i + 1) % segments
+                if len(a) == 1 and len(b) > 1:
+                    g.faces.new((a[0], b[j], b[i]))
+                elif len(b) == 1 and len(a) > 1:
+                    g.faces.new((a[i], a[j], b[0]))
+                elif len(a) > 1:
+                    g.faces.new((a[i], a[j], b[j], b[i]))
+        face_out(g, lambda p: Vector((0, 0, p.z)))
+        for point, normal in cuts:
+            bmesh.ops.bisect_plane(g, geom=g.verts[:] + g.edges[:] + g.faces[:],
+                                   plane_co=Vector(point), plane_no=Vector(normal), clear_outer=True)
+    part._add(make, mat, Matrix.Translation(-part.pivot))
 
 
 def body_point(angle_deg, z, out=0.0):
-    """A point out from the body's surface (along its normal) at a heading (0 = front, +Y; 90 =
+    """A point out from the torso's surface (along its normal) at a heading (0 = front, +Y; 90 =
     +X) and height, and that normal."""
+    w, d = torso_size(z)
     dz = 0.004
-    slope = (surface_r(z + dz) - surface_r(z - dz)) / (2 * dz)
     t = math.radians(angle_deg)
-    radial = Vector((math.sin(t), math.cos(t), 0))
+    p = Vector((math.sin(t) * w, math.cos(t) * d, z))
+    # The oval's outward normal, tipped by the outline's slope.
+    slope = (torso_size(min(z + dz, TORSO_TOP))[0] - torso_size(max(z - dz, TORSO_BOTTOM))[0]) / (2 * dz)
+    radial = Vector((math.sin(t) * d, math.cos(t) * w, 0)).normalized()
     normal = (radial - Vector((0, 0, slope))).normalized()
-    return radial * surface_r(z) + Vector((0, 0, z)) + normal * out, normal
+    return p + normal * out, normal
 
 
 def body_frame(angle_deg, z):
-    """A rotation whose Z is the body's normal there, Y up along the surface and X across it."""
-    _, n = body_point(angle_deg, z)
+    """A rotation whose Z is the torso's normal there, Y up along the surface and X across it."""
+    return surface_frame(body_point(angle_deg, z)[1])
+
+
+def surface_frame(normal):
+    """A rotation whose Z is the normal, Y up along the surface and X across it."""
+    n = Vector(normal).normalized()
     across = Vector((0, 0, 1)).cross(n).normalized()
     up = n.cross(across)
     return Matrix((across, up, n)).transposed().to_4x4()
 
 
-def cloth(part, mat, z0=BODY_BOTTOM, z1=BODY_TOP, out=TOP_OUT, cuts=()):
-    """Cloth over the body from z0 to z1, out from it by out."""
-    part.lathe(mat, body_profile(out, z0, z1), cuts=cuts)
+def waist_band(part, mat, top=BAND_TOP, out=BOTTOM_OUT):
+    """A bottom's waist band: cloth round the torso's bottom, closed under it (the legs come out
+    through it), up to top."""
+    oval_lathe(part, mat, torso_rings(out, TORSO_BOTTOM, top))
+
+
+def cloth(part, mat, z0=0.92, z1=TORSO_TOP, out=TOP_OUT, cuts=()):
+    """Cloth over the torso from z0 to z1, out from it by out (closed over the top at TORSO_TOP)."""
+    oval_lathe(part, mat, torso_rings(out, z0, z1), cuts=cuts)
+
+
+def flared(out, top, hem_z, flare, stretch=1.6, power=2.3):
+    """Rings (bottom up) of a skirt or a dress's skirt: from the torso's outline at height top
+    (offset out) flaring down over the legs' tops to a round hem at hem_z, flare further out at the
+    sides (and stretch times that at the front and back, so the legs can swing inside it). The
+    flare grows as t ** power (t from 0 at the top to 1 at the hem): slowly at first, so the skirt
+    stays clear of the hands hanging beside the hips, then out to the hem below them."""
+    w, d = torso_size(top)
+    w, d = w + out, d + out
+    rings = []
+    for k in range(13):
+        t = k / 12
+        grow = flare * t ** power
+        rings.append((w + grow, d + grow * stretch, top + (hem_z - top) * t))
+    return rings[::-1]
+
+
+DRESS_FLARE = 0.10
+
+
+def dress(part, mat, out, hem_z=0.62, flare=DRESS_FLARE, waist=TOP_HEM):
+    """A dress: over the torso from its top down to waist, flaring below it over the legs to a hem
+    at hem_z. Returns its rings (bottom up) for hem_point."""
+    rings = flared(out, waist, hem_z, flare)[:-1] + torso_rings(out, waist)
+    oval_lathe(part, mat, rings)
+    return rings
+
+
+def hem_ring(part, mat, rings, z, radius, out=0.0):
+    """A round cord all round a flared skirt (rings as flared() gives) at height z."""
+    p, _ = hem_point(rings, 90, z, out + radius * 0.6)
+    q, _ = hem_point(rings, 0, z, out + radius * 0.6)
+    part.torus(mat, (0, 0, p.z), p.x, radius, scale=(1, q.y / p.x), segments=64)
+
+
+def on_skirt(part, mat, rings, angle_deg, z0, z1, radius, out=0.0, steps=8):
+    """A round cord (a pleat, a seam) lying down a flared skirt at a heading from z0 to z1."""
+    pts = [hem_point(rings, angle_deg, z0 + (z1 - z0) * k / steps, out + radius * 0.6)[0] for k in range(steps + 1)]
+    part.tube(mat, pts, radius)
+
+
+def hem_point(rings, angle_deg, z, out=0.0):
+    """A point out from a flared skirt's surface (rings as flared() gives, bottom up) at a heading
+    and height, and its normal there."""
+    for (w0, d0, z0), (w1, d1, z1) in zip(rings, rings[1:]):
+        if z0 <= z <= z1:
+            f = (z - z0) / (z1 - z0)
+            w, d = w0 + (w1 - w0) * f, d0 + (d1 - d0) * f
+            slope = (w1 - w0) / (z1 - z0)
+            break
+    else:
+        w, d, _ = rings[0]
+        slope = 0.0
+    t = math.radians(angle_deg)
+    p = Vector((math.sin(t) * w, math.cos(t) * d, z))
+    normal = (Vector((math.sin(t) * d, math.cos(t) * w, 0)).normalized() - Vector((0, 0, slope))).normalized()
+    return p + normal * out, normal
 
 
 def on_body(part, mat, path, radius, out=TOP_OUT, closed=False, steps=6):
-    """A round cord (a hem, belt, stripe, strap) lying on the body over the cloth: path is (angle,
+    """A round cord (a hem, belt, stripe, strap) lying on the torso over the cloth: path is (angle,
     z) points, smoothed between them."""
     n = len(path)
     pts = []
     for i in range(n if closed else n - 1):
         p0, p1, p2, p3 = (path[(i + k) % n] if closed else path[min(max(i + k, 0), n - 1)] for k in (-1, 0, 1, 2))
+        # Headings the short way round from p1 (so 330 -> 0 goes on through 345, not back).
+        def near(q, ref):
+            return (ref[0] + (q[0] - ref[0] + 180) % 360 - 180, q[1])
+        p0, p2 = near(p0, p1), near(p2, p1)
+        p3 = near(p3, p2)
         for s in range(steps):
             t = s / steps
             a = [0.5 * (2 * p1[c] + (-p0[c] + p2[c]) * t + (2 * p0[c] - 5 * p1[c] + 4 * p2[c] - p3[c]) * t * t +
@@ -339,7 +474,7 @@ def on_body(part, mat, path, radius, out=TOP_OUT, closed=False, steps=6):
 
 
 def ring(part, mat, z, radius, out=TOP_OUT, segments=48):
-    """A cord all round the body at height z."""
+    """A cord all round the torso at height z."""
     on_body(part, mat, [(k / 12 * 360, z) for k in range(12)], radius, out, closed=True, steps=max(1, segments // 12))
 
 
@@ -347,6 +482,41 @@ def spot(part, mat, angle_deg, z, size, out=TOP_OUT, thickness=0.3):
     """A flat round spot on the cloth."""
     p, _ = body_point(angle_deg, z, out + 0.003)
     part.sphere(mat, p, (size, size, size * thickness), rotation=body_frame(angle_deg, z), segments=16, rings=8)
+
+
+# The legs: rounded tubes of radius LEG_R from the hips (the pivots) down to ANKLE_Z.
+
+def leg_tube(part, mat, z0, z1, out=LEG_OUT, segments=24):
+    """Cloth round the part's leg from z0 up to z1, out from it by out: a tube whose bottom edge
+    turns in round to the leg (open above, its top hidden in the torso or the waist band)."""
+    x = part.pivot.x
+    r = LEG_R + out
+    lip = r - LEG_R - 0.002
+    profile = [(r - lip + lip * math.cos(math.radians(a)), z0 + lip + lip * math.sin(math.radians(a))) for a in range(-90, 1, 15)]
+    profile += [(r, z0 + lip + (z1 - z0 - lip) * k / 12) for k in range(1, 13)]
+    def make(g):
+        rings = [[g.verts.new((x + rr * math.cos(i / segments * 2 * math.pi),
+                               rr * math.sin(i / segments * 2 * math.pi), z)) for i in range(segments)]
+                 for rr, z in profile]
+        for a, b in zip(rings, rings[1:]):
+            for i in range(segments):
+                j = (i + 1) % segments
+                g.faces.new((a[i], a[j], b[j], b[i]))
+        face_out(g, lambda p: Vector((x, 0, p.z)))
+    part._add(make, mat, Matrix.Translation(-part.pivot))
+
+
+def leg_seam(part, mat, angle_deg, z0, z1, radius, out=LEG_OUT):
+    """A round cord (a seam) down the part's leg at a heading (0 = front, 90 = +X) from z0 to z1."""
+    t = math.radians(angle_deg)
+    r = LEG_R + out + radius * 0.6
+    x, y = part.pivot.x + math.sin(t) * r, math.cos(t) * r
+    part.tube(mat, [(x, y, z0 + (z1 - z0) * k / 6) for k in range(7)], radius)
+
+
+def leg_cuff(part, mat, z, radius, out=LEG_OUT):
+    """A round cuff (a hem) round the part's leg at height z, over cloth out from it by out."""
+    part.torus(mat, (part.pivot.x, 0, z), LEG_R + out + radius * 0.6, radius, segments=32)
 
 
 def flower(part, petal_mat, middle_mat, center, normal, size, petals=5):
@@ -362,12 +532,12 @@ def flower(part, petal_mat, middle_mat, center, normal, size, petals=5):
 
 
 
-def shoe(part, mat, sole_mat, size=(0.1, 0.135, 0.064), sole=0.032):
-    """A round shoe over the part's foot: an upper reaching just under the body's bottom on a sole
-    from the ground up to sole. Returns the upper's center."""
+def shoe(part, mat, sole_mat, size=(0.082, 0.132, 0.074), sole=0.03):
+    """A rounded shoe over the rig's shoe at the end of the part's leg: an upper from the ground up
+    round the ankle on a sole from the ground up to sole. Returns the upper's center."""
     x = part.pivot.x
-    c = Vector((x, FOOT_C[0], BODY_BOTTOM - 0.003 - size[2]))
-    part.sphere(mat, c, size, cut=((x, 0, sole), (0, 0, -1)), segments=24, rings=12)
+    c = Vector((x, SHOE_C[0], SHOE_C[1]))
+    part.sphere(mat, c, size, cut=((x, 0, sole * 0.4), (0, 0, -1)), segments=24, rings=12)
     part.sphere(sole_mat, (x, c.y, sole / 2), (size[0] * 1.04, size[1] * 1.04, sole / 2), segments=24, rings=8)
     return c
 

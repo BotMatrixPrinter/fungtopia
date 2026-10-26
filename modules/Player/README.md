@@ -1,6 +1,6 @@
 # Player module
 
-The player character: a chibi Girl or Boy who walks the whole world (Mushroom Town, the roads,
+The player character: a Girl or Boy (1.80 m, simple shapes) who walks the whole world (Mushroom Town, the roads,
 Mushroom Forest, Pet City, the home interior) in third person, relative to the camera, turns
 smoothly, jumps, follows the ground, slides along giant mushroom trunks, buildings and the edge
 of the walkable ground, stands still while talking, stands idle and turns for viewing while the
@@ -21,8 +21,9 @@ after defeat until it is teleported (to the clinic the next morning).
 - `Tests/` — `PlayerModuleTests.cs`: xUnit tests of `PlayerModule` (with a fake `IMessageBus`;
   also the save part's round trip and bad saved Json),
   `ArcheryPose` and `CharacterLook` (also standing idle and turning while the wardrobe is open),
-  and of `girl.glb` and `boy.glb` read back (the rig's parts and pivots, the floating head over
-  the cone body, floating hands and feet, no arm or leg meshes; the vivid mushroom colors and
+  and of `girl.glb` and `boy.glb` read back (the rig's parts and pivots; 1.80 m with normal
+  proportions: the round head floating over the tapered torso, real legs in rounded shoes, the
+  outfits on the new body, floating round hands and no arm meshes; the vivid mushroom colors and
   materials, the other colors unchanged).
 
 Test it with `./test.sh Player` from the repository root.
@@ -167,13 +168,14 @@ character's own `Skin`, `Eye` and `Hair` materials, shows or hides the built-in 
 the hair style's and each worn item's .glb (cached bytes) the same way, parenting each of its
 objects to the rig part of the same name with no offset (`Fungtopia.Wardrobe.Attach`), so worn
 models move with every animation and the archery pose; while a `Back` item is worn the slung bow
-sits 0.13 m further out behind it. The model has no arms or legs (their parts are invisible pivots), so
-nothing draws them: the animation swings the floating hands (at the invisible arms' ends, turned a
-little out, `HandsOut`) and the feet (hanging from the hips) back and forth with the walk bob and
-body sway; in the air the hands go up and the feet tuck in; the body (squashed and stretched about
-its bottom, which stays put) stretches rising and squashes on landing, the floating head riding a
-few cm above it; a blinking white flash while invulnerable, and tipping over on its back when
-defeated.
+sits 0.13 m further out behind it. The model has real legs but no arms (the arms' parts are
+invisible pivots), so nothing draws them: walking, the legs swing from the hips (`LegSwing`, 0.5
+rad, a stride of about 0.7 m) with the shoes (and the trouser legs) on their ends, the body dropping
+as they spread so the feet stay on the ground, and the floating hands (at the invisible arms' ends,
+turned a little out, `HandsOut`) swing against them, with body sway; in the air the hands go up and
+the legs part; the body (squashed and stretched about the hips) stretches rising and squashes on
+landing, the floating head riding about 5 cm above it; a blinking white flash while invulnerable,
+and tipping over on its back when defeated.
 
 **Archery** (the Bow module draws only the arrows in flight; the character holds and draws the
 bow). `ArcheryPose` (Core, pure functions, positions in the model frame: X right, Y up, -Z the
@@ -181,7 +183,8 @@ facing) says what `CharacterModel` draws; `ArcheryPose.Solve` gives the whole po
 
 - Idle and walking (`Weight` 0): the bow stays slung on the back (`BackBow`).
 - As soon as `Draw` > 0 the pose blends in over 0.15 s (`Weight`, eased): `BackBow` is hidden and
-  `HandBow` (the same bow, 1.3 times bigger; it grows as it comes) swings from the back over the
+  `HandBow` (the same bow, 1.3 times bigger, about as tall as from the hips to above the head;
+  it grows as it comes) swings from the back over the
   right shoulder into the left hand, its grip and the left hand at `BowGeometry`'s hold point
   (`HoldLocal`, on the player's right, where the Bow module's arrows start).
 - The arrow points from the hold point at `BowState.Target` (`ArrowAim`; along the input's aim
@@ -189,26 +192,30 @@ facing) says what `CharacterModel` draws; `ArcheryPose.Solve` gives the whole po
   within -0.2..0.7 rad (steeper down, the nock would come up past the right cheek). The bow
   stands upright along it (`BowTurn`: limbs up, the string toward the character), its top tilted
   `BowCant` (0.15 rad) away from the head (to the right). The right hand pinches the string at the
-  nock with the arrow (`NockArrow`, a poison mushroom tip), pulled back along the arrow `Draw` ×
-  `BowGeometry.FullDrawPull` behind the string's rest (`StringRest`) to an anchor beside the right
-  cheek and chin; the string bends into a V and each limb (`HandBowLimbTop` / `Bottom`) bends back
+  nock with the arrow (`NockArrow`, 0.95 m, a poison mushroom tip), pulled back along the arrow `Draw` ×
+  `BowGeometry.FullDrawPull` behind the string's rest (`StringRest`) to an anchor below the right
+  cheek and chin (at a level or downward aim; aiming up, the nock comes down below the grip); the string bends into a V and each limb (`HandBowLimbTop` / `Bottom`) bends back
   about the grip by up to `MaxLimbFlex` (0.1 rad) with the visible pull (`Frame.Pull`).
-- The arms are invisible limits now (no arm meshes; only the floating hands at their ends show),
-  but the pose keeps them: they are never scaled or stretched: they keep `ArmLength` (0.42 m) and only turn at the
-  shoulders (`ReachArm`), the hands at their ends. The left arm reaches forward and across, in
-  front of the chest, to the grip on the right. For that the body turns to the right of the aim
+- The arms are invisible limits (no arm meshes; only the floating hands at their ends show), but
+  the pose keeps them, never scaled or stretched: `ArmLength` (0.66 m, shoulders `ShoulderLRest`
+  at 1.40 m, ±0.22 m), halves of `ArmLength` / 2 for the upper arm and forearm. They only turn at
+  the shoulders (`ReachArm`). The left (bow) arm stays straight, its hand at its end; it reaches
+  forward and across, in front of the chest, to the grip on the right. The right (drawing) arm
+  bends at its elbow (`Frame.ElbowR`, pointing out to the right and down, `DrawElbowPole`), so its
+  hand comes in anywhere from `MinDrawReach` (0.22 m) to `ArmLength` from the shoulder. For that the body turns to the right of the aim
   (near `SideOn`, less at the start of a draw, never more than `MaxTurn`, 1.5 rad: the chest
   always faces the target's side), leans about the hips (`BodyTurn`) and slides its hips up to
   `MaxHipShift` (0.15 m; `Frame.Hips`) just enough that the shoulders put both hands where they
   belong: a small damped least-squares solve (bow hand first; within 2 cm of the grip, 3 cm of the
-  nock), started from a half draw's pose so the pose moves smoothly. Where the right arm still
+  nock; as the pull grows the neck leans toward the string so the head's middle comes about
+  `AnchorBeside`, 0.2 m, beside the nock), started from a half draw's pose so the pose moves smoothly. Where the right arm still
   cannot reach the full pull, the visible pull (and the nocked arrow with it) is shortened instead
-  (`Frame.Pull` ≤ `StringPull`; about 80% at a level full draw); an arm is never wrapped round.
-  Both hands and both elbows (the middle of the arm: it never bends) stay in front of the torso's
-  back plane (`InFrontOfBack`, `TorsoBack` 0.17 m behind its middle) and never behind the neck or
-  head. The feet keep walking and keep the facing logic. The head rides on the neck,
-  looks along the arrow, and tilts on it to stay about over the feet, a little away from the bow
-  (`HeadMiddle`), clear of the bow and the string hand. A slight squash pulses as the draw reaches
+  (`Frame.Pull` ≤ `StringPull`); an arm is never wrapped round.
+  Both hands and both elbows stay in front of the torso's back plane (`InFrontOfBack`, `TorsoBack`
+  0.12 m behind its middle) and never round behind the neck or head. The feet keep walking and
+  keep the facing logic. The head (center 0.16 m above the neck, `HeadAboveNeck`) rides on the
+  neck, looks along the arrow, and tilts on it a little toward the arrow (`HeadMiddle`), sighting
+  along it, clear of the bow and the string hand. A slight squash pulses as the draw reaches
   full (body and head only; squash and stretch never scale the hands or feet).
 - On release (`Draw` back to 0): the arrow is gone, the string snaps forward with a little
   overshoot and the limbs straighten, the body holds the drawn pose and the right hand swings back
@@ -220,34 +227,49 @@ facing) says what `CharacterModel` draws; `ArcheryPose.Solve` gives the whole po
 ## Models
 
 `blender -b --factory-startup --python modules/Player/Models/characters.py` (from the
-repository root) writes `girl.glb` and `boy.glb`; commit both with the script. Kids made of simple shapes, from
-Saria's drawings (2026-10-25), with floating hands and head like Animal Crossing: a big round head
-(at the neck pivot, 0.72 m, as before) with large dark oval eyes with sparkles, rosy cheeks, a
-small smile and hair, floating about 7 cm above a smooth cone body (a triangle from the front:
-0.3 m round at its bottom, 0.13 m up, narrowing to a rounded top at 0.61 m; no neck); two round
-hands floating beside the body, a little below its middle (at the ends of invisible 0.42 m arms);
-two little round shoes under it; no arms and no legs. Both are the same modular rig: skin parts
-(material `Skin`: the cone body, the hands, the head) with dark eyes (`Eye`), empty pivots
-`ArmL`/`ArmR` and `LegL`/`LegR`, and the old outfit and hair as separate child objects of their
-part, at its pivot, for the game to hide: `Hair` (Head), `DefaultTop` (Body), `DefaultBottom`
-(Body; the Boy's trousers), `DefaultShoesLegL`/`R` (the feet, on the legs' pivots, so they swing),
-`DefaultHead` (the Girl's ribbon). The Wardrobe's clothes were sized for the old rounded body and
-legs (its `kit.py`): they still attach, but look off until they are refit to the cone. A wooden
-bow slung on the back (its strap a band across the cone) with
-mushroom-red tips (material `MushroomRed`, its own, not the ribbon's), and for shooting the same bow 1.3 times bigger, without its string (the game
-draws the string), its two limbs separate children for bending, and a nocked poison
-mushroom-tipped arrow (0.78 m). The mushrooms are "vivid" (Tony, 2026-10-25, the rule for every
-mushroom in the game; `Core/Mushrooms.cs` keeps the same colors): the tips a pure tomato red
-(0.96, 0.1, 0.06), the arrow's `PoisonCap` a rich bright purple (0.62, 0.12, 0.95) with bright
-green `PoisonSpots` (0.5, 1.0, 0.25) on a clean light cream `Stem` (1.0, 0.96, 0.86). The Girl has a ribbon bow on her
-head, pigtail puffs and a pink dress with white spots coloring the cone; the Boy a red bow tie and
-two buttons on a blue shirt coloring the cone, and trousers as a band round its bottom. Separate objects with pivots where they move: `Body`, `Head`
-(neck), `LegL`/`LegR` (hip), `ArmL`/`ArmR` (shoulder), `HandL`/`HandR` (hand center; the
-game keeps them at the invisible arms' ends), `BackBow`, `HandBow` (grip; it rests exactly where `BackBow`
-is, its own frame being the held bow's: tips up and down, arc bulging forward; children
-`HandBowLimbTop` / `HandBowLimbBottom` at the same pivot) and `NockArrow`
-(nock; at rest it hides upright inside the body, its own frame points forward). Feet at the
-origin, facing -Z in Godot.
+repository root) writes `girl.glb` and `boy.glb`; commit both with the script. People made of simple
+shapes, from Saria's drawings (2026-10-25), grown up to 1.80 m with normal proportions (Tony,
+2026-10-25: "1.8 meters average", "they do have legs in the drawings", "make them look more
+normal"), with a floating head and floating round hands like Animal Crossing. Both are 1.80 m: feet
+at 0, the top of the head at 1.80 (a character of another height would be the same rig scaled by
+height / 1.80). From the ground up:
+
+- **Legs** `LegL`/`LegR`: rounded skin tubes (radius 0.065 m) from the hip pivots (y 0.90, x
+  ∓0.10) down into rounded shoes (`DefaultShoesLegL`/`R`, children of the legs, about 0.12 m tall
+  and 0.25 m long).
+- **Torso** `Body` (pivot at the hips, 0.90): a smooth tapered oval shape from 0.88 to 1.44 m:
+  hips about 0.34 m wide, waist 0.30, shoulders 0.40, about 0.22 m deep, with the bow's strap
+  across it.
+- **Arms** `ArmL`/`ArmR`: empty pivots at the shoulders (y 1.40, x ∓0.22): invisible 0.66 m arms;
+  the round hands `HandL`/`HandR` (radius about 0.055 m, pivots at their centers) float at their
+  ends, beside the thighs at rest.
+- **Head** `Head` (pivot at the neck, 1.48): round, 0.27 m wide and 0.30 m tall, centered at 1.64
+  (`BowGeometry.HeadUp`), floating about 5 cm above the torso (no neck), with large dark oval eyes
+  with sparkles, rosy cheeks, a small smile and hair. The face and hair are drawn on the old 0.4 m
+  design head and mapped onto the real one (`head_space`), so they keep their shapes.
+
+Skin parts use material `Skin` (the torso, legs, hands and head), the eyes `Eye`. The old outfit and
+hair are separate child objects of their part, at its pivot, for the game to hide: `Hair` (Head),
+`DefaultTop` (Body), `DefaultBottom` (the Boy's trousers: a waist band on Body, and
+`DefaultBottomLegL`/`R` on the legs, so they swing), `DefaultShoesLegL`/`R` (the shoes, on the
+legs), `DefaultHead` (the Girl's ribbon). The Girl has a ribbon bow on her head, pigtail puffs and
+a pink white-spotted dress that follows the torso and flares below the hips over the legs' tops to
+a hem at about 0.62 m; the Boy a blue shirt with a red bow tie and two buttons, and trousers on his
+legs. A wooden bow slung on the back (1.1 times the old one, its strap a band across the torso)
+with mushroom-red tips (material `MushroomRed`, its own, not the ribbon's), and for shooting the
+same bow 1.3 times bigger again (about 1.05 m tip to tip), without its string (the game draws the
+string), its two limbs separate children for bending, and a nocked poison mushroom-tipped arrow
+(0.95 m). The mushrooms are "vivid" (Tony, 2026-10-25, the rule for every mushroom in the game;
+`Core/Mushrooms.cs` keeps the same colors): the tips a pure tomato red (0.96, 0.1, 0.06), the
+arrow's `PoisonCap` a rich bright purple (0.62, 0.12, 0.95) with bright green `PoisonSpots` (0.5,
+1.0, 0.25) on a clean light cream `Stem` (1.0, 0.96, 0.86). Separate objects with pivots where they
+move: `Body`, `Head` (neck), `LegL`/`LegR` (hip), `ArmL`/`ArmR` (shoulder), `HandL`/`HandR` (hand
+center; the game keeps them at the invisible arms' ends), `BackBow`, `HandBow` (grip; it rests
+exactly where `BackBow` is, its own frame being the held bow's: tips up and down, arc bulging
+forward; children `HandBowLimbTop` / `HandBowLimbBottom` at the same pivot) and `NockArrow` (nock;
+at rest it stands upright inside the left leg and the torso, hidden by the game; its own frame
+points forward). Feet at the origin, facing -Z in Godot. The Wardrobe's clothes (its `kit.py`) are
+fitted to this body.
 
 ## Screenshots
 
@@ -255,7 +277,7 @@ origin, facing -Z in Godot.
 variable `PLAYER_PREVIEW` picks the pose: `front` (default), `back`, `walk`, `jump`, `hit`,
 `draw` (full draw), `drawback` (full draw from behind, like the game camera), `release` (just
 after a shot), `swing` (the bow on its way back), or `aim`, `side` and `facing`: a held draw
-(`PLAYER_PREVIEW_DRAW`, 0..1, default 1) at a level aim from the Camera module's aim camera (0.9 m
+(`PLAYER_PREVIEW_DRAW`, 0..1, default 1) at a level aim from the Camera module's aim camera (0.7 m
 right of and 0.25 m above the head, 2.75 m back, 62 degrees), from the right side (the bow's) and
 from the front
 (`PLAYER_PREVIEW_WALK=1` walks meanwhile); `PLAYER_PREVIEW_CHARACTER=girl` or `boy`

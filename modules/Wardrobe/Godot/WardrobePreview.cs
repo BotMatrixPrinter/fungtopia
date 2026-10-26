@@ -47,7 +47,8 @@ public partial class WardrobePreview : Node3D, IMessageHandler<SpendCoins>, IMes
         AddChild(_mannequin);
         var camera = new Camera3D { Fov = 40f, Current = true };
         AddChild(camera);
-        camera.LookAtFromPosition(new Vector3(1.0f, 1.1f, 3.2f), new Vector3(1.0f, 0.75f, 0), Vector3.Up);
+        // The whole 1.80 m mannequin (and a tall hat or hair) on the left, the panel on the right.
+        camera.LookAtFromPosition(new Vector3(1.0f, 1.25f, 3.5f), new Vector3(1.0f, 0.95f, 0), Vector3.Up);
 
         _view = (WardrobeView)GD.Load<PackedScene>("res://modules/Wardrobe/Godot/Main.tscn").Instantiate();
         _view.Bind(_wardrobe);
@@ -145,7 +146,7 @@ public partial class WardrobePreview : Node3D, IMessageHandler<SpendCoins>, IMes
         }
         var camera = new Camera3D { Fov = 40f, Current = true };
         AddChild(camera);
-        camera.LookAtFromPosition(new Vector3(0, 1.3f, 4.6f), new Vector3(0, 0.75f, 0), Vector3.Up);
+        camera.LookAtFromPosition(new Vector3(0, 1.4f, 4.9f), new Vector3(0, 0.95f, 0), Vector3.Up);
     }
 
     private void Stage()
