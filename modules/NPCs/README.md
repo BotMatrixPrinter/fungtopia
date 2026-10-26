@@ -41,7 +41,8 @@ conversation in speech bubbles (the Dialogue module shows them).
   prompt floats, at the top of their head; and each one's look: Jeremy's coat, badge and
   stethoscope, Millie's ears and tail, Lucy's flower and "Pet Store" print, Abby's bun and dress,
   Pip's hat, muffin apron, spoon and the 0.63 m stool Pip still needs at the counter,
-  the shoulders as high as before); Pip's vivid mushroom hat (cherry red spots, pure white
+  the shoulders as high as before; no mouths: no `Mouth` material in the models or `npcs.py`, nothing but skin
+  where a mouth would be, the eyes kept); Pip's vivid mushroom hat (cherry red spots, pure white
 cap, light cream gills, Pip's other colors unchanged) and `MushroomLook` (only the cap gets the
 gloss and the stronger rim, and the toon shader takes them).
 
@@ -179,16 +180,16 @@ the body down to rounded feet a little wider than them, coming out from under it
 outline seen from the front; two big oval hands (0.18 m tall, 0.14 m wide) floating well out beside
 the body at its middle (0.58 m), each with three short dark finger marks; no arms.
 Each keeps the features Saria drew for them (the head is modelled at a design size and scaled onto
-the ball, `HEAD_FIT`). Dr. Jeremy: big dark eyes with sparkles, a neat side parting, his white
+the ball, `HEAD_FIT`); no mouths (Tony, 2026-10-26: like the player characters and townsfolk, in
+Saria's style the faces are just the eyes). Dr. Jeremy: big dark eyes with sparkles, a neat side parting, his white
 doctor's coat as the egg, open in a V at the top over a blue shirt and red tie, with lapels,
 buttons and a name badge, a stethoscope ringing its top with the chest piece in front, dark
 trousers. Millie: cat ears with pink insides, happy ^ ^ closed eyes, honey hair in bunches, a mint
 dress with white spots and a frilly hem as the triangle, a pink bow at its top, a little curled cat
-tail behind. Lucy: a pink flower in her purple bob, half-lidded unimpressed eyes and a flat little
-mouth, a pale pink shirt saying "Pet Store" with little hearts as the egg over a blue skirt band
-round and under its base, purple tights. Abby: big dark eyes with sparkles, a happy smile, auburn hair with
+tail behind. Lucy: a pink flower in her purple bob, half-lidded unimpressed eyes, a pale pink shirt saying "Pet Store" with little hearts as the egg over a blue skirt band
+round and under its base, purple tights. Abby: big dark eyes with sparkles, auburn hair with
 a tall top bun, the triangle her pink dress with a white collar and hem. Pip: big dark eyes
-with sparkles, rosy cheeks with freckles, a big smile, short ginger hair, a puffy chef's hat shaped
+with sparkles, rosy cheeks with freckles, short ginger hair, a puffy chef's hat shaped
 like a mushroom cap, vivid like every mushroom in the game: crisp pure white with pure cherry red
 spots and clean light cream gills, a coral shirt egg with a trousers band, a cream apron over
 its front (tied with a bow at the back) with a little muffin printed on it (pink cup, blueberries, a

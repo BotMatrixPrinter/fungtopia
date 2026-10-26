@@ -1556,6 +1556,44 @@ public class NPCsModuleTests
     /// <summary>True when all of the material's vertices on the node are on the front (Godot -Z).</summary>
     private static bool InFront(Glb glb, string node, string material) => glb.Vertices(node, material).All(v => v.Z < 0f);
 
+    /// <summary>
+    /// No NPC has a mouth (Tony, 2026-10-26: like the player characters and townsfolk, the faces
+    /// are just the eyes): no "Mouth" material in any model or in npcs.py, and nothing but skin on
+    /// the front of the head between and below the eyes, where the smiles and Lucy's flat mouth were.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(NpcModels))]
+    public void TheModelsHaveNoMouths(string file, float lift, string[] cloth, bool cone)
+    {
+        _ = (lift, cloth, cone);
+        var glb = new Glb(file);
+        Assert.DoesNotContain("Mouth", glb.AllMaterials());
+        var skin = glb.Vertices("Head", "Skin");
+        Vector3 lo = Min(skin), hi = Max(skin), center = (lo + hi) / 2;
+        float r = (hi.Y - lo.Y) / 2;
+        // The mouths were 0.32 to 0.5 of the head's radius under its center, at most 0.11 of it off
+        // the middle; the eyes reach no lower than 0.39 of it there, and are 0.17 of it or more out.
+        bool MouthArea(Vector3 v) => MathF.Abs(v.X - center.X) < 0.15f * r && v.Y < center.Y - 0.25f * r &&
+            v.Y > center.Y - 0.6f * r && v.Z < center.Z - 0.5f * r;
+        foreach (var material in glb.Materials("Head").Where(m => m != "Skin"))
+            Assert.False(glb.Vertices("Head", material).Any(MouthArea), $"{file}: {material} where a mouth would be");
+        // Still the eyes on the face.
+        Assert.True(InFront(glb, "Head", "Eye"));
+        Assert.True(glb.Vertices("Head", "Eye").All(v => v.Y > center.Y - 0.45f * r));
+    }
+
+    [Fact]
+    public void NpcsPyHasNoMouthMaterialOrSmile()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !File.Exists(Path.Combine(dir.FullName, "modules", "NPCs", "Models", "npcs.py")))
+            dir = dir.Parent;
+        Assert.NotNull(dir);
+        string script = File.ReadAllText(Path.Combine(dir!.FullName, "modules", "NPCs", "Models", "npcs.py"));
+        Assert.DoesNotContain("\"Mouth\"", script);
+        Assert.DoesNotContain("smile(", script);
+    }
+
     [Fact]
     public void JeremyKeepsHisCoatBadgeAndStethoscope()
     {
@@ -1668,7 +1706,7 @@ public class NPCsModuleTests
     public static readonly TheoryData<string, float, float, float> PipOtherColors = new()
     {
         { "Skin", 0.98f, 0.68f, 0.52f }, { "Blush", 1.0f, 0.45f, 0.48f }, { "Eye", 0.07f, 0.04f, 0.06f },
-        { "EyeShine", 1.0f, 1.0f, 1.0f }, { "Mouth", 0.55f, 0.16f, 0.2f }, { "Shoe", 0.42f, 0.24f, 0.18f },
+        { "EyeShine", 1.0f, 1.0f, 1.0f }, { "Shoe", 0.42f, 0.24f, 0.18f },
         { "Hair", 0.85f, 0.42f, 0.18f }, { "Freckle", 0.66f, 0.36f, 0.22f }, { "Shirt", 0.92f, 0.38f, 0.36f },
         { "Apron", 0.95f, 0.8f, 0.56f }, { "Cup", 0.97f, 0.55f, 0.68f }, { "MuffinTop", 0.72f, 0.45f, 0.25f },
         { "Berry", 0.35f, 0.38f, 0.85f }, { "Cherry", 0.9f, 0.15f, 0.2f }, { "Trousers", 0.45f, 0.35f, 0.3f },

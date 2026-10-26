@@ -35,7 +35,7 @@ public partial class NpcFigure : Node3D
     /// <summary>Surfaces drawn without an ink outline (small soft details).</summary>
     private static readonly HashSet<string> NoOutline = new()
     {
-        "EyeShine", "Blush", "Mouth", "Print", "Heart", "Button", "BadgeStripe", "Lid", "Spots",
+        "EyeShine", "Blush", "Print", "Heart", "Button", "BadgeStripe", "Lid", "Spots",
         "Freckle", "Cup", "MuffinTop", "Berry", "Cherry", "HatSpots", "Gills", "Finger",
     };
 

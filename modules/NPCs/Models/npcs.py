@@ -13,18 +13,19 @@
 # fully rounded, softly curved bottom for a dress; a soft egg otherwise), two straight tube legs,
 # wide apart, coming out from under its base (inside its outline seen from the front) down to
 # rounded feet, and two big oval hands with finger marks floating well out beside the body at about
-# its middle height (no arms).
+# its middle height (no arms). No mouths: the faces are just the eyes (Saria's style, like the
+# player characters and townsfolk; Tony, 2026-10-26).
 #   Dr. Jeremy: big dark eyes with sparkles, a neat side parting, a white doctor's coat (the egg)
 #               with lapels, buttons and a name badge open over a blue shirt and red tie, a
 #               stethoscope round its top.
 #   Millie:     cat ears, happy ^ ^ closed eyes, honey bunches, a pink bow, a mint spotted dress
 #               (the triangle) with a frilly hem, and a little curled cat tail.
-#   Lucy:       a flower in her purple bob, half-lidded unimpressed eyes, a flat little mouth, a shirt
-#               (the egg) saying "Pet Store" with little hearts, a skirt band round the bottom.
-#   Abby:       big dark eyes, a happy smile, hair in a tall top bun, the triangle her pink
+#   Lucy:       a flower in her purple bob, half-lidded unimpressed eyes, a shirt (the egg)
+#               saying "Pet Store" with little hearts, a skirt band round the bottom.
+#   Abby:       big dark eyes, hair in a tall top bun, the triangle her pink
 #               dress with a white collar and hem.
 #   Pip:        the cook at the Mushroom Munchies food stall: big dark eyes, rosy freckled cheeks,
-#               a big smile, a puffy white chef's hat shaped like a mushroom cap with red spots, a
+#               a puffy white chef's hat shaped like a mushroom cap with red spots, a
 #               cream apron with a little muffin printed on it over the egg, a wooden spoon in
 #               the right hand; standing on a little wooden step stool (to reach over the counter).
 #
@@ -48,7 +49,6 @@ COLORS = {
     "Blush": (1.0, 0.45, 0.48),
     "Eye": (0.07, 0.04, 0.06),
     "EyeShine": (1.0, 1.0, 1.0),
-    "Mouth": (0.55, 0.16, 0.2),
     "Shoe": (0.42, 0.24, 0.18),
     "Finger": (0.74, 0.4, 0.32),
 }
@@ -492,12 +492,6 @@ def blush(head, mats):
                     rotation=Matrix.Rotation(math.radians(side * -38), 4, "Z"), segments=16, rings=8)
 
 
-def smile(head, mats, big=False):
-    head.torus(mats["Mouth"], HEAD_C + Vector((0, HEAD_R * 0.92, -0.17)), 0.045 if big else 0.035, 0.01,
-               rotation=Matrix.Rotation(math.radians(90), 4, "X") @ Matrix.Rotation(math.radians(-90), 4, "Z"),
-               arc=0.45 if big else 0.42)
-
-
 def hair_cap(head, mats, fringe=True, back=1.0):
     head.sphere(mats["Hair"], HEAD_C + Vector((0, -0.02, 0.03)), (HEAD_R * 1.07, HEAD_R * 1.06 * back, HEAD_R * 1.04),
                 segments=40, rings=24, cut=(HEAD_C + Vector((0, 0.1, -0.1)), Vector((0, 0.85, -0.53))))
@@ -521,7 +515,6 @@ def jeremy(mats):
     head = round_head(mats)
     round_eyes(head, mats)
     blush(head, mats)
-    smile(head, mats)
     hair_cap(head, mats, fringe=False)
     # A neat side parting: a swoop of hair over the forehead.
     head.sphere(mats["Hair"], HEAD_C + Vector((-0.08, HEAD_R * 0.62, 0.27)), (0.26, 0.12, 0.09),
@@ -565,7 +558,6 @@ def millie(mats):
     head = round_head(mats)
     happy_eyes(head, mats)
     blush(head, mats)
-    smile(head, mats, big=True)
     hair_cap(head, mats)
     # Two puffy bunches at the sides.
     for side in (-1, 1):
@@ -605,9 +597,6 @@ def millie(mats):
 def lucy(mats):
     head = round_head(mats)
     sleepy_eyes(head, mats)
-    # A small flat unimpressed mouth.
-    head.capsule(mats["Mouth"], HEAD_C + Vector((-0.04, HEAD_R * 0.93, -0.18)), HEAD_C + Vector((0.04, HEAD_R * 0.93, -0.18)),
-                 0.009, segments=8)
     hair_cap(head, mats, fringe=False)
     # A straight-cut fringe and a bob down to the chin.
     head.sphere(mats["Hair"], HEAD_C + Vector((0, HEAD_R * 0.55, 0.22)), (0.34, 0.16, 0.11), segments=24, rings=12)
@@ -643,7 +632,6 @@ def abby(mats):
     head = round_head(mats)
     round_eyes(head, mats)
     blush(head, mats)
-    smile(head, mats, big=True)
     hair_cap(head, mats)
     # A tall top bun: a round bun on a little hair stack, tied with a band.
     top = HEAD_C + Vector((0, -0.03, HEAD_R * 0.98))
@@ -693,7 +681,6 @@ def pip(mats):
     round_eyes(head, mats)
     blush(head, mats)
     freckles(head, mats)
-    smile(head, mats, big=True)
     # Short ginger hair under the hat: the back of the head, a fringe and tufts over the ears.
     head.sphere(mats["Hair"], HEAD_C + Vector((0, -0.04, 0.0)), (HEAD_R * 1.02, HEAD_R, HEAD_R * 0.96),
                 segments=40, rings=24, cut=(HEAD_C + Vector((0, 0.12, 0.0)), Vector((0, 1, 0))))
