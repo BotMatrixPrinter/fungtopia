@@ -618,10 +618,10 @@ public class NPCsModuleTests
 
     [Theory]
     [InlineData(DeviceKind.KeyboardMouse, "key_e")]
-    [InlineData(DeviceKind.Xbox, "xbox_x")]
-    [InlineData(DeviceKind.PlayStation, "ps_square")]
-    [InlineData(DeviceKind.Nintendo, "ns_y")]
-    [InlineData(DeviceKind.Generic, "xbox_x")]
+    [InlineData(DeviceKind.Xbox, "xbox_a")]
+    [InlineData(DeviceKind.PlayStation, "ps_cross")]
+    [InlineData(DeviceKind.Nintendo, "ns_b")]
+    [InlineData(DeviceKind.Generic, "xbox_a")]
     public void EveryPromptShowsOnlyTheActiveDevicesInteractIcon(DeviceKind device, string glyph)
     {
         string icon = $"[img={NPCsModule.PromptIconSize}]res://modules/Input/Glyphs/{glyph}.svg[/img]";
@@ -656,16 +656,16 @@ public class NPCsModuleTests
 
         rig.Npcs.Handle(new ActiveDevice(DeviceKind.Xbox));
         rig.Tick();
-        Assert.Equal("[img=36]res://modules/Input/Glyphs/xbox_x.svg[/img] Talk", rig.Npcs.PromptText);
+        Assert.Equal("[img=36]res://modules/Input/Glyphs/xbox_a.svg[/img] Talk", rig.Npcs.PromptText);
 
         rig.Npcs.Handle(new ActiveDevice(DeviceKind.PlayStation));
         rig.Tick();
-        Assert.Equal("[img=36]res://modules/Input/Glyphs/ps_square.svg[/img] Talk", rig.Npcs.PromptText);
+        Assert.Equal("[img=36]res://modules/Input/Glyphs/ps_cross.svg[/img] Talk", rig.Npcs.PromptText);
 
-        // At Pip's counter with the PlayStation pad: Square and "Food".
+        // At Pip's counter with the PlayStation pad: Cross and "Food".
         rig.Position = Places.FoodSpot.Position;
         rig.Tick();
-        Assert.Equal("[img=36]res://modules/Input/Glyphs/ps_square.svg[/img] Food", rig.Npcs.PromptText);
+        Assert.Equal("[img=36]res://modules/Input/Glyphs/ps_cross.svg[/img] Food", rig.Npcs.PromptText);
 
         rig.Npcs.Handle(new ActiveDevice(DeviceKind.KeyboardMouse));
         rig.Tick();
@@ -789,6 +789,95 @@ public class NPCsModuleTests
         Assert.Empty(rig.Bus.All<SpendCoins>());
         Assert.Equal("Lucy", rig.Shown.Speaker);
         Assert.False(rig.Shown.Last);
+    }
+
+    [Fact]
+    public void BackSaysNoToTheCrow()
+    {
+        var rig = new Rig(Near(Lucy)) { Coins = 5000 };
+        HearTheOffer(rig);
+        rig.Npcs.DeclineCrow();
+        rig.Tick();
+        Assert.False(rig.Npcs.OfferingCrow);
+        // Back to the plain talk prompt: Interact starts her talk again, it does not buy.
+        Assert.Equal(Lucy, rig.Npcs.PromptNpc);
+        Assert.Equal(NPCsModule.PromptKind.Talk, rig.Npcs.Prompt);
+        rig.Press();
+        Assert.Empty(rig.Bus.All<SpendCoins>());
+        Assert.Equal("Lucy", rig.Shown.Speaker);
+        Assert.False(rig.Shown.Last);
+        // Back with no offer standing changes nothing.
+        rig.Npcs.DeclineCrow();
+        Assert.False(rig.Npcs.OfferingCrow);
+    }
+
+    // Smart A: a showing prompt offers an interaction (the gamepad's A talks instead of jumping).
+
+    [Theory]
+    [InlineData(Jeremy)]
+    [InlineData(Lucy)]
+    [InlineData(Abby)]
+    [InlineData(Pip)]
+    public void APromptIsAvailableForInteractWhileItShows(int npc)
+    {
+        var rig = new Rig(Far);
+        rig.Wait(2);
+        Assert.Empty(rig.Bus.All<InteractAvailable>());
+        rig.Position = Near(npc);
+        rig.Tick();
+        var on = Assert.Single(rig.Bus.All<InteractAvailable>());
+        Assert.Equal(NPCsModule.InteractOwner, on.Owner);
+        Assert.True(on.Available);
+        rig.Wait(3);
+        Assert.Single(rig.Bus.All<InteractAvailable>());
+        rig.Position = Far;
+        rig.Tick();
+        var all = rig.Bus.All<InteractAvailable>();
+        Assert.Equal(2, all.Count);
+        Assert.Equal(NPCsModule.InteractOwner, all[1].Owner);
+        Assert.False(all[1].Available);
+    }
+
+    [Fact]
+    public void TalkingEndsTheAvailabilityAndTheNextPromptBringsItBack()
+    {
+        var rig = new Rig(Near(Jeremy));
+        rig.Tick();
+        Assert.True(rig.Bus.All<InteractAvailable>()[^1].Available);
+        // The talk's speech bubbles hide the prompt (the Dialogue module offers A then).
+        rig.Tick(interact: true);
+        Assert.Equal(Jeremy, rig.Npcs.Talking);
+        Assert.False(rig.Bus.All<InteractAvailable>()[^1].Available);
+        rig.ReadAll();
+        rig.Tick();
+        Assert.Equal(Jeremy, rig.Npcs.PromptNpc);
+        var all = rig.Bus.All<InteractAvailable>();
+        Assert.Equal(3, all.Count);
+        Assert.True(all[^1].Available);
+    }
+
+    [Fact]
+    public void LucysBuyPromptIsAvailableForInteract()
+    {
+        var rig = new Rig(Near(Lucy)) { Coins = 5000 };
+        HearTheOffer(rig);
+        Assert.Equal(NPCsModule.PromptKind.Buy, rig.Npcs.Prompt);
+        Assert.True(rig.Bus.All<InteractAvailable>()[^1].Available);
+    }
+
+    [Fact]
+    public void AMenuHoldingUiFocusEndsTheAvailability()
+    {
+        var rig = new Rig(Near(Millie));
+        rig.Tick();
+        Assert.True(rig.Bus.All<InteractAvailable>()[^1].Available);
+        rig.Npcs.Handle(new UiFocus(99, true));
+        rig.Tick();
+        Assert.Equal(-1, rig.Npcs.PromptNpc);
+        Assert.False(rig.Bus.All<InteractAvailable>()[^1].Available);
+        rig.Npcs.Handle(new UiFocus(99, false));
+        rig.Tick();
+        Assert.True(rig.Bus.All<InteractAvailable>()[^1].Available);
     }
 
     [Fact]

@@ -87,7 +87,8 @@ public partial class InputView : Control, IModuleView
                 _input.PressJump();
                 break;
             case InputEventJoypadButton { ButtonIndex: JoyButton.A, Pressed: true }:
-                _input.PressJump();
+                // Smart A: Interact when there is something to interact with (or a menu is open), else Jump.
+                _input.PressGamepadA();
                 break;
             case InputEventKey { PhysicalKeycode: Key.E, Pressed: true, Echo: false }:
             case InputEventJoypadButton { ButtonIndex: JoyButton.X, Pressed: true }:

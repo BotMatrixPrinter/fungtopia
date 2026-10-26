@@ -52,6 +52,9 @@ public sealed class FoodModule : IModule, IMessageHandler<PlayerState>, IMessage
     /// <summary>The <see cref="UiFocus.Owner"/> held while eating (the player stops to eat).</summary>
     public const int EatFocusOwner = 8241002;
 
+    /// <summary>The <see cref="InteractAvailable.Owner"/> published while <see cref="StallPrompt"/> shows (the gamepad's A opens the menu then).</summary>
+    public const int InteractOwner = 8241003;
+
     private readonly int[] _counts = new int[FoodKinds.Count];
     private readonly int[] _restored = new int[FoodKinds.Count];
     private IMessageBus? _bus;
@@ -63,7 +66,7 @@ public sealed class FoodModule : IModule, IMessageHandler<PlayerState>, IMessage
     private int _pendingRequest = -1;
     private int _pendingKind;
     private float _eatTime;
-    private bool _menuFocus, _eatFocus;
+    private bool _menuFocus, _eatFocus, _offered;
 
     /// <summary>How many of <paramref name="kind"/> are in the bag (0..9).</summary>
     public int Count(int kind) => FoodCatalog.Valid(kind) ? _counts[kind] : 0;
@@ -180,6 +183,11 @@ public sealed class FoodModule : IModule, IMessageHandler<PlayerState>, IMessage
             TickEating((float)context.StepSeconds);
 
         PublishFocus();
+        if (StallPrompt != _offered)
+        {
+            _offered = StallPrompt;
+            _bus.Publish(new InteractAvailable(InteractOwner, StallPrompt));
+        }
         _bus.Publish(new FoodBag(_counts[0], _counts[1], _counts[2], Selected, Eating, EatProgress));
     }
 
@@ -290,7 +298,7 @@ public sealed class FoodModule : IModule, IMessageHandler<PlayerState>, IMessage
         MenuOpen = false;
     }
 
-    /// <summary>The view's confirm button (Enter, gamepad A): buys at the next tick like Interact, only while the menu is open.</summary>
+    /// <summary>The view's confirm button (Enter; the gamepad's A arrives as Interact): buys at the next tick like Interact, only while the menu is open.</summary>
     public void Confirm()
     {
         if (MenuOpen)

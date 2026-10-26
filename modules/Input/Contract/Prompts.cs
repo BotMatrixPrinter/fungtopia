@@ -18,7 +18,7 @@ public static class Prompts
     // its "A" is the bottom button, Nintendo's B; its "B" the right one, Nintendo's A; its "X" the left one, Nintendo's Y).
     private static readonly string[,] s_glyphs =
     {
-        /* Interact  */ { "key_e", "xbox_x", "ps_square", "ns_y" },
+        /* Interact  */ { "key_e", "xbox_a", "ps_cross", "ns_b" },
         /* Jump      */ { "key_space", "xbox_a", "ps_cross", "ns_b" },
         /* Fire      */ { "mouse_left", "xbox_rt", "ps_r2", "ns_zr" },
         /* Back      */ { "key_esc", "xbox_b", "ps_circle", "ns_a" },
@@ -40,7 +40,7 @@ public static class Prompts
 
     private static readonly string[,] s_texts =
     {
-        /* Interact  */ { "E", "X", "Square", "Y" },
+        /* Interact  */ { "E", "A", "Cross", "B" },
         /* Jump      */ { "Space", "A", "Cross", "B" },
         /* Fire      */ { "Left Click", "RT", "R2", "ZR" },
         /* Back      */ { "Esc", "B", "Circle", "A" },

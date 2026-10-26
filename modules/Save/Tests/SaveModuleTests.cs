@@ -680,6 +680,40 @@ public sealed class SaveModuleTests : IDisposable
     }
 
     [Fact]
+    public void Back_goes_up_one_page_at_a_time_and_closes_the_menu_from_Main()
+    {
+        var (bus, save, _) = OpenMenu();
+        Tick(save);
+        Assert.Equal(new UiFocus(SaveModule.MenuOwner, true), bus.All<UiFocus>().Last());
+        save.ShowPage(MenuPage.Slots, 1);
+        save.ChosenSlot = 2;
+        save.ShowPage(MenuPage.Choice, 0);
+
+        save.Back();
+        Assert.True(save.MenuOpen);
+        Assert.Equal(MenuPage.Slots, save.Page);
+        Assert.Equal(1, save.Highlight); // slot 2, the one chosen
+        save.Back();
+        Assert.True(save.MenuOpen);
+        Assert.Equal(MenuPage.Main, save.Page);
+        Assert.Equal(2, save.Highlight); // Load
+        save.Back();
+        Assert.False(save.MenuOpen);
+        Tick(save);
+        Assert.Equal(new UiFocus(SaveModule.MenuOwner, false), bus.All<UiFocus>().Last());
+
+        // Closed, Back does nothing; reopened, the menu starts on Main again.
+        save.Back();
+        Assert.False(save.MenuOpen);
+        Assert.True(save.OpenMenu());
+        Assert.Equal(MenuPage.Main, save.Page);
+        save.ChosenSlot = 9;
+        Assert.Equal(SaveSlots.Count, save.ChosenSlot);
+        save.ChosenSlot = 0;
+        Assert.Equal(1, save.ChosenSlot);
+    }
+
+    [Fact]
     public void A_held_direction_moves_one_item_per_fifth_of_a_second()
     {
         var (_, save, nav) = OpenMenu();

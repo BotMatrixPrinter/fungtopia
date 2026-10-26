@@ -9,9 +9,11 @@ prompts use `ActiveDevice` with `Prompts` to show only the buttons of the device
     normalized to length 1. The left stick is analog (it has a radial dead zone and is clamped to 1).
     The keyboard wins when both are used.
   - `Look`: camera turn this tick in radians, x yaw right, y pitch up.
-  - `Jump`: true on the one tick after a jump press.
+  - `Jump`: true on the one tick after a jump press (Space; the gamepad's bottom button only when
+    nothing can be interacted with, see `InteractAvailable`).
   - `Fire`: true while fire is held.
-  - `Interact`: true on the one tick after an interact press (talk, signposts, doors).
+  - `Interact`: true on the one tick after an interact press (talk, signposts, doors): E, X / Square,
+    or the gamepad's bottom button while something can be interacted with or a menu is open.
   - `OpenMap`: true on the one tick after a map press.
   - `Eat`: true on the one tick after an eat press (eat the selected food).
   - `FoodSelect`: 0, 1 or 2 on the one tick after food key 1, 2 or 3 is pressed (the last one pressed
@@ -32,6 +34,13 @@ prompts use `ActiveDevice` with `Prompts` to show only the buttons of the device
   `Jump`, `Fire` and `Eat` false, `FoodSelect` -1 and `FoodCycle` 0; `Interact` and `OpenMap` are still reported, so menus and dialogue can use
   them. Owners are tracked one by one: an owner that opens twice needs one close, closing an owner
   that is not open changes nothing, and the controls come back when the last open owner closes.
+- `Contract/` also has `InteractAvailable` (`int Owner`, `bool Available`), tracked per owner like
+  `UiFocus`: a module publishes `Available` true while it offers an interaction (its Interact prompt
+  shows, or a dialogue is open) and false when that ends (NPCs, Travel, Home, Food and Dialogue do).
+  This is "smart A": a press of the gamepad's bottom face button (Xbox A, PlayStation Cross,
+  Nintendo's bottom button, B) gives `Interact` and no `Jump` while any `InteractAvailable` owner is
+  available or any `UiFocus` owner is open, and `Jump` otherwise (as in Zelda and Animal Crossing).
+  X / Square (Nintendo Y) always gives `Interact`; the keyboard is unchanged (E interacts, Space jumps).
 - `Contract/` also has `MenuNav` (`int Vertical`: -1 up, +1 down, else 0; `int Horizontal`: -1 left,
   +1 right, else 0; `bool Any`), published every tick (also while a menu is open), so every menu moves
   its selection at the same pace instead of reading the stick and D-pad itself. A step fires on the tick
@@ -45,7 +54,9 @@ prompts use `ActiveDevice` with `Prompts` to show only the buttons of the device
   `enum PromptAction` and `static class Prompts`.
 - `Core/`: `Fungtopia.Input.Core`, `InputModule`. It keeps the latest device state its view
   reports. Mouse motion and jump, interact, map, eat and food presses (`PressEat`, `PressFoodSelect(slot)`,
-  `PressFoodCycle(direction)`) that arrive between ticks are added up and handed out once (presses made while a menu is open are dropped, not saved for later). `MenuOpen` is true while
+  `PressFoodCycle(direction)`) that arrive between ticks are added up and handed out once (presses made while a menu is open are dropped, not saved for later);
+  `PressGamepadA()` (the bottom face button) becomes Interact or Jump at the tick, by `InteractOffered`
+  (any `InteractAvailable` owner available) and `MenuOpen`. `MenuOpen` is true while
   any `UiFocus` owner is open. `SetAim(origin, direction)` takes the camera ray (a non-finite origin or a zero or
   non-finite direction means no aim). `Device` is the device used last (keyboard and mouse at start),
 published as `ActiveDevice` every tick (also while a menu is open): `NoteKeyboardMouse()` (a key,
@@ -82,9 +93,9 @@ Xbox / XInput / Microsoft) or else the USB vendor in its SDL GUID (054c Sony, 05
 |---|---|---|
 | Move | W A S D (physical keys) | Left stick |
 | Look | Mouse (when captured) | Right stick |
-| Jump | Space | A / Cross |
+| Jump | Space | A / Cross (when nothing can be interacted with) |
 | Fire (hold) | Left mouse button | Right trigger |
-| Interact | E (physical key) | X / Square |
+| Interact | E (physical key) | A / Cross while something can be interacted with or a menu is open; X / Square always |
 | Open map | M (physical key) | Back / Select or Touchpad |
 | Eat the selected food | F (physical key) | D-pad Up |
 | Select food 1 / 2 / 3 | 1 / 2 / 3 (physical keys, top row) | |
@@ -106,10 +117,10 @@ Nintendo pad's bottom button is B and its right one A.
 
 | PromptAction | Keyboard / mouse | Xbox (and Generic) | PlayStation | Nintendo | Used by |
 |---|---|---|---|---|---|
-| Interact | E | X | Square | Y | this module |
+| Interact | E | A | Cross | B | this module (X / Square / Y interacts too) |
 | Jump | Space | A | Cross | B | this module |
 | Fire | Left click | RT | R2 | ZR | this module |
-| Back | Esc | B | Circle | A | menus (Home also takes Q) |
+| Back | Esc | B | Circle | A | menus: backs out one page, and closes the menu from its top one (Home and Food also take Q) |
 | Confirm | Enter | A | Cross | B | menus (the start screen also takes E) |
 | OpenMap | M | View | Share | - | this module |
 | Eat | F | D-pad Up | D-pad Up | D-pad Up | this module |

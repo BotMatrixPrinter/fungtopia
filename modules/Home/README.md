@@ -34,7 +34,7 @@ Test it with `./test.sh Home` from the repository root.
 `Fungtopia.Wallet.WalletState` and `SpendResult`, `Fungtopia.Pet.OwnedPets`,
 `Fungtopia.Wardrobe.WardrobeState`, `Fungtopia.StartScreen.StartScreenState` and `Fungtopia.Save.CollectSave` and
 `RestorePart`; it publishes `Fungtopia.Save.SavePart`, `Fungtopia.Player.TeleportPlayer`,
-`Fungtopia.Wallet.SpendCoins`, `Fungtopia.Wardrobe.OpenWardrobe`, `Fungtopia.Input.UiFocus` and `HomeState`, and takes the
+`Fungtopia.Wallet.SpendCoins`, `Fungtopia.Wardrobe.OpenWardrobe`, `Fungtopia.Input.UiFocus`, `Fungtopia.Input.InteractAvailable` and `HomeState`, and takes the
 world's spots from the Map Contract (`Places`, `Areas`). An Interact press is acted on at the
 next tick, for whatever `Prompt` shows then (only while the player is alive, and never while
 the start screen is open, below):
@@ -53,6 +53,10 @@ the start screen is open, below):
   item (`ShopSelection`, `MoveShopSelection`): one `SpendCoins(RequestId, price, name)`, and
   when its `SpendResult` is `Ok` the item goes into the inventory (owned, not placed);
   `LastShopResult` is `Bought`, `TooFewCoins` or `Full` (64 items at most).
+- **Smart A.** While a prompt shows (`Prompt` is not `None`: the door outside or inside, the shop,
+  decorating or the wardrobe) the module holds `Fungtopia.Input.InteractAvailable(InteractOwner,
+  true)` (7461003), published on the tick the prompt appears and released (false) on the tick it
+  goes, so the gamepad's A button interacts there instead of jumping.
 - **Menus and UiFocus.** The shop's panel (`ShopFocusOwner`) and placement mode
   (`DecorateFocusOwner`) each publish `UiFocus(owner, true)` at the tick they open and
   `UiFocus(owner, false)` at the tick they close, however they close (Back, walking away, leaving
@@ -61,7 +65,7 @@ the start screen is open, below):
   `MenuNav` steps (one when a direction is first pushed, then at most one per 0.2 s while held,
   from the left stick, D-pad, arrow keys and WASD alike): in the shop each `Vertical` step moves
   the highlight one line (wrapping), while decorating each step moves the cursor one cell; with no
-  panel open they do nothing. The module reads no stick or keys of its own for this. `Confirm()` (Enter, A)
+  panel open they do nothing. The module reads no stick or keys of its own for this. `Confirm()` (Enter; a gamepad's A arrives as Interact)
   acts like an Interact press at the next tick, only while a panel is open.
 - **Catalog.** `Furniture.ForSale`, prices in M¢: Mushroom Bed 300, Rug 120, Lamp 150, Table 200,
   Chair 100, Potted Mushroom 80, Painting (on an easel) 250, Pet Bed 180, Bookshelf 220,
@@ -122,13 +126,13 @@ Input module):
 | Decorating: move | Arrow keys, WASD (`MenuNav`) | D-pad, left stick (`MenuNav`) |
 | Decorating: turn | R | RB |
 | Decorating: next item | Tab | LB |
-| Buy / place / pick up | E or Enter | A / Cross (X / Square, Interact, works too) |
+| Buy / place / pick up | E or Enter | A / Cross (through Interact; X / Square works too) |
 | Close / done | Q or Esc | B / Circle |
 
 **Prompts.** Every prompt and hint shows only the buttons of the device used last
 (`HomeModule.Device`, the latest `ActiveDevice`), as icons in `RichTextLabel`s, rebuilt the moment
 it changes. `HomeText.Prompt(prompt, device)` is the Interact icon (`Prompts.Rich`) and the verb
-("[E key] Enter", "[X] Enter" on Xbox and Generic pads, "[Square] Enter" on PlayStation, "[Y] Enter"
+("[E key] Enter", "[A] Enter" on Xbox and Generic pads, "[Cross] Enter" on PlayStation, "[B] Enter"
 on Nintendo); `HomeText.ShopHelp(device)` and `DecorateHelp(device)` the hint lines and
 `PickUpTitle(device)` decorating's "pick something up" title. On the keyboard they show Up / Down
 (choose), WASD (move), R (turn), Tab (next item), E (buy / place) and Esc (close / done); on a
@@ -136,8 +140,9 @@ gamepad D-pad Up / Down, the left stick, RB, LB, Confirm (A / Cross / B) and Bac
 each family's own icons. Icon sizes are parameters (`PromptIconSize` 40 next to 30 px text,
 `HelpIconSize` 28 in the 18 px hints); the labels fit their content, so the panels grow with the
 icons. `HomePanels` makes each icon it shows loadable when Godot has not imported it (as the Input
-view does for its own), so the preview works without the Input module. E and
-X / Square arrive through the Input module's Interact and the directions as its `MenuNav`; the rest the view reads itself. While a
+view does for its own), so the preview works without the Input module. E, X / Square and A / Cross
+(the bottom button gives Interact while a panel holds `UiFocus`, so the view does not take A as a
+Confirm too, which would buy or place twice) arrive through the Input module's Interact and the directions as its `MenuNav`; the rest the view reads itself. While a
 panel is open the player stands still (its `UiFocus` stops movement in the Input module); the
 player walks through furniture (it collides only with the Map's obstacles).
 

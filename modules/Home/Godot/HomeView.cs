@@ -175,10 +175,11 @@ public partial class HomeView : Node3D, IModuleView
     {
         if (_home == null || !(_home.ShopOpen || _home.Decorating))
             return;
-        // E / X come through the Input module as Interact; menu directions come as MenuNav.
+        // E, X and A (while a panel holds UiFocus) come through the Input module as Interact, so A is
+        // not also a Confirm here (that would buy or place twice); menu directions come as MenuNav.
         if (Pressed(e, Key.Q, JoyButton.B) || Pressed(e, Key.Escape, JoyButton.B))
             _home.Back();
-        else if (Pressed(e, Key.Enter, JoyButton.A) || Pressed(e, Key.KpEnter, JoyButton.A))
+        else if (e is InputEventKey && (Pressed(e, Key.Enter, JoyButton.A) || Pressed(e, Key.KpEnter, JoyButton.A)))
             _home.Confirm();
         else if (_home.Decorating && Pressed(e, Key.R, JoyButton.RightShoulder))
             _home.Rotate();

@@ -31,6 +31,7 @@ public class HomeModuleTests
         public readonly List<SpendCoins> Spends = new();
         public readonly List<HomeState> States = new();
         public readonly List<UiFocus> Focus = new();
+        public readonly List<InteractAvailable> Available = new();
         public readonly List<SavePart> SaveParts = new();
         public int OpenWardrobes;
         public int? Coins;
@@ -50,6 +51,8 @@ public class HomeModuleTests
                 States.Add(state);
             if (message is UiFocus focus)
                 Focus.Add(focus);
+            if (message is InteractAvailable available)
+                Available.Add(available);
             if (message is SavePart part)
                 SaveParts.Add(part);
             if (message is OpenWardrobe)
@@ -256,6 +259,74 @@ public class HomeModuleTests
         Assert.Equal(1, home.ItemCount);
         bus.Publish(new SpendResult(bus.Spends[0].RequestId, true, 0));
         Assert.Equal(2, home.ItemCount);
+    }
+
+    // Smart A: every prompt offers an interaction (the gamepad's A uses it instead of jumping)
+
+    public static IEnumerable<object[]> PromptSpots()
+    {
+        yield return new object[] { "door outside", false };
+        yield return new object[] { "shop", false };
+        yield return new object[] { "door inside", true };
+        yield return new object[] { "decorate", true };
+        yield return new object[] { "wardrobe", true };
+    }
+
+    private static Vector3 Spot(string name) => name switch
+    {
+        "door outside" => Places.HomeDoor.Position,
+        "shop" => Places.FurnitureShopSpot.Position,
+        "door inside" => Places.HomeExit.Position,
+        "decorate" => HomeRoom.BookPosition,
+        _ => HomeRoom.WardrobeFront,
+    };
+
+    [Theory]
+    [MemberData(nameof(PromptSpots))]
+    public void EachPromptIsAvailableForInteractWhileItShows(string spot, bool inside)
+    {
+        var (home, bus) = Started();
+        var away = inside ? Places.HomeInterior.Position : new Vector3(0f, 0f, 230f);
+        StandAt(bus, away);
+        home.Tick(Step);
+        Assert.Equal(HomePrompt.None, home.Prompt);
+        Assert.Empty(bus.Available);
+        StandAt(bus, Spot(spot));
+        home.Tick(Step);
+        home.Tick(Step);
+        Assert.NotEqual(HomePrompt.None, home.Prompt);
+        var on = Assert.Single(bus.Available);
+        Assert.Equal(new InteractAvailable(HomeModule.InteractOwner, true), on);
+        StandAt(bus, away);
+        home.Tick(Step);
+        Assert.Equal(new[] { on, new InteractAvailable(HomeModule.InteractOwner, false) }, bus.Available);
+    }
+
+    [Fact]
+    public void OpeningAPanelOrAScreenEndsTheAvailability()
+    {
+        var (home, bus) = Started();
+        Interact(home, bus, Places.FurnitureShopSpot.Position);
+        Assert.True(home.ShopOpen);
+        // The shop's panel holds UiFocus instead (A buys there through Interact).
+        Assert.False(bus.Available[^1].Available);
+        home.Back();
+        home.Tick(Step);
+        Assert.True(bus.Available[^1].Available);
+
+        Inside(home, bus);
+        StandAt(bus, HomeRoom.WardrobeFront);
+        home.Tick(Step);
+        Assert.True(bus.Available[^1].Available);
+        bus.Publish(new WardrobeState(true, false));
+        home.Tick(Step);
+        Assert.False(bus.Available[^1].Available);
+        bus.Publish(new WardrobeState(false, false));
+        home.Tick(Step);
+        Assert.True(bus.Available[^1].Available);
+        bus.Publish(new StartScreenState(true));
+        home.Tick(Step);
+        Assert.False(bus.Available[^1].Available);
     }
 
     // Menus: UiFocus and their own buttons
@@ -490,10 +561,10 @@ public class HomeModuleTests
 
     [Theory]
     [InlineData(HomePrompt.Enter, DeviceKind.KeyboardMouse, "key_e", "Enter")]
-    [InlineData(HomePrompt.Leave, DeviceKind.Xbox, "xbox_x", "Leave")]
-    [InlineData(HomePrompt.Shop, DeviceKind.PlayStation, "ps_square", "Shop")]
-    [InlineData(HomePrompt.Decorate, DeviceKind.Nintendo, "ns_y", "Decorate")]
-    [InlineData(HomePrompt.Wardrobe, DeviceKind.Generic, "xbox_x", "Wardrobe")]
+    [InlineData(HomePrompt.Leave, DeviceKind.Xbox, "xbox_a", "Leave")]
+    [InlineData(HomePrompt.Shop, DeviceKind.PlayStation, "ps_cross", "Shop")]
+    [InlineData(HomePrompt.Decorate, DeviceKind.Nintendo, "ns_b", "Decorate")]
+    [InlineData(HomePrompt.Wardrobe, DeviceKind.Generic, "xbox_a", "Wardrobe")]
     public void ThePromptIsTheInteractIconOfTheDeviceAndTheVerb(HomePrompt prompt, DeviceKind device, string icon, string verb)
     {
         Assert.Equal($"[img={HomeText.PromptIconSize}]res://modules/Input/Glyphs/{icon}.svg[/img] {verb}", HomeText.Prompt(prompt, device));
@@ -562,7 +633,7 @@ public class HomeModuleTests
         Assert.Equal(DeviceKind.KeyboardMouse, home.Device);
         bus.Publish(new ActiveDevice(DeviceKind.PlayStation));
         Assert.Equal(DeviceKind.PlayStation, home.Device);
-        Assert.Contains("ps_square", HomeText.Prompt(HomePrompt.Enter, home.Device));
+        Assert.Contains("ps_cross", HomeText.Prompt(HomePrompt.Enter, home.Device));
         bus.Publish(new ActiveDevice(DeviceKind.KeyboardMouse));
         Assert.Equal(DeviceKind.KeyboardMouse, home.Device);
     }

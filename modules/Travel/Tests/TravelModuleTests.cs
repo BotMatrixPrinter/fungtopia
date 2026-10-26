@@ -25,6 +25,7 @@ public class TravelModuleTests
         public readonly List<MapState> States = new();
         public readonly List<TeleportPlayer> Teleports = new();
         public readonly List<UiFocus> Focus = new();
+        public readonly List<InteractAvailable> Available = new();
         public int OtherMessages;
 
         public void Subscribe<T>(IMessageHandler<T> handler) where T : struct => Subscribed.Add(typeof(T));
@@ -37,6 +38,8 @@ public class TravelModuleTests
                 Teleports.Add(teleport);
             else if (message is UiFocus focus)
                 Focus.Add(focus);
+            else if (message is InteractAvailable available)
+                Available.Add(available);
             else
                 OtherMessages++;
         }
@@ -164,6 +167,33 @@ public class TravelModuleTests
         rig.Tick();
         Assert.False(rig.Travel.ShowPrompt);
         Assert.Equal(-1, rig.Travel.NearSignpost);
+    }
+
+    [Fact]
+    public void TheSignpostPromptIsAvailableForInteractWhileItShows()
+    {
+        var rig = new Rig(TownSquare);
+        rig.Tick();
+        Assert.Empty(rig.Bus.Available);
+        rig.Position = Near(Places.SignpostTown);
+        rig.Tick();
+        rig.Tick();
+        var on = Assert.Single(rig.Bus.Available);
+        Assert.Equal(TravelModule.InteractOwner, on.Owner);
+        Assert.True(on.Available);
+        // Opening the map hides the prompt: the map holds UiFocus instead.
+        rig.Tick(interact: true);
+        Assert.True(rig.Travel.Open);
+        Assert.Equal(2, rig.Bus.Available.Count);
+        Assert.False(rig.Bus.Available[^1].Available);
+        rig.Travel.Close();
+        rig.Tick();
+        Assert.True(rig.Bus.Available[^1].Available);
+        rig.Position = TownSquare;
+        rig.Tick();
+        Assert.Equal(4, rig.Bus.Available.Count);
+        Assert.Equal(TravelModule.InteractOwner, rig.Bus.Available[^1].Owner);
+        Assert.False(rig.Bus.Available[^1].Available);
     }
 
     [Fact]
@@ -694,10 +724,10 @@ public class TravelModuleTests
     public void SignpostPromptUsesTheRightButtonPerDevice()
     {
         Assert.Contains("res://modules/Input/Glyphs/key_e.svg", TravelModule.PromptRich(DeviceKind.KeyboardMouse));
-        Assert.Contains("res://modules/Input/Glyphs/xbox_x.svg", TravelModule.PromptRich(DeviceKind.Xbox));
-        Assert.Contains("res://modules/Input/Glyphs/ps_square.svg", TravelModule.PromptRich(DeviceKind.PlayStation));
-        Assert.Contains("res://modules/Input/Glyphs/ns_y.svg", TravelModule.PromptRich(DeviceKind.Nintendo));
-        Assert.Contains("res://modules/Input/Glyphs/xbox_x.svg", TravelModule.PromptRich(DeviceKind.Generic));
+        Assert.Contains("res://modules/Input/Glyphs/xbox_a.svg", TravelModule.PromptRich(DeviceKind.Xbox));
+        Assert.Contains("res://modules/Input/Glyphs/ps_cross.svg", TravelModule.PromptRich(DeviceKind.PlayStation));
+        Assert.Contains("res://modules/Input/Glyphs/ns_b.svg", TravelModule.PromptRich(DeviceKind.Nintendo));
+        Assert.Contains("res://modules/Input/Glyphs/xbox_a.svg", TravelModule.PromptRich(DeviceKind.Generic));
     }
 
     [Theory]

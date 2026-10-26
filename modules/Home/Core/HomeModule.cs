@@ -136,6 +136,9 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
     /// <summary>The <see cref="UiFocus.Owner"/> of placement mode (the decorating catalog and grid).</summary>
     public const int DecorateFocusOwner = 7461002;
 
+    /// <summary>The <see cref="InteractAvailable.Owner"/> published while a prompt shows (door, shop, decorate, wardrobe), so the gamepad's A uses it instead of jumping.</summary>
+    public const int InteractOwner = 7461003;
+
     private static readonly Vector3[] PetSpawns =
     {
         new(598f, Areas.HomeFloorY, 599f), new(602f, Areas.HomeFloorY, 599f), new(600f, Areas.HomeFloorY, 597.5f),
@@ -152,7 +155,7 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
     private int _pendingRequest = -1;
     private FurnitureKind _pendingKind;
     private uint _random = 0x9E3779B9u;
-    private bool _shopFocus, _decorateFocus;
+    private bool _shopFocus, _decorateFocus, _offered;
     private readonly FurnitureItem[] _restored = new FurnitureItem[MaxItems];
 
     public HomeModule()
@@ -287,6 +290,11 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
         }
 
         PublishFocus();
+        if ((Prompt != HomePrompt.None) != _offered)
+        {
+            _offered = Prompt != HomePrompt.None;
+            _bus.Publish(new InteractAvailable(InteractOwner, _offered));
+        }
         TickPets((float)context.StepSeconds);
         _bus.Publish(new HomeState(ItemCount, ItemsPlaced, Decorating));
     }
@@ -429,7 +437,7 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
     }
 
     /// <summary>
-    /// The view's confirm button (Enter, gamepad A), acted on at the next tick like an Interact
+    /// The view's confirm button (Enter; the gamepad's A arrives as Interact), acted on at the next tick like an Interact
     /// press: buys in the shop, places or picks up while decorating. Nothing when no panel is open.
     /// </summary>
     public void Confirm()

@@ -135,6 +135,36 @@ public class DialogueModuleTests
         Assert.All(states, s => Assert.Equal(Millie, s.SpeakerId));
     }
 
+    // Smart A: an open dialogue is an interaction, so the gamepad's A advances it instead of jumping.
+
+    [Fact]
+    public void OpenDialogueIsAvailableForInteractUntilItCloses()
+    {
+        var npc = new FakeNpc(_bus, Millie, "Hi!", "Bye!");
+        Tick(3);
+        Assert.Empty(_bus.All<InteractAvailable>());
+        npc.Talk();
+        Tick();
+        var available = Assert.Single(_bus.All<InteractAvailable>());
+        Assert.Equal(DialogueModule.InteractOwner, available.Owner);
+        Assert.True(available.Available);
+        // Typing out, waiting for the next line and the next line all stay available, sent only once.
+        Tick(TicksToType("Hi!"));
+        Press();
+        Tick(TicksToType("Bye!"));
+        Assert.True(_dialogue.Open);
+        Assert.Single(_bus.All<InteractAvailable>());
+        Press();
+        Tick();
+        Assert.False(_dialogue.Open);
+        var all = _bus.All<InteractAvailable>();
+        Assert.Equal(2, all.Count);
+        Assert.Equal(DialogueModule.InteractOwner, all[1].Owner);
+        Assert.False(all[1].Available);
+        Tick(3);
+        Assert.Equal(2, _bus.All<InteractAvailable>().Count);
+    }
+
     [Fact]
     public void InteractWhileClosedDoesNothing()
     {

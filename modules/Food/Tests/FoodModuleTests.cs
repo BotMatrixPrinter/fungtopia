@@ -400,10 +400,10 @@ public class FoodModuleTests
 
     [Theory]
     [InlineData(DeviceKind.KeyboardMouse, "key_e", "key_up key_down", "key_e", "key_esc", "key_f", "key_1 key_2 key_3")]
-    [InlineData(DeviceKind.Xbox, "xbox_x", "xbox_dpad_up xbox_dpad_down", "xbox_a", "xbox_b", "xbox_dpad_up", "xbox_dpad_left xbox_dpad_right")]
-    [InlineData(DeviceKind.Generic, "xbox_x", "xbox_dpad_up xbox_dpad_down", "xbox_a", "xbox_b", "xbox_dpad_up", "xbox_dpad_left xbox_dpad_right")]
-    [InlineData(DeviceKind.PlayStation, "ps_square", "ps_dpad_up ps_dpad_down", "ps_cross", "ps_circle", "ps_dpad_up", "ps_dpad_left ps_dpad_right")]
-    [InlineData(DeviceKind.Nintendo, "ns_y", "ns_dpad_up ns_dpad_down", "ns_b", "ns_a", "ns_dpad_up", "ns_dpad_left ns_dpad_right")]
+    [InlineData(DeviceKind.Xbox, "xbox_a", "xbox_dpad_up xbox_dpad_down", "xbox_a", "xbox_b", "xbox_dpad_up", "xbox_dpad_left xbox_dpad_right")]
+    [InlineData(DeviceKind.Generic, "xbox_a", "xbox_dpad_up xbox_dpad_down", "xbox_a", "xbox_b", "xbox_dpad_up", "xbox_dpad_left xbox_dpad_right")]
+    [InlineData(DeviceKind.PlayStation, "ps_cross", "ps_dpad_up ps_dpad_down", "ps_cross", "ps_circle", "ps_dpad_up", "ps_dpad_left ps_dpad_right")]
+    [InlineData(DeviceKind.Nintendo, "ns_b", "ns_dpad_up ns_dpad_down", "ns_b", "ns_a", "ns_dpad_up", "ns_dpad_left ns_dpad_right")]
     public void PromptsUseTheDevicesButtons(DeviceKind device, string interact, string choose, string buy, string close, string eat, string pick)
     {
         var prompt = Split(FoodText.Prompt(device));
@@ -449,6 +449,35 @@ public class FoodModuleTests
         _bus.Publish(new ActiveDevice(DeviceKind.PlayStation));
         Tick();
         Assert.Equal(DeviceKind.PlayStation, _food.Device);
+    }
+
+    [Fact]
+    public void TheStallPromptIsAvailableForInteractWhileItShows()
+    {
+        Player(10);
+        Tick();
+        Assert.Empty(_bus.All<InteractAvailable>());
+        Player(10, at: Places.FoodSpot.Position);
+        Tick(2);
+        Assert.True(_food.StallPrompt);
+        Assert.Equal(new[] { new InteractAvailable(FoodModule.InteractOwner, true) }, _bus.All<InteractAvailable>());
+        // The menu opening hides the prompt (the menu holds UiFocus instead), Back brings it back.
+        Press(interact: true);
+        Assert.True(_food.MenuOpen);
+        Assert.Equal(new InteractAvailable(FoodModule.InteractOwner, false), _bus.Last<InteractAvailable>());
+        _food.Back();
+        Tick();
+        Assert.Equal(new InteractAvailable(FoodModule.InteractOwner, true), _bus.Last<InteractAvailable>());
+        Player(10);
+        Tick();
+        Assert.Equal(4, _bus.All<InteractAvailable>().Count());
+        Assert.Equal(new InteractAvailable(FoodModule.InteractOwner, false), _bus.Last<InteractAvailable>());
+        // Once Pip owns the stall, Pip's prompt offers the interaction instead.
+        _bus.Publish(new OpenFoodMenu());
+        _food.Back();
+        Player(10, at: Places.FoodSpot.Position);
+        Tick(3);
+        Assert.Equal(4, _bus.All<InteractAvailable>().Count());
     }
 
     [Fact]

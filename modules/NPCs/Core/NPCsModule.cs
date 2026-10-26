@@ -65,6 +65,9 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
     /// <summary>The prompt's icon size in pixels, next to its 26-pixel text.</summary>
     public const int PromptIconSize = 36;
 
+    /// <summary>The <see cref="InteractAvailable.Owner"/> published while a prompt shows (so the gamepad's A talks instead of jumping).</summary>
+    public const int InteractOwner = 0x6E70_6373; // "npcs"
+
     public const int CrowPrice = 1500;
 
     /// <summary>The <see cref="SpendCoins.RequestId"/> of the first purchase; each one after counts up.</summary>
@@ -213,6 +216,7 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
     // The owners of the menus holding UiFocus open (the food menu, the start screen...).
     private readonly int[] _focusOwners = new int[MaxFocusOwners];
     private int _focusCount;
+    private bool _offered;
     private const int MaxFocusOwners = 16;
 
     public NPCsModule()
@@ -264,8 +268,11 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
     /// <summary>The NPC the living player is within <see cref="FaceRadius"/> of, or -1 (the nearest when several); Pip waves when you come near.</summary>
     public int Noticing { get; private set; } = -1;
 
-    /// <summary>Lucy has offered the crow: Interact near her buys it; walking away says no.</summary>
+    /// <summary>Lucy has offered the crow: Interact near her buys it; walking away or <see cref="DeclineCrow"/> says no.</summary>
     public bool OfferingCrow { get; private set; }
+
+    /// <summary>The view's Back button (gamepad B) on Lucy's buy choice: says no to the crow, as walking away does.</summary>
+    public void DeclineCrow() => OfferingCrow = false;
 
     public bool QuestActive { get; private set; }
     public bool QuestComplete { get; private set; }
@@ -552,6 +559,11 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
             && _focusCount == 0;
         PromptNpc = free ? near : -1;
         Prompt = PromptNpc == Lucy && OfferingCrow ? PromptKind.Buy : PromptNpc == Pip ? PromptKind.Food : PromptKind.Talk;
+        if ((PromptNpc >= 0) != _offered)
+        {
+            _offered = PromptNpc >= 0;
+            _bus.Publish(new InteractAvailable(InteractOwner, _offered));
+        }
 
         _bus.Publish(new QuestState(QuestActive, _questTitle, QuestProgress, QuestGoal, QuestComplete));
 

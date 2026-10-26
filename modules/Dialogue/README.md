@@ -18,6 +18,9 @@ letter with a blip per letter, and lets the player continue with Interact.
   - while the text is still typing out (`LettersPerSecond` = 40), Interact completes it;
   - on a fully shown line, Interact publishes `DialogueAdvanced`; after a `Last` line it closes and
     publishes `DialogueClosed`, otherwise it waits (`Waiting`, no arrow) for the next line.
+  - While a dialogue is open it holds `Fungtopia.Input.InteractAvailable(InteractOwner, true)`
+    (`0x6469616C`, published on the tick it opens, false on the tick it closes), so the gamepad's A
+    button advances and closes it and never makes the player jump. B does nothing here.
   - A press counts only once a line has been shown for a tick, so the press that starts a talk
     does not skip its first line. Presses while closed or waiting do nothing.
   - The view reads `Open`, `Speaker`, `Text`, `Voice`, `VisibleLetters`, `Typing`,

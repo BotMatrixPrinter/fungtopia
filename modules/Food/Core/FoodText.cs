@@ -56,7 +56,7 @@ public static class FoodText
         _ => "",
     };
 
-    // Buy: E on the keyboard (Interact), A / Cross / B on a gamepad (Confirm; Interact works too).
+    // Buy: E on the keyboard (Interact), A / Cross / B on a gamepad (Confirm: it arrives as Interact while the menu is open; X / Square works too).
     private static PromptAction Select(DeviceKind device) =>
         device == DeviceKind.KeyboardMouse ? PromptAction.Interact : PromptAction.Confirm;
 

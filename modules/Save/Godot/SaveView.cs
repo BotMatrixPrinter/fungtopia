@@ -179,17 +179,16 @@ public partial class SaveView : CanvasLayer, IModuleView
                 return;
         }
 
-        if (IsPause(e))
-        {
-            if (_save.Page == MenuPage.Main)
-                Resume();
-            else
-                Back();
-        }
+        // Esc / Start and Backspace / B go back one page, and from Main resume.
+        if (IsPause(e) || Pressed(e, Key.Backspace, JoyButton.B))
+            Back();
         else if (Pressed(e, Key.Enter, JoyButton.A) || Pressed(e, Key.KpEnter, JoyButton.A) || Pressed(e, Key.Space, JoyButton.A))
             Confirm();
-        else if (Pressed(e, Key.Backspace, JoyButton.B))
-            Back();
+        else
+            return;
+        // The menu's buttons are the menu's: the Input module would turn A into Interact (a door, a
+        // signpost or a dialogue behind the menu) and Space into a jump.
+        GetViewport().SetInputAsHandled();
     }
 
     private static bool IsPause(InputEvent e) => Pressed(e, Key.Escape, JoyButton.Start);
@@ -253,10 +252,18 @@ public partial class SaveView : CanvasLayer, IModuleView
 
     private void Back()
     {
-        if (_save?.Page == MenuPage.Choice)
-            Show(MenuPage.Slots, _menu.ChosenSlot - 1);
-        else
-            Show(MenuPage.Main, 2);
+        if (_save == null)
+            return;
+        _save.ChosenSlot = _menu.ChosenSlot;
+        _save.Back();
+        if (!_save.MenuOpen)
+        {
+            Resume();
+            return;
+        }
+        _menu.Page = _save.Page;
+        _menu.Highlight = _save.Highlight;
+        _appear = 0.6f;
     }
 
     /// <summary>Shows a page with an item highlighted (the preview uses it too).</summary>

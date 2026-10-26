@@ -137,6 +137,8 @@ public sealed class SaveModule : IModule,
     /// <summary>The device the player used last (<see cref="ActiveDevice"/>); the pause menu's hints show its buttons.</summary>
     public DeviceKind Device { get; private set; }
 
+    private int _chosenSlot = 1;
+
     /// <summary>The pause menu's page (Main each time it opens).</summary>
     public MenuPage Page { get; private set; }
 
@@ -263,6 +265,36 @@ public sealed class SaveModule : IModule,
     {
         Page = page;
         SetHighlight(highlight);
+    }
+
+    /// <summary>The slot (1..3) whose saves the Choice page shows; Back from there highlights it on Slots.</summary>
+    public int ChosenSlot
+    {
+        get => _chosenSlot;
+        set => _chosenSlot = Math.Clamp(value, 1, SaveSlots.Count);
+    }
+
+    /// <summary>
+    /// Back (B, Backspace; Esc / Start too): one level up, the same from every page. Choice goes to
+    /// Slots (<see cref="ChosenSlot"/> highlighted), Slots to Main (Load highlighted), and Main closes
+    /// the menu. Nothing while the menu is closed.
+    /// </summary>
+    public void Back()
+    {
+        if (!MenuOpen)
+            return;
+        switch (Page)
+        {
+            case MenuPage.Choice:
+                ShowPage(MenuPage.Slots, ChosenSlot - 1);
+                break;
+            case MenuPage.Slots:
+                ShowPage(MenuPage.Main, 2);
+                break;
+            default:
+                CloseMenu();
+                break;
+        }
     }
 
     /// <summary>Highlights an item of the current page (the mouse hovers or clicks it).</summary>

@@ -63,6 +63,13 @@ public partial class NPCsView : Node3D, IModuleView
         PlacePrompt(_npcs.PromptNpc, _npcs.PromptText);
     }
 
+    public override void _UnhandledInput(InputEvent e)
+    {
+        // Gamepad B backs out of Lucy's buy choice (Interact, A, says yes).
+        if (_npcs is { OfferingCrow: true } && e is InputEventJoypadButton { ButtonIndex: JoyButton.B, Pressed: true })
+            _npcs.DeclineCrow();
+    }
+
     private void PlacePrompt(int npc, string text)
     {
         _prompt.Visible = false;

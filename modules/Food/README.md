@@ -37,7 +37,7 @@ Test it with `./test.sh Food` from the repository root.
 `Fungtopia.Wallet.WalletState` and `SpendResult`, `OpenFoodMenu`,
 `Fungtopia.StartScreen.StartScreenState` and `Fungtopia.Save.CollectSave` and `RestorePart`; it
 publishes `FoodBag`, `FoodEaten`, `Fungtopia.Player.HealPlayer`, `Fungtopia.Wallet.SpendCoins`,
-`Fungtopia.Input.UiFocus` and `Fungtopia.Save.SavePart`, and takes the stall's spot from the Map
+`Fungtopia.Input.UiFocus`, `Fungtopia.Input.InteractAvailable` and `Fungtopia.Save.SavePart`, and takes the stall's spot from the Map
 Contract (`Places.FoodSpot`). Presses are acted on at the next tick.
 
 - **Catalog** (`FoodCatalog`), cheap on purpose (one 50 M¢ caterpillar or ant buys about 10 muffins,
@@ -47,13 +47,15 @@ Contract (`Places.FoodSpot`). Presses are acted on at the next tick.
 - **The stall's menu.** `OpenFoodMenu` opens it (`MenuOpen`; not while defeated or on the start
   screen). Pip owns the prompt and the talking; until Pip exists, Interact within 1.5 m of
   `Places.FoodSpot` also opens it, with the prompt "[Interact] Food" (`StallPrompt`: the E key's icon and "Food" on
-  the keyboard, the X button's icon on an Xbox pad, Square's on a PlayStation pad). Once any `OpenFoodMenu` has arrived (`CookPresent`) the module
+  the keyboard, the A button's icon on an Xbox pad, Cross's on a PlayStation pad; while it shows the
+  module holds `Fungtopia.Input.InteractAvailable(InteractOwner, true)` (8241003, false once it hides), so the
+  gamepad's A opens the menu instead of jumping). Once any `OpenFoodMenu` has arrived (`CookPresent`) the module
   stops doing that. The menu lists the three foods with price, healing and how many you carry
   (`FoodText.MenuLine`, e.g. "Mushroom Soup   12 M¢   +3 ♥   2/9"); each `MenuNav` step with
   `Vertical` -1 / +1 moves the highlight (`MenuSelection`) one row up / down, wrapping; the Input
   module paces them (one at once, then one per 0.2 s while held), so a short flick moves exactly one
   row (`Horizontal` steps and steps while the menu is closed change nothing); Interact or
-  `Confirm()` (Enter, gamepad A) buys it: one `SpendCoins(RequestId, price, name)` (request ids from
+  `Confirm()` (Enter; a gamepad's A arrives as Interact) buys it: one `SpendCoins(RequestId, price, name)` (request ids from
   `FirstRequestId`, 8240000), and when its `SpendResult` is `Ok` one more is in the bag.
   `LastBuyResult` is `Bought`, `TooFewCoins` ("Not enough M¢") or `Full` (9 carried already; no
   coins asked). `Back()` (Q / Esc, gamepad B) closes it; it also closes when the player is defeated
@@ -102,13 +104,14 @@ The pictures are the foods' models rendered in small off-screen viewports. While
 `FoodView` shows the food held up in front of the player's face, shrinking bite by bite, with crumbs
 falling; when the meal is done a burst of crumbs and a pink "+3 ♥" (the hearts actually healed,
 `FoodText.Healed`: "+½ ♥" for 1 health) rises over the player's head and fades. Buttons the view
-reads itself while the menu is open (E / X arrive through the Input module's Interact, Choose as its
-`MenuNav`):
+reads itself while the menu is open (E, X and A arrive through the Input module's Interact, which A gives
+while the menu holds `UiFocus`, so the view does not take A as a Confirm too and buy twice; Choose
+arrives as its `MenuNav`):
 
 | Action | Keyboard | Gamepad |
 | --- | --- | --- |
 | Choose (`MenuNav`) | Up / Down, W / S (held: one per 0.2 s) | D-pad Up / Down, left stick |
-| Buy | E or Enter | A / Cross (X / Square, Interact, works too) |
+| Buy | E or Enter | A / Cross (through Interact; X / Square works too) |
 | Close | Q or Esc | B / Circle |
 
 ## Models

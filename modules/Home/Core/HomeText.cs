@@ -54,7 +54,7 @@ public static class HomeText
     public static string PickUpTitle(DeviceKind device, int iconSize = PromptIconSize) =>
         $"Decorating: pick something up, or {NextItem(device, iconSize)} for an item";
 
-    // Buy / place: E on the keyboard (Interact), A / Cross / B on a gamepad (Confirm; Interact works too).
+    // Buy / place: E on the keyboard (Interact), A / Cross / B on a gamepad (Confirm: it arrives as Interact while a panel is open; X / Square works too).
     private static PromptAction Select(DeviceKind device) =>
         device == DeviceKind.KeyboardMouse ? PromptAction.Interact : PromptAction.Confirm;
 

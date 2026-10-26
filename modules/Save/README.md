@@ -98,6 +98,9 @@ another module's tick.
   and a short flick exactly one, from the stick, D-pad, arrow keys and WASD alike.
   `ItemCount(page)` is 4 on Main, 4 on Slots (three slots and Back), 3 on Choice.
   `ShowPage(page, item)` and `SetHighlight(item)` (the mouse) clamp the item to the page.
+- **Back.** `Back()` goes up one level, the same from every page: Choice to Slots (`ChosenSlot`,
+  1..3, the slot whose saves Choice showed, highlighted), Slots to Main (Load highlighted), and on
+  Main it closes the menu. Nothing while closed.
 - **Device.** `Device` is the latest `ActiveDevice.Kind` (keyboard and mouse until one arrives).
   `PauseHints.Line(device, mainPage, iconSize)` is the hint line as RichTextLabel BBCode with that
   device's icons only (`Prompts.Rich`): "[Up][Down] Move  [Confirm] Choose  [Pause] Resume" on the
@@ -128,7 +131,9 @@ and the bar fits around them.
 
 The highlight moves only by the Core's `MenuNav` steps (the arrow keys, W A S D, the D-pad and the
 left stick, paced by the Input module); the view reads no direction itself. Enter, Space or A
-choose; Backspace or B go back; Esc or Start resume (or go back from the Load pages). The mouse
+choose; Backspace, B, Esc and Start go back one page (`Back()`), and on the Paused page resume.
+While the menu is open the view keeps these buttons from the Input module (`SetInputAsHandled`),
+so A never also interacts with a door, signpost or dialogue behind the menu. The mouse
 is visible while it is open: hovering highlights, clicking chooses (the click is kept from the
 game). Loading closes the menu ("Loaded!"); autosaves show a small "Autosaved" toast.
 Quit to Title loads the whole game scene again (`ReloadCurrentScene`), which starts at the start

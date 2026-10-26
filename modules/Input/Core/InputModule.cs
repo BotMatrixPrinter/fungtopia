@@ -7,9 +7,11 @@ namespace Fungtopia.Input;
 /// <summary>
 /// Keeps the latest device state reported by its Godot view and publishes one
 /// <see cref="PlayerInput"/> and one <see cref="ActiveDevice"/> per tick. Mouse look and jump, interact, map, eat and food presses that arrive between ticks
-/// are gathered and handed out once, on the next tick.
+/// are gathered and handed out once, on the next tick. The gamepad's bottom face button
+/// (<see cref="PressGamepadA"/>) gives Interact while an <see cref="InteractAvailable"/> owner is
+/// available or a menu is open, else Jump.
 /// </summary>
-public sealed class InputModule : IModule, IMessageHandler<UiFocus>
+public sealed class InputModule : IModule, IMessageHandler<UiFocus>, IMessageHandler<InteractAvailable>
 {
     /// <summary>Stick deflection below this is ignored; the rest is rescaled to 0..1.</summary>
     public float StickDeadZone { get; set; } = 0.2f;
@@ -39,6 +41,7 @@ public sealed class InputModule : IModule, IMessageHandler<UiFocus>
     private Vector2 _mouseLook;
     private bool _jumpPressed;
     private bool _interactPressed;
+    private bool _gamepadAPressed;
     private bool _openMapPressed;
     private bool _eatPressed;
     private int _foodSelectPressed = -1;
@@ -50,6 +53,8 @@ public sealed class InputModule : IModule, IMessageHandler<UiFocus>
     private Vector3 _aimOrigin;
     private int[] _openOwners = new int[8];
     private int _openCount;
+    private int[] _availableOwners = new int[8];
+    private int _availableCount;
     private int _menuButtonsVertical;
     private int _menuButtonsHorizontal;
     private double _sinceMenuStep = double.PositiveInfinity;
@@ -68,28 +73,38 @@ public sealed class InputModule : IModule, IMessageHandler<UiFocus>
         ArgumentNullException.ThrowIfNull(bus);
         _bus = bus;
         bus.Subscribe<UiFocus>(this);
+        bus.Subscribe<InteractAvailable>(this);
     }
 
     /// <summary>True while at least one <see cref="UiFocus"/> owner is open.</summary>
     public bool MenuOpen => _openCount > 0;
 
+    /// <summary>True while at least one <see cref="InteractAvailable"/> owner is available.</summary>
+    public bool InteractOffered => _availableCount > 0;
+
     /// <summary>
     /// Tracks open menus per owner: opening an owner already open, or closing one not open, changes nothing.
     /// </summary>
-    public void Handle(in UiFocus message)
+    public void Handle(in UiFocus message) => Track(ref _openOwners, ref _openCount, message.Owner, message.Open);
+
+    /// <summary>Tracks offered interactions per owner, the same way as <see cref="UiFocus"/>.</summary>
+    public void Handle(in InteractAvailable message) =>
+        Track(ref _availableOwners, ref _availableCount, message.Owner, message.Available);
+
+    private static void Track(ref int[] owners, ref int count, int owner, bool on)
     {
-        int index = Array.IndexOf(_openOwners, message.Owner, 0, _openCount);
-        if (message.Open)
+        int index = Array.IndexOf(owners, owner, 0, count);
+        if (on)
         {
             if (index >= 0)
                 return;
-            if (_openCount == _openOwners.Length)
-                Array.Resize(ref _openOwners, _openOwners.Length * 2);
-            _openOwners[_openCount++] = message.Owner;
+            if (count == owners.Length)
+                Array.Resize(ref owners, owners.Length * 2);
+            owners[count++] = owner;
         }
         else if (index >= 0)
         {
-            _openOwners[index] = _openOwners[--_openCount];
+            owners[index] = owners[--count];
         }
     }
 
@@ -124,6 +139,13 @@ public sealed class InputModule : IModule, IMessageHandler<UiFocus>
 
     /// <summary>An interact button went down; reported as Interact on the next tick only.</summary>
     public void PressInteract() => _interactPressed = true;
+
+    /// <summary>
+    /// The gamepad's bottom face button (Xbox A, PlayStation Cross, Nintendo B) went down: on the next
+    /// tick it is Interact (and no Jump) while <see cref="InteractOffered"/> or <see cref="MenuOpen"/>,
+    /// else Jump.
+    /// </summary>
+    public void PressGamepadA() => _gamepadAPressed = true;
 
     /// <summary>A map button went down; reported as OpenMap on the next tick only.</summary>
     public void PressOpenMap() => _openMapPressed = true;
@@ -212,6 +234,14 @@ public sealed class InputModule : IModule, IMessageHandler<UiFocus>
         Vector2 look = _mouseLook + ApplyDeadZone(_lookStick, StickDeadZone) * (StickLookRadiansPerSecond * (float)context.StepSeconds);
         bool fire = _fireButton || _fireTrigger >= TriggerThreshold;
         bool jump = _jumpPressed;
+        bool interact = _interactPressed;
+        if (_gamepadAPressed)
+        {
+            if (InteractOffered || MenuOpen)
+                interact = true;
+            else
+                jump = true;
+        }
         bool eat = _eatPressed;
         int foodSelect = _foodSelectPressed;
         int foodCycle = _foodCyclePressed;
@@ -226,11 +256,12 @@ public sealed class InputModule : IModule, IMessageHandler<UiFocus>
             foodCycle = 0;
         }
 
-        Latest = new PlayerInput(move, look, jump, fire, _hasAim, _aim, _interactPressed, _openMapPressed, _aimOrigin,
+        Latest = new PlayerInput(move, look, jump, fire, _hasAim, _aim, interact, _openMapPressed, _aimOrigin,
             eat, foodSelect, foodCycle);
         _mouseLook = Vector2.Zero;
         _jumpPressed = false;
         _interactPressed = false;
+        _gamepadAPressed = false;
         _openMapPressed = false;
         _eatPressed = false;
         _foodSelectPressed = -1;

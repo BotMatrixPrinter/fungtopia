@@ -210,10 +210,11 @@ public partial class FoodView : Node3D, IModuleView
     {
         if (_food == null || !_food.MenuOpen)
             return;
-        // E / X come through the Input module as Interact; Up / Down come as MenuNav (Core).
+        // E, X and A (the menu holds UiFocus) come through the Input module as Interact, so A is not
+        // also a Confirm here (that would buy twice); Up / Down come as MenuNav (Core).
         if (Pressed(e, Key.Q, JoyButton.B) || Pressed(e, Key.Escape, JoyButton.B))
             _food.Back();
-        else if (Pressed(e, Key.Enter, JoyButton.A) || Pressed(e, Key.KpEnter, JoyButton.A))
+        else if (e is InputEventKey && (Pressed(e, Key.Enter, JoyButton.A) || Pressed(e, Key.KpEnter, JoyButton.A)))
             _food.Confirm();
     }
 

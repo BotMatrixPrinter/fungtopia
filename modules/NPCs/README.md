@@ -5,7 +5,7 @@ door, **Lucy**, the Pet Store cashier, **Abby**, the clothing shopkeeper, and **
 the Mushroom Munchies food stall. Each stands at their spot, turns to face you when you come near
 (Pip keeps stirring the soup pot and waves instead), and idles a little. Within 2.5 m a small
 "[Interact icon] Talk" prompt ("[Interact icon] Food" at Pip's counter) floats over them, showing only
-the button of the device in use (the E key, Xbox X, PlayStation Square...), and Interact starts a
+the button of the device in use (the E key, Xbox A, PlayStation Cross...), and Interact starts a
 conversation in speech bubbles (the Dialogue module shows them).
 
 - `Contract/` — `Fungtopia.NPCs.Contract` (namespace `Fungtopia.NPCs`):
@@ -50,7 +50,7 @@ Test it with `./test.sh NPCs` from the repository root.
 `Fungtopia.Wardrobe.WardrobeState`, `Fungtopia.Input.UiFocus` and `ActiveDevice`, `Fungtopia.Save` `CollectSave` and
 `RestorePart`, and the spots from `Fungtopia.Map.Places`. It publishes `SayLine`, `QuestState`
 (every tick), `GrantCoins`, `SpendCoins`, `AdoptPet`, `Fungtopia.Wardrobe` `GrantItem` and
-`OpenShop`, `Fungtopia.Food.OpenFoodMenu`, and `Fungtopia.Save.SavePart`.
+`OpenShop`, `Fungtopia.Food.OpenFoodMenu`, `Fungtopia.Input.InteractAvailable` and `Fungtopia.Save.SavePart`.
 
 | NPC (index) | Spot | Speaker id | Voice |
 | --- | --- | --- | --- |
@@ -74,6 +74,9 @@ Each tick:
   `ActiveDevice`'s `Kind`, and `PromptText` the prompt as RichTextLabel BBCode for it:
   `Prompts.Rich(Interact, Device, PromptIconSize)` (36 px) and "Talk", "Food" or "Buy the Mushroom Crow
   (1,500 M¢)" (`PromptBbcode(kind, device)`; every prompt for every device is built once at startup).
+  While a prompt shows, the module holds `Fungtopia.Input.InteractAvailable(InteractOwner, true)`
+  (`0x6E706373`), published on the tick it appears and released (false) on the tick it goes, so
+  the gamepad's A button talks (or buys) instead of jumping.
 - **Talking.** `Interact` with the prompt showing starts that NPC's conversation: its lines go out
   one `SayLine` at a time, the next on its `DialogueAdvanced`, the last one with `Last` set. The
   press that dismisses a last line (`DialogueClosed` that tick) never starts a new talk. `Talking`
@@ -96,7 +99,8 @@ Each tick:
   offers it for 1,500 M¢, ending with "Ask me again to buy it." (the speech bubbles are plain text, so lines name no
   buttons; the buy prompt then shows the icon). Once that line is dismissed she
   is `OfferingCrow`: Interact near her says yes and publishes `SpendCoins` (request ids from
-  71000 up, "Mushroom Crow"); walking out of the prompt radius says no. On its `SpendResult`:
+  71000 up, "Mushroom Crow"); walking out of the prompt radius, or `DeclineCrow()` (the view's
+  Back: gamepad B), says no. On its `SpendResult`:
   `Ok` publishes `AdoptPet(Crow)` and she says "Congrats. It bites."; otherwise "Come back with
   1,500 M¢." When the crow is owned she just says so.
 - **Abby.** Talking to her says "Ooh, you'd look so cute in something new!"; once that line is

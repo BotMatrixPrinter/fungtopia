@@ -9,11 +9,16 @@ namespace Fungtopia.Dialogue;
 /// <see cref="LettersPerSecond"/>, and on <see cref="PlayerInput.Interact"/> either completes the
 /// typing or, when the line is fully shown, publishes <see cref="DialogueAdvanced"/> (and, after a
 /// <see cref="SayLine.Last"/> line, closes and publishes <see cref="DialogueClosed"/>). It
-/// publishes <see cref="DialogueState"/> every tick.
+/// publishes <see cref="DialogueState"/> every tick, and <see cref="InteractAvailable"/> (owner
+/// <see cref="InteractOwner"/>) on the tick a dialogue opens and the tick it closes, so the gamepad's
+/// A button advances it instead of jumping.
 /// </summary>
 public sealed class DialogueModule : IModule, IMessageHandler<SayLine>, IMessageHandler<PlayerInput>
 {
     public const float LettersPerSecond = 40f;
+
+    /// <summary>The <see cref="InteractAvailable.Owner"/> of an open dialogue.</summary>
+    public const int InteractOwner = 0x6469_616C; // "dial"
 
     private IMessageBus? _bus;
     private float _typed;
@@ -21,6 +26,7 @@ public sealed class DialogueModule : IModule, IMessageHandler<SayLine>, IMessage
     // A press counts only once a line has been shown for a tick, so the press that started the
     // talk (or one landing between two lines) does not skip the new line.
     private bool _armed;
+    private bool _offered;
 
     public bool Open { get; private set; }
     public int SpeakerId { get; private set; } = -1;
@@ -91,6 +97,11 @@ public sealed class DialogueModule : IModule, IMessageHandler<SayLine>, IMessage
             _typed = MathF.Min(Text.Length, _typed + LettersPerSecond * (float)context.StepSeconds);
 
         _bus.Publish(new DialogueState(Open, Open ? SpeakerId : -1));
+        if (Open != _offered)
+        {
+            _offered = Open;
+            _bus.Publish(new InteractAvailable(InteractOwner, Open));
+        }
     }
 
     private void Advance()

@@ -12,7 +12,7 @@ public class InputModuleTests
 
     /// <summary>
     /// Fake of the shell's bus: records every PlayerInput and ActiveDevice published and delivers
-    /// UiFocus to its subscribers.
+    /// UiFocus and InteractAvailable to their subscribers.
     /// </summary>
     private sealed class FakeBus : IMessageBus
     {
@@ -20,12 +20,15 @@ public class InputModuleTests
         public readonly List<ActiveDevice> Devices = new();
         public readonly List<MenuNav> MenuNavs = new();
         public readonly List<IMessageHandler<UiFocus>> FocusHandlers = new();
+        public readonly List<IMessageHandler<InteractAvailable>> AvailableHandlers = new();
         public int OtherMessages;
 
         public void Subscribe<T>(IMessageHandler<T> handler) where T : struct
         {
-            if (handler is IMessageHandler<UiFocus> focus)
+            if (handler is IMessageHandler<UiFocus> focus && typeof(T) == typeof(UiFocus))
                 FocusHandlers.Add(focus);
+            else if (handler is IMessageHandler<InteractAvailable> available && typeof(T) == typeof(InteractAvailable))
+                AvailableHandlers.Add(available);
         }
 
         public void Publish<T>(in T message) where T : struct
@@ -39,11 +42,16 @@ public class InputModuleTests
             else if (message is UiFocus focus)
                 foreach (var handler in FocusHandlers)
                     handler.Handle(focus);
+            else if (message is InteractAvailable available)
+                foreach (var handler in AvailableHandlers)
+                    handler.Handle(available);
             else
                 OtherMessages++;
         }
 
         public void Focus(int owner, bool open) => Publish(new UiFocus(owner, open));
+
+        public void Available(int owner, bool available) => Publish(new InteractAvailable(owner, available));
     }
 
     private static InputModule Started(FakeBus bus)
@@ -622,6 +630,10 @@ public class InputModuleTests
     }
 
     [Theory]
+    [InlineData("PhysicalKeycode: Key.Space, Pressed: true, Echo: false", "_input.PressJump();")]
+    [InlineData("ButtonIndex: JoyButton.A, Pressed: true", "_input.PressGamepadA();")]
+    [InlineData("PhysicalKeycode: Key.E, Pressed: true, Echo: false", "_input.PressInteract();")]
+    [InlineData("ButtonIndex: JoyButton.X, Pressed: true", "_input.PressInteract();")]
     [InlineData("PhysicalKeycode: Key.F, Pressed: true, Echo: false", "_input.PressEat();")]
     [InlineData("ButtonIndex: JoyButton.DpadUp, Pressed: true", "_input.PressEat();")]
     [InlineData("PhysicalKeycode: Key.Key1, Pressed: true, Echo: false", "_input.PressFoodSelect(0);")]
@@ -629,7 +641,7 @@ public class InputModuleTests
     [InlineData("PhysicalKeycode: Key.Key3, Pressed: true, Echo: false", "_input.PressFoodSelect(2);")]
     [InlineData("ButtonIndex: JoyButton.DpadLeft, Pressed: true", "_input.PressFoodCycle(-1);")]
     [InlineData("ButtonIndex: JoyButton.DpadRight, Pressed: true", "_input.PressFoodCycle(1);")]
-    public void ViewMapsTheFoodControls(string pattern, string call)
+    public void ViewMapsTheButtons(string pattern, string call)
     {
         // The first call after the case pattern is the one that button triggers.
         var source = ViewSource();
@@ -725,6 +737,124 @@ public class InputModuleTests
         bus.Focus(ShopMenu, false);
         Assert.False(input.MenuOpen);
         AssertLive(TickWithEverything(input, bus));
+    }
+
+    // --- Smart A: the gamepad's bottom button interacts when there is something to interact with ---
+
+    private const int Signpost = 303;
+
+    [Fact]
+    public void SubscribesToInteractAvailableOnStart()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        Assert.Contains(input, bus.AvailableHandlers);
+    }
+
+    [Fact]
+    public void GamepadAJumpsWhenNothingCanBeInteractedWith()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        Assert.False(input.InteractOffered);
+        input.PressGamepadA();
+        var msg = TickOnce(input, bus);
+        Assert.True(msg.Jump);
+        Assert.False(msg.Interact);
+        // Once only.
+        msg = TickOnce(input, bus, 1);
+        Assert.False(msg.Jump);
+        Assert.False(msg.Interact);
+    }
+
+    [Fact]
+    public void GamepadAInteractsAndDoesNotJumpWhileAnInteractionIsAvailable()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        bus.Available(Signpost, true);
+        Assert.True(input.InteractOffered);
+        input.PressGamepadA();
+        var msg = TickOnce(input, bus);
+        Assert.True(msg.Interact);
+        Assert.False(msg.Jump);
+        Assert.False(TickOnce(input, bus, 1).Interact);
+        // The controls stay live: only the button's meaning changed.
+        input.SetKeyboardMove(new Vector2(0, 1));
+        AssertNear(new Vector2(0, 1), TickOnce(input, bus, 2).Move);
+    }
+
+    [Fact]
+    public void GamepadAInteractsAndDoesNotJumpWhileAMenuIsOpen()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        bus.Focus(ShopMenu, true);
+        Assert.False(input.InteractOffered);
+        input.PressGamepadA();
+        var msg = TickOnce(input, bus);
+        Assert.True(msg.Interact);
+        Assert.False(msg.Jump);
+        bus.Focus(ShopMenu, false);
+        input.PressGamepadA();
+        msg = TickOnce(input, bus, 1);
+        Assert.True(msg.Jump);
+        Assert.False(msg.Interact);
+    }
+
+    [Fact]
+    public void GamepadAJumpsAgainOnceTheLastAvailableOwnerEnds()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        bus.Available(Signpost, true);
+        bus.Available(Signpost, true);
+        bus.Available(Dialogue, true);
+        bus.Available(Signpost, false);
+        input.PressGamepadA();
+        Assert.True(TickOnce(input, bus).Interact);
+        // Ending an owner that is not available changes nothing.
+        bus.Available(Signpost, false);
+        bus.Available(ShopMenu, false);
+        Assert.True(input.InteractOffered);
+        bus.Available(Dialogue, false);
+        Assert.False(input.InteractOffered);
+        input.PressGamepadA();
+        var msg = TickOnce(input, bus, 1);
+        Assert.True(msg.Jump);
+        Assert.False(msg.Interact);
+    }
+
+    [Fact]
+    public void AvailabilityIsDecidedAtTheTickAfterThePress()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        input.PressGamepadA();
+        bus.Available(Signpost, true);
+        var msg = TickOnce(input, bus);
+        Assert.True(msg.Interact);
+        Assert.False(msg.Jump);
+    }
+
+    [Fact]
+    public void InteractButtonAndKeyboardKeepTheirMeaning()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        // X / Square (and E) interacts with or without anything to interact with...
+        input.PressInteract();
+        var msg = TickOnce(input, bus);
+        Assert.True(msg.Interact);
+        Assert.False(msg.Jump);
+        bus.Available(Signpost, true);
+        input.PressInteract();
+        Assert.True(TickOnce(input, bus, 1).Interact);
+        // ... and Space jumps even next to a signpost.
+        input.PressJump();
+        msg = TickOnce(input, bus, 2);
+        Assert.True(msg.Jump);
+        Assert.False(msg.Interact);
     }
 
     [Fact]
@@ -1016,7 +1146,7 @@ public class InputModuleTests
     }
 
     [Theory]
-    [InlineData(PromptAction.Interact, "key_e", "xbox_x", "ps_square", "ns_y")]
+    [InlineData(PromptAction.Interact, "key_e", "xbox_a", "ps_cross", "ns_b")]
     [InlineData(PromptAction.Jump, "key_space", "xbox_a", "ps_cross", "ns_b")]
     [InlineData(PromptAction.Fire, "mouse_left", "xbox_rt", "ps_r2", "ns_zr")]
     [InlineData(PromptAction.Back, "key_esc", "xbox_b", "ps_circle", "ns_a")]
@@ -1046,7 +1176,9 @@ public class InputModuleTests
     public void TextNamesTheButton()
     {
         Assert.Equal("E", Prompts.Text(PromptAction.Interact, DeviceKind.KeyboardMouse));
-        Assert.Equal("X", Prompts.Text(PromptAction.Interact, DeviceKind.Xbox));
+        Assert.Equal("A", Prompts.Text(PromptAction.Interact, DeviceKind.Xbox));
+        Assert.Equal("Cross", Prompts.Text(PromptAction.Interact, DeviceKind.PlayStation));
+        Assert.Equal("B", Prompts.Text(PromptAction.Interact, DeviceKind.Nintendo));
         Assert.Equal("A", Prompts.Text(PromptAction.Confirm, DeviceKind.Xbox));
         Assert.Equal("Cross", Prompts.Text(PromptAction.Confirm, DeviceKind.PlayStation));
         Assert.Equal("B", Prompts.Text(PromptAction.Confirm, DeviceKind.Nintendo));

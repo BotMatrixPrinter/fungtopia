@@ -3,7 +3,7 @@
 Fast travel between the three places of the world. A wooden signpost with three arrow boards
 stands at each signpost of the Map (`Places.SignpostTown`, `SignpostForestSouth`,
 `SignpostForestNorth`, `SignpostPetCity`). Near one a prompt "[Interact button] Map" shows (the
-icon of the device in use only: E key, Xbox X, PlayStation Square, ...); Interact there,
+icon of the device in use only: E key, Xbox A, PlayStation Cross, ...); Interact there,
 or OpenMap (M / Back) anywhere outdoors, opens a full-screen map: three big circles on parchment,
 Mushroom Town, Mushroom Forest and Pet City, labeled, with "you are here". Picking one closes the
 map with a short fade and teleports the player to that place's signpost.
@@ -14,6 +14,9 @@ map with a short fade and teleports the player to that place's signpost.
 - It also publishes `Fungtopia.Input.UiFocus` (owner `TravelModule.FocusOwner`) open on the tick the
   map opens and closed on the tick it closes (`Close`, `OpenMap` again, indoors, or the teleport after
   a pick), once each, so Input stops walking, looking, jumping and firing while the map shows.
+- And `Fungtopia.Input.InteractAvailable` (owner `TravelModule.InteractOwner`) true on the tick the
+  signpost prompt shows (`ShowPrompt`) and false on the tick it hides, so the gamepad's A opens the
+  map there instead of jumping.
 - `Core/` — `Fungtopia.Travel.Core`: `TravelModule` (the one `IModule`) and `MapLayout`.
 - `Godot/` — `Main.tscn` with `TravelView`; `MapCanvas` (the map, drawn in code); `SignpostModel`
   (loads the model); `Preview.tscn` for screenshots; `Shaders/` (toon surface, ink outline).

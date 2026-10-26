@@ -12,7 +12,8 @@ namespace Fungtopia.Travel;
 /// signposts, opens the travel map on Interact there or on OpenMap anywhere outdoors, and on a
 /// pick fades out, publishes <see cref="TeleportPlayer"/> to that place's signpost and fades in.
 /// Publishes <see cref="MapState"/> every tick, and <see cref="UiFocus"/> (owner
-/// <see cref="FocusOwner"/>) when the map opens and when it closes, so Input stops walking meanwhile.
+/// <see cref="FocusOwner"/>) when the map opens and when it closes, so Input stops walking meanwhile, and
+/// <see cref="InteractAvailable"/> (owner <see cref="InteractOwner"/>) when the signpost prompt shows and hides.
 /// </summary>
 public sealed class TravelModule : IModule, IMessageHandler<PlayerInput>, IMessageHandler<PlayerState>,
     IMessageHandler<ActiveDevice>, IMessageHandler<MenuNav>
@@ -37,6 +38,9 @@ public sealed class TravelModule : IModule, IMessageHandler<PlayerInput>, IMessa
 
     /// <summary>The <see cref="UiFocus.Owner"/> of the travel map.</summary>
     public const int FocusOwner = 0x7472_6176; // "trav"
+
+    /// <summary>The <see cref="InteractAvailable.Owner"/> published while a signpost's prompt shows (the gamepad's A opens the map then).</summary>
+    public const int InteractOwner = 0x7369_676E; // "sign"
 
     private static readonly Area[] s_destinations = { Area.Town, Area.Forest, Area.PetCity };
 
@@ -71,6 +75,7 @@ public sealed class TravelModule : IModule, IMessageHandler<PlayerInput>, IMessa
     private bool _pendingConfirm;
     private MenuNav _nav;
     private bool _focused;
+    private bool _offered;
 
     /// <summary>The three places, in map order: Town, Forest, PetCity.</summary>
     public static ReadOnlySpan<Area> Destinations => s_destinations;
@@ -267,6 +272,11 @@ public sealed class TravelModule : IModule, IMessageHandler<PlayerInput>, IMessa
         {
             _focused = Open;
             _bus.Publish(new UiFocus(FocusOwner, Open));
+        }
+        if (ShowPrompt != _offered)
+        {
+            _offered = ShowPrompt;
+            _bus.Publish(new InteractAvailable(InteractOwner, ShowPrompt));
         }
         _bus.Publish(new MapState(Open));
     }
