@@ -1,4 +1,5 @@
 using System;
+using System.Numerics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Fungtopia.Map;
@@ -13,7 +14,7 @@ namespace Fungtopia.DayNight;
 /// publishes <see cref="TimeOfDay"/> every tick. When the player faints
 /// (<see cref="PlayerDefeated"/>) it waits <see cref="FaintSeconds"/>, skips to the next
 /// morning at <see cref="WakeHour"/>, and sends the player to Dr. Jeremy's clinic
-/// (<see cref="TeleportPlayer"/> to <see cref="Places.ClinicDoor"/>) with one <see cref="WokeUp"/>.
+/// (<see cref="TeleportPlayer"/> to <see cref="WakeSpot"/>, beside Jeremy facing the clinic) with one <see cref="WokeUp"/>.
 /// It saves its day and hour as one <see cref="SavePart"/> and restores them from a <see cref="RestorePart"/>.
 /// </summary>
 public sealed class DayNightModule : IModule, IMessageHandler<PlayerDefeated>, IMessageHandler<PlayerState>,
@@ -30,6 +31,23 @@ public sealed class DayNightModule : IModule, IMessageHandler<PlayerDefeated>, I
 
     /// <summary>Real seconds from fainting to waking (the screen fades meanwhile).</summary>
     public const double FaintSeconds = 3.0;
+
+    /// <summary>How far further out from the clinic than <see cref="Places.ClinicDoor"/> the player wakes (meters).</summary>
+    public const float WakeOut = 2.5f;
+
+    /// <summary>How far to one side of <see cref="Places.ClinicDoor"/> the player wakes (meters).</summary>
+    public const float WakeSide = 1.2f;
+
+    /// <summary>The walker radius (and walkable margin) a wake spot must be free for.</summary>
+    public const float WakeClearance = 0.5f;
+
+    /// <summary>
+    /// Where the player wakes after fainting: beside Dr. Jeremy (who stands at <see cref="Places.ClinicDoor"/>),
+    /// <see cref="WakeOut"/> further out and <see cref="WakeSide"/> to one side, facing the clinic
+    /// (<c>ClinicDoor.Yaw + pi</c>), so the camera behind the player is out on the street. The first free spot
+    /// of: the right side, the left side, then each again 0.5 m further out (up to 3 m more).
+    /// </summary>
+    public static readonly Place WakeSpot = FindWakeSpot();
 
     private const double SecondsPerHour = TimeOfDay.RealSecondsPerDay / 24.0;
 
@@ -167,9 +185,34 @@ public sealed class DayNightModule : IModule, IMessageHandler<PlayerDefeated>, I
         if (Hour >= WakeHour)
             Day++;
         _secondsIntoDay = WakeHour * SecondsPerHour;
-        var clinic = Places.ClinicDoor;
-        _bus!.Publish(new TeleportPlayer(clinic.Position, clinic.Yaw));
+        var wake = WakeSpot;
+        _bus!.Publish(new TeleportPlayer(wake.Position, wake.Yaw));
         _bus.Publish(new WokeUp(Day));
+    }
+
+    private static Place FindWakeSpot()
+    {
+        var door = Places.ClinicDoor;
+        var outward = door.Facing;
+        var side = new Vector3(-outward.Z, 0f, outward.X);
+        float yaw = door.Yaw + MathF.PI;
+        if (yaw > MathF.PI)
+            yaw -= 2f * MathF.PI;
+        for (int step = 0; step <= 6; step++)
+        {
+            float o = WakeOut + 0.5f * step;
+            for (int s = 1; s >= -1; s -= 2)
+            {
+                float x = door.Position.X + outward.X * o + side.X * WakeSide * s;
+                float z = door.Position.Z + outward.Z * o + side.Z * WakeSide * s;
+                if (Areas.Walkable(x, z, WakeClearance) && !Ground.Blocks(x, z, WakeClearance))
+                    return new Place(x, z, yaw);
+            }
+        }
+
+        // No free spot (the town would have to change a lot): the first choice anyway, still beside Jeremy.
+        return new Place(door.Position.X + outward.X * WakeOut + side.X * WakeSide,
+            door.Position.Z + outward.Z * WakeOut + side.Z * WakeSide, yaw);
     }
 }
 

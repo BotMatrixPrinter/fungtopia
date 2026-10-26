@@ -397,13 +397,48 @@ public class DayNightModuleTests
 
         Ticks(1);
         var teleport = Assert.Single(_bus.Teleports);
-        Assert.Equal(Places.ClinicDoor.Position, teleport.Position);
-        Assert.Equal(Places.ClinicDoor.Yaw, teleport.Facing);
+        Assert.Equal(DayNightModule.WakeSpot.Position, teleport.Position);
+        Assert.Equal(DayNightModule.WakeSpot.Yaw, teleport.Facing);
         Assert.Equal(2, Assert.Single(_bus.Wakes).Day);
+        // The teleport comes first, then WokeUp.
+        int teleportAt = _bus.Published.LastIndexOf(typeof(TeleportPlayer));
+        Assert.True(teleportAt >= 0 && _bus.Published.IndexOf(typeof(WokeUp)) == teleportAt + 1);
         Assert.Equal(2, Last.Day);
         Assert.Equal(7f, Last.Hour, 3);
         Assert.False(Last.IsNight);
         Assert.False(_clock.Fainting);
+    }
+
+    [Fact]
+    public void WakesBesideJeremyOnFreeGroundFacingTheClinic()
+    {
+        Faint();
+        Seconds(3);
+        var teleport = Assert.Single(_bus.Teleports);
+        var door = Places.ClinicDoor;
+        var p = teleport.Position;
+
+        // Not inside Dr. Jeremy, who stands exactly at ClinicDoor.
+        float fromJeremy = new Vector2(p.X - door.Position.X, p.Z - door.Position.Z).Length();
+        Assert.True(fromJeremy >= 1f, $"wakes {fromJeremy} m from Jeremy");
+        Assert.True(fromJeremy <= 6f, $"wakes {fromJeremy} m from Jeremy, not beside him");
+
+        // Standable: walkable with 0.5 m to spare, no obstacle for a 0.5 m walker, on the ground.
+        Assert.True(Areas.Walkable(p.X, p.Z, 0.5f));
+        Assert.False(Ground.Blocks(p.X, p.Z, 0.5f));
+        Assert.Equal(Ground.HeightAt(p.X, p.Z), p.Y, 3);
+
+        // Out on the street: farther from the clinic's front than ClinicDoor.
+        var clinic = Buildings.First(BuildingKind.Clinic);
+        float OutFromFront(float x, float z) => Vector2.Dot(new Vector2(x, z) - clinic.Center, clinic.Front);
+        Assert.True(OutFromFront(p.X, p.Z) > OutFromFront(door.Position.X, door.Position.Z) + 1f);
+
+        // Facing the clinic: within 45 degrees of ClinicDoor's yaw + pi, so the camera behind is outside.
+        float diff = MathF.IEEERemainder(teleport.Facing - (door.Yaw + MathF.PI), 2f * MathF.PI);
+        Assert.True(MathF.Abs(diff) <= MathF.PI / 4f, $"facing off by {diff} rad");
+        // The camera spot about 4 m behind the player is out on the street too, not inside the clinic.
+        var behind = new Vector2(p.X + MathF.Sin(teleport.Facing) * 4f, p.Z + MathF.Cos(teleport.Facing) * 4f);
+        Assert.True(OutFromFront(behind.X, behind.Y) > OutFromFront(p.X, p.Z));
     }
 
     [Fact]

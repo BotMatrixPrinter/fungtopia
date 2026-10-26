@@ -9,7 +9,7 @@ next morning. The view owns the one sun, sky and WorldEnvironment of the whole g
   global volumetric fog settings; `Lighting` (with `Mood` and `Rgb`), the palette of the sun, sky and
   environment.
 - `Godot/` — `Main.tscn` with `DayNightView` (light, sky, environment); `Shaders/sky.gdshader`.
-- `Tests/` — `DayNightModuleTests.cs`: xUnit tests of `DayNightModule` (clock, faint, save/restore) with a fake `IMessageBus`, of
+- `Tests/` — `DayNightModuleTests.cs`: xUnit tests of `DayNightModule` (clock, faint and wake spot, save/restore) with a fake `IMessageBus`, of
   `VolumetricFog`, and of `Lighting`'s palette (hues, saturation and fog checked at every quarter hour).
 
 Test it with `./test.sh DayNight` from the repository root.
@@ -24,15 +24,23 @@ Test it with `./test.sh DayNight` from the repository root.
 ## Core
 
 `DayNightModule` reads `Fungtopia.Player.PlayerDefeated` and `PlayerState` (only its `Area`, for
-the view) and `Fungtopia.Save.CollectSave` and `RestorePart`, and uses `Fungtopia.Map.Places.ClinicDoor`. Each tick it adds the step to the clock
+the view) and `Fungtopia.Save.CollectSave` and `RestorePart`, and uses `Fungtopia.Map`'s `Places.ClinicDoor`, `Ground.Blocks` and `Areas.Walkable`. Each tick it adds the step to the clock
 (50 real seconds per hour; the day counts up at midnight) and publishes `TimeOfDay`.
 
 On `PlayerDefeated` it starts a faint (more defeats while fainting are ignored). After
 `FaintSeconds` (3 s, while the screen fades) it skips to the next morning at `WakeHour` (7:00):
 the next day, or the same day when the faint began before 7:00 (in the small hours the next
 morning is that day's), then publishes, in this order, one `TeleportPlayer` to
-`Places.ClinicDoor` (position and yaw) and one `WokeUp`, and that tick's `TimeOfDay` already
+`DayNightModule.WakeSpot` (position and yaw) and one `WokeUp`, and that tick's `TimeOfDay` already
 shows 7:00. The Player module restores health on the teleport.
+
+`WakeSpot` (found once) is beside Dr. Jeremy, who stands exactly at `Places.ClinicDoor`, not
+inside him: `WakeOut` (2.5 m) further out from the clinic than ClinicDoor (along its facing) and
+`WakeSide` (1.2 m) to its right, facing the clinic (ClinicDoor's yaw + pi), so the camera, which
+snaps behind the player after a teleport, lands out on the street looking at the player, Jeremy
+and the clinic. If that spot is not free (`Areas.Walkable` with `WakeClearance` 0.5 m, and not
+`Ground.Blocks` for a 0.5 m walker), it tries the left side, then both sides again 0.5 m further
+out each time (up to 3 m more); every candidate is at least 1.2 m from Jeremy.
 
 Saving (`Fungtopia.Save`): on `CollectSave` it answers at once with one `SavePart` (Module
 `"DayNight"`) whose Json is compact, e.g. `{"v":1,"day":3,"hour":14.25}` (`SaveVersion` 1; the hour
