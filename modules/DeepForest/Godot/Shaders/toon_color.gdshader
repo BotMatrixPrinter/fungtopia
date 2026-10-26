@@ -1,4 +1,4 @@
-// Old giant stems, side stems, roots and shelves: toon surface colored by the instance, darker
+// Old giant stems, side stems, the little fungi's stalks, roots and shelves: toon surface colored by the instance, darker
 // and mossier toward the foot, and less ambient light the deeper in the gloom.
 shader_type spatial;
 render_mode specular_disabled;
@@ -10,9 +10,12 @@ uniform vec3 moss : source_color = vec3(0.2, 0.3, 0.2);
 uniform float moss_height = 1.2;
 
 varying vec3 world_pos;
+varying float glow;
 
 void vertex() {
 	world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	// The little stems of glowing fungi glow faintly (INSTANCE_CUSTOM.y; 0 for the rest).
+	glow = INSTANCE_CUSTOM.y;
 }
 
 void fragment() {
@@ -20,6 +23,7 @@ void fragment() {
 	// Old bark: uneven grooves running up and around the stem (UV.x goes around it).
 	vec3 bark = COLOR.rgb * (0.86 + 0.14 * sin(UV.x * 6.2831 * 9.0 + sin(UV.y * 7.0) * 1.5));
 	ALBEDO = mix(bark, moss, foot * 0.55);
+	EMISSION = COLOR.rgb * glow * 0.35;
 	AO = 1.0 - 0.55 * gloom_at(world_pos);
 	AO_LIGHT_AFFECT = 0.0;
 }

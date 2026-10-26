@@ -87,7 +87,8 @@ public class DeepForestTests
             Assert.Equal(o, caps[i].Owner);
             Assert.True(Horizontal(caps[i].Position, c.X, c.Z) < 0.01f);
             Assert.True(caps[i].Scale.X >= c.Radius * 2.5f);
-            Assert.True(caps[i].Position.Y > stems[i].Position.Y + stems[i].Scale.Y * 0.8f);
+            // On top of the stem (bells reach down over it).
+            Assert.True(caps[i].Position.Y + caps[i].Scale.Y > stems[i].Position.Y + stems[i].Scale.Y);
         }
     }
 
@@ -219,20 +220,229 @@ public class DeepForestTests
         }
     }
 
-    [Fact]
-    public void SmallPropsKeepTheirHeightAboveTheHighSide()
+    /// <summary>The highest point of a cap (its mesh from y 0 to 1, radius 1), tilted by its rotation.</summary>
+    private static float Top(in Prop p)
     {
-        foreach (var p in Scenery.Of(PropKind.Toadstool))
+        float up = Vector3.Transform(Vector3.UnitY, p.Rotation).Y;
+        return p.Position.Y + p.Scale.Y * up + p.Scale.X * MathF.Sqrt(MathF.Max(0f, 1f - up * up));
+    }
+
+    private static bool Stemless(CapShape shape) => shape is CapShape.Ball or CapShape.Cup or CapShape.Coral or CapShape.Jelly;
+
+    /// <summary>The Map's Deep Forest medium mushrooms with their circle's index in Ground.Obstacles.</summary>
+    private static List<(Fungtopia.Map.Prop Prop, int Circle)> MediumProps()
+    {
+        var list = new List<(Fungtopia.Map.Prop, int)>();
+        int circle = Ground.PropCircleStart;
+        foreach (var p in Props.All)
         {
-            var (_, high) = DeepForestScenery.GroundUnder(p.Position.X, p.Position.Z, p.Scale.X * DeepForestScenery.ToadstoolFoot);
-            float stemTop = p.Position.Y + DeepForestScenery.ToadstoolStem * p.Scale.Y;
-            Assert.True(MathF.Abs(stemTop - high - DeepForestScenery.ToadstoolStem * p.Scale.X) < 0.001f, $"toadstool at {p.Position}");
+            if (p.Kind == Fungtopia.Map.PropKind.MediumMushroom && p.Area == Area.DeepForest)
+                list.Add((p, circle));
+            circle += p.CircleCount;
         }
-        foreach (var p in Scenery.Of(PropKind.Glow))
+        return list;
+    }
+
+    [Fact]
+    public void MediumMushroomsStandExactlyOnTheMapsPropsNoTallerThanThem()
+    {
+        var medium = MediumProps();
+        Assert.True(medium.Count > 200, $"only {medium.Count} medium props");
+        var owners = new HashSet<int>();
+        foreach (var (mp, circle) in medium)
         {
-            var (_, high) = DeepForestScenery.GroundUnder(p.Position.X, p.Position.Z, p.Scale.X * DeepForestScenery.GlowFoot);
-            float top = p.Position.Y + DeepForestScenery.GlowHeight * p.Scale.Y;
-            Assert.True(MathF.Abs(top - high - DeepForestScenery.GlowHeight * p.Scale.X) < 0.001f, $"glowing mushroom at {p.Position}");
+            var c = Ground.Obstacles[circle];
+            Assert.Equal(mp.X, c.X);
+            Assert.Equal(mp.Radius, c.Radius);
+            owners.Add(circle);
+            var (_, high) = DeepForestScenery.GroundUnder(mp.X, mp.Z, mp.Radius);
+            float tallest = 0f, reach = 0f;
+            int caps = 0;
+            foreach (var p in Scenery.Of(PropKind.MediumCap))
+            {
+                if (p.Owner != circle)
+                    continue;
+                caps++;
+                tallest = MathF.Max(tallest, Top(p) - high);
+                reach = MathF.Max(reach, Horizontal(p.Position, mp.X, mp.Z) + p.Scale.X);
+                // A stemless body (puffball, coral) is solid itself: inside the circle.
+                if (Stemless(p.Shape))
+                    Assert.True(Horizontal(p.Position, mp.X, mp.Z) + p.Scale.X <= mp.Radius + 0.01f, $"{p.Species} at {p.Position} is outside its prop");
+            }
+            Assert.True(caps >= 1, $"medium prop at {mp.Center} is not drawn");
+            // Visual height varies within the prop's height, and it covers the solid circle.
+            Assert.InRange(tallest, 0.6f * mp.Height, mp.Height + 0.01f);
+            Assert.True(reach >= 0.8f * mp.Radius, $"medium mushroom at {mp.Center} reaches only {reach} of {mp.Radius}");
+            foreach (var p in Scenery.Of(PropKind.MediumStem))
+            {
+                if (p.Owner != circle)
+                    continue;
+                // Every stem's foot is inside the prop's circle, and planted.
+                float foot = p.Scale.X * DeepForestScenery.StalkFoot;
+                Assert.True(Horizontal(p.Position, mp.X, mp.Z) + foot <= mp.Radius + 0.01f, $"stem at {p.Position} is outside its prop");
+                AssertPlanted(p.Position, foot, DeepForestScenery.SmallSink);
+            }
+        }
+        foreach (var kind in new[] { PropKind.MediumStem, PropKind.MediumCap })
+            foreach (var p in Scenery.Of(kind))
+                Assert.Contains(p.Owner, owners);
+    }
+
+    [Fact]
+    public void SmallFungiAndFernsStayLowEnoughToWalkOver()
+    {
+        Assert.True(DeepForestScenery.SmallMaxHeight <= 0.4f);
+        Assert.True(Scenery.Of(PropKind.SmallCap).Length > 1500, $"only {Scenery.Of(PropKind.SmallCap).Length} small fungi");
+        foreach (var p in Scenery.Of(PropKind.SmallCap))
+        {
+            var (_, high) = DeepForestScenery.GroundUnder(p.Position.X, p.Position.Z, DeepForestScenery.SmallSpotRadius);
+            Assert.True(Top(p) - high <= DeepForestScenery.SmallMaxHeight + 0.02f, $"{p.Species} at {p.Position} is {Top(p) - high:F2} m tall");
+            Assert.True(Top(p) - Ground.HeightAt(p.Position.X, p.Position.Z) > 0.03f, $"{p.Species} at {p.Position} is buried");
+        }
+        foreach (var p in Scenery.Of(PropKind.Fern))
+            Assert.True(p.Scale.Y * DeepForestScenery.FernHeight <= DeepForestScenery.SmallMaxHeight + 0.001f, $"fern at {p.Position} is too tall");
+    }
+
+    // ---- Variety: many kinds, sizes, proportions and tilts; no two neighbors alike
+
+    [Fact]
+    public void ManyKindsOfMushroomsAndFungiGrowEverywhere()
+    {
+        var all = new HashSet<Fungus>();
+        var giantShapes = new HashSet<CapShape>();
+        var mediumKinds = new HashSet<Fungus>();
+        var smallKinds = new HashSet<Fungus>();
+        foreach (var kind in new[] { PropKind.GiantCap, PropKind.BranchCap })
+            foreach (var p in Scenery.Of(kind))
+            {
+                giantShapes.Add(p.Shape);
+                all.Add(p.Species);
+            }
+        foreach (var p in Scenery.Of(PropKind.MediumCap))
+            mediumKinds.Add(p.Species);
+        foreach (var p in Scenery.Of(PropKind.SmallCap))
+            smallKinds.Add(p.Species);
+        foreach (var p in Scenery.Of(PropKind.Shelf))
+            all.Add(p.Species);
+        all.UnionWith(mediumKinds);
+        all.UnionWith(smallKinds);
+        foreach (var f in Enum.GetValues<Fungus>())
+            if (f != Fungus.None)
+                Assert.Contains(f, all);
+        Assert.True(giantShapes.Count >= 5, $"giant caps in only {giantShapes.Count} shapes");
+        Assert.True(mediumKinds.Count >= 10, $"medium mushrooms of only {mediumKinds.Count} kinds");
+        Assert.True(smallKinds.Count >= 12, $"small fungi of only {smallKinds.Count} kinds");
+        // The giants lean to the strange kinds: glowing, amethyst and ink caps are a good share.
+        int strange = 0;
+        foreach (var p in Scenery.Of(PropKind.GiantCap))
+            if (p.Species is Fungus.Glowing or Fungus.Amethyst or Fungus.InkCap)
+                strange++;
+        Assert.True(strange > Scenery.Of(PropKind.GiantCap).Length * 0.4f, $"only {strange} strange giant caps");
+        foreach (var p in Scenery.Of(PropKind.Shelf))
+            Assert.Equal(Fungus.Bracket, p.Species);
+    }
+
+    [Fact]
+    public void SinglesPairsAndClustersOfDifferentHeightsProportionsAndTilts()
+    {
+        var perSpot = new Dictionary<int, List<Prop>>();
+        foreach (var p in Scenery.Of(PropKind.MediumCap))
+        {
+            if (!perSpot.TryGetValue(p.Owner, out var list))
+                perSpot[p.Owner] = list = new List<Prop>();
+            list.Add(p);
+        }
+        int singles = 0, pairs = 0, clusters = 0, mixedHeights = 0;
+        foreach (var list in perSpot.Values)
+        {
+            if (list.Count == 1)
+                singles++;
+            else if (list.Count == 2)
+                pairs++;
+            else
+                clusters++;
+            float lo = float.MaxValue, hi = 0f;
+            foreach (var p in list)
+            {
+                float h = Top(p) - Ground.HeightAt(p.Position.X, p.Position.Z);
+                lo = MathF.Min(lo, h);
+                hi = MathF.Max(hi, h);
+            }
+            if (list.Count > 1 && lo < hi * 0.9f)
+                mixedHeights++;
+        }
+        Assert.True(singles > 20 && pairs > 20 && clusters > 20, $"{singles} single, {pairs} pairs, {clusters} clusters");
+        Assert.True(mixedHeights > (pairs + clusters) / 2, $"only {mixedHeights} groups mix heights");
+        // Sizes, proportions and tilts vary within each kind.
+        foreach (var species in new[] { Fungus.FlyAgaric, Fungus.Amethyst, Fungus.InkCap, Fungus.Parasol })
+        {
+            float minRatio = float.MaxValue, maxRatio = 0f, minSize = float.MaxValue, maxSize = 0f, maxTilt = 0f, minTilt = 1f;
+            foreach (var p in Scenery.Of(PropKind.SmallCap))
+            {
+                if (p.Species != species)
+                    continue;
+                float ratio = p.Scale.Y / p.Scale.X;
+                (minRatio, maxRatio) = (MathF.Min(minRatio, ratio), MathF.Max(maxRatio, ratio));
+                (minSize, maxSize) = (MathF.Min(minSize, p.Scale.X), MathF.Max(maxSize, p.Scale.X));
+                float tilt = MathF.Acos(Math.Clamp(Vector3.Transform(Vector3.UnitY, p.Rotation).Y, -1f, 1f));
+                (minTilt, maxTilt) = (MathF.Min(minTilt, tilt), MathF.Max(maxTilt, tilt));
+            }
+            Assert.True(maxRatio > minRatio * 1.2f, $"{species} caps all have the same proportions");
+            Assert.True(maxSize > minSize * 2f, $"{species} caps are all one size");
+            Assert.True(maxTilt > 0.1f && minTilt < 0.03f, $"{species} tilts {minTilt:F2}..{maxTilt:F2}");
+        }
+    }
+
+    /// <summary>Whether every spot's nearest neighbor has another look.</summary>
+    private static void AssertNeighborsDiffer(string what, List<(Vector2 At, DeepForestScenery.Look Look)> spots)
+    {
+        Assert.True(spots.Count > 50, $"only {spots.Count} {what}");
+        for (int i = 0; i < spots.Count; i++)
+        {
+            int nearest = -1;
+            float best = float.MaxValue;
+            for (int j = 0; j < spots.Count; j++)
+            {
+                float d = Vector2.DistanceSquared(spots[i].At, spots[j].At);
+                if (j != i && d < best)
+                    (best, nearest) = (d, j);
+            }
+            Assert.True(spots[i].Look != spots[nearest].Look, $"{what} at {spots[i].At} and its neighbor at {spots[nearest].At} are both {spots[i].Look}");
+        }
+    }
+
+    [Fact]
+    public void NoTwoNeighborsAreIdentical()
+    {
+        var giants = new List<(Vector2, DeepForestScenery.Look)>();
+        foreach (var p in Scenery.Of(PropKind.GiantCap))
+            giants.Add((new Vector2(p.Position.X, p.Position.Z), new DeepForestScenery.Look(p.Species, p.Shape)));
+        AssertNeighborsDiffer("giant mushrooms", giants);
+        // A side cap is never the same as its own giant's cap.
+        var caps = Scenery.Of(PropKind.GiantCap);
+        foreach (var p in Scenery.Of(PropKind.BranchCap))
+        {
+            var g = caps[p.Owner - FirstDeepTrunk];
+            Assert.False(g.Species == p.Species && g.Shape == p.Shape, $"side cap at {p.Position} is like its giant's");
+        }
+        var medium = new List<(Vector2, DeepForestScenery.Look)>();
+        var seen = new HashSet<int>();
+        foreach (var p in Scenery.Of(PropKind.MediumCap))
+            if (seen.Add(p.Owner))
+                medium.Add((new Vector2(Ground.Obstacles[p.Owner].X, Ground.Obstacles[p.Owner].Z), new DeepForestScenery.Look(p.Species, p.Shape)));
+        AssertNeighborsDiffer("medium mushrooms", medium);
+        var small = new List<(Vector2, DeepForestScenery.Look)>();
+        foreach (var s in Scenery.GroundSpots)
+            small.Add((s.At, s.Look));
+        AssertNeighborsDiffer("small fungi spots", small);
+        // Each small fungus grows in a spot of its own look.
+        foreach (var p in Scenery.Of(PropKind.SmallCap))
+        {
+            bool found = false;
+            foreach (var s in Scenery.GroundSpots)
+                found |= s.Look.Species == p.Species && s.Look.Shape == p.Shape
+                    && Vector2.Distance(s.At, new Vector2(p.Position.X, p.Position.Z)) <= DeepForestScenery.SmallSpotRadius + 0.2f;
+            Assert.True(found, $"{p.Species} at {p.Position} is in no spot of its kind");
         }
     }
 
@@ -259,17 +469,19 @@ public class DeepForestTests
     [Fact]
     public void GroundPropsStandOnTheGroundOffTheStemsAndOffThePathsMiddle()
     {
-        foreach (var kind in new[] { PropKind.Glow, PropKind.Toadstool, PropKind.Fern })
+        foreach (var kind in new[] { PropKind.SmallStem, PropKind.SmallCap, PropKind.Fern })
         {
             Assert.True(Scenery.Of(kind).Length > 100, $"too few {kind}");
             foreach (var p in Scenery.Of(kind))
             {
                 float x = p.Position.X, z = p.Position.Z;
                 Assert.Equal(-1, p.Owner);
+                if (kind == PropKind.SmallCap && !Stemless(p.Shape))
+                    continue; // on its stem
                 float foot = kind switch
                 {
-                    PropKind.Glow => DeepForestScenery.GlowFoot,
-                    PropKind.Toadstool => DeepForestScenery.ToadstoolFoot,
+                    PropKind.SmallStem => DeepForestScenery.StalkFoot,
+                    PropKind.SmallCap => 1f,
                     _ => DeepForestScenery.FernFoot,
                 } * p.Scale.X;
                 AssertPlanted(p.Position, foot, DeepForestScenery.SmallSink);
@@ -300,41 +512,65 @@ public class DeepForestTests
     private static float Max(Vector3 c) => MathF.Max(c.X, MathF.Max(c.Y, c.Z));
 
     [Fact]
-    public void CapsAreVividPurplesRedsAndOrangeBrowns()
+    public void CapsAreVividJewelColorsWithWhiteSpotsAndPearlyInkCapsAndPuffballs()
     {
-        int reds = 0, purples = 0, oranges = 0;
-        foreach (var kind in new[] { PropKind.GiantCap, PropKind.BranchCap, PropKind.Toadstool })
+        int reds = 0, purples = 0, magentas = 0, teals = 0, golds = 0, spotted = 0;
+        foreach (var kind in new[] { PropKind.GiantCap, PropKind.BranchCap, PropKind.MediumCap, PropKind.SmallCap })
         {
             foreach (var p in Scenery.Of(kind))
             {
                 var c = p.Color;
-                // Clearly saturated and bright enough to pop, but not washed out to white.
-                Assert.True(Saturation(c) >= 0.75f, $"{kind} color {c} is dull");
                 Assert.InRange(Max(c), 0.4f, 1f);
-                Assert.True(c.Y < c.X, $"{kind} color {c} is green"); // red, purple or orange-brown: never green-leaning
-                if (c.Z > c.X * 0.6f)
-                    purples++;
-                else if (c.Y < c.X * 0.2f)
+                if (p.Species is Fungus.InkCap or Fungus.Puffball)
                 {
-                    reds++;
-                    // A pure cherry/tomato red: neither brownish nor pink.
-                    Assert.True(c.Z < c.X * 0.15f, $"red cap {c} is pinkish");
+                    // Pale and pearly, but bright, never grey.
+                    Assert.True(Max(c) >= 0.8f && MathF.Min(c.X, MathF.Min(c.Y, c.Z)) >= 0.6f, $"{p.Species} color {c} is not pearly");
+                    continue;
                 }
-                else
-                    oranges++;
+                // Clearly saturated and bright enough to pop, never washed out to white.
+                Assert.True(Saturation(c) >= 0.5f, $"{kind} {p.Species} color {c} is dull");
+                if (p.Species == Fungus.FlyAgaric)
+                {
+                    Assert.True(p.Spots >= 0.7f, $"fly agaric at {p.Position} has no white spots");
+                    Assert.True(c.X > 0.7f && c.Y < 0.15f && c.Z < 0.15f, $"fly agaric {c} is not red");
+                }
+                if (p.Spots > 0f)
+                    spotted++;
+                if (c.X > 0.7f && c.Y < 0.2f && c.Z < 0.3f)
+                    reds++;
+                else if (c.Z > c.X && c.Y < c.X * 0.4f)
+                    purples++;
+                else if (c.X > 0.75f && c.Z > 0.5f && c.Y < 0.3f)
+                    magentas++;
+                else if (c.Y > c.X * 1.5f && c.Z > c.X * 1.5f)
+                    teals++;
+                else if (c.X > 0.85f && c.Y > 0.5f && c.Z < 0.2f)
+                    golds++;
             }
         }
-        Assert.True(reds > 20 && purples > 20 && oranges > 20, $"{reds} red, {purples} purple, {oranges} orange-brown caps");
+        Assert.True(reds > 50 && purples > 50 && magentas > 20 && teals > 50 && golds > 30,
+            $"{reds} red, {purples} purple, {magentas} magenta, {teals} teal, {golds} gold caps");
+        Assert.True(spotted > 200, $"only {spotted} spotted caps");
     }
 
     [Fact]
-    public void ShelvesAreARichOrangeBrown()
+    public void BracketShelvesComeInSeveralRichColors()
     {
+        int orange = 0, teal = 0, magenta = 0, gold = 0;
         foreach (var p in Scenery.Of(PropKind.Shelf))
         {
-            Assert.True(Saturation(p.Color) >= 0.8f, $"shelf color {p.Color} is dull");
-            Assert.True(p.Color.X > p.Color.Y && p.Color.Y > p.Color.Z, $"shelf color {p.Color} is not orange-brown");
+            var c = p.Color;
+            Assert.True(Saturation(c) >= 0.8f, $"shelf color {c} is dull");
+            if (c.Y > c.X)
+                teal++;
+            else if (c.Z > c.Y)
+                magenta++;
+            else if (c.Y > c.X * 0.65f)
+                gold++;
+            else
+                orange++;
         }
+        Assert.True(orange > 20 && teal > 20 && magenta > 20 && gold > 20, $"{orange} orange, {teal} teal, {magenta} magenta, {gold} gold shelves");
     }
 
     [Fact]
@@ -400,16 +636,42 @@ public class DeepForestTests
     [Fact]
     public void GlowingMushroomsGlowClearlyAndSporesGiveFaintLight()
     {
-        Assert.True(Scenery.Of(PropKind.Glow).Length > 300);
-        Assert.True(Scenery.Of(PropKind.Spore).Length > 500);
-        // About twice the old glow (0.6..1.2, 0.9 on average), so they clearly glow at night.
+        // Small glowing fungi glow GlowStrength..twice it; every bioluminescent kind glows, no other does.
+        int small = 0, giant = 0, medium = 0;
         float sum = 0f;
-        foreach (var p in Scenery.Of(PropKind.Glow))
+        foreach (var kind in new[] { PropKind.GiantCap, PropKind.BranchCap, PropKind.MediumCap, PropKind.SmallCap })
         {
-            Assert.InRange(p.Glow, DeepForestScenery.GlowStrength, 2f * DeepForestScenery.GlowStrength);
-            sum += p.Glow;
+            foreach (var p in Scenery.Of(kind))
+            {
+                if (p.Species != Fungus.Glowing)
+                {
+                    Assert.Equal(0f, p.Glow);
+                    continue;
+                }
+                if (kind == PropKind.SmallCap)
+                {
+                    Assert.InRange(p.Glow, DeepForestScenery.GlowStrength, 2f * DeepForestScenery.GlowStrength);
+                    sum += p.Glow;
+                    small++;
+                }
+                else if (kind == PropKind.MediumCap)
+                {
+                    Assert.InRange(p.Glow, DeepForestScenery.GlowStrength, 2f * DeepForestScenery.GlowStrength);
+                    medium++;
+                }
+                else
+                {
+                    Assert.InRange(p.Glow, 0.3f, DeepForestScenery.GiantGlow);
+                    giant++;
+                }
+                // Blue, green, cyan or violet: never a warm color.
+                Assert.True(p.Color.Z > p.Color.X || p.Color.Y > p.Color.X, $"glowing cap {p.Color} is warm");
+            }
         }
-        Assert.InRange(sum / Scenery.Of(PropKind.Glow).Length, 1.6f, 2f);
+        // More glowing fungi than before (over 300 small ones), and glowing giants and medium ones too.
+        Assert.True(small > 600 && medium > 30 && giant > 30, $"{small} small, {medium} medium, {giant} giant glowing caps");
+        Assert.InRange(sum / small, 1.6f, 2f);
+        Assert.True(Scenery.Of(PropKind.Spore).Length > 500);
         foreach (var p in Scenery.Of(PropKind.Spore))
             Assert.Equal(1f, p.Glow);
         Assert.InRange(Scenery.Lights.Length, 6, DeepForestScenery.MaxLights);
@@ -426,8 +688,8 @@ public class DeepForestTests
         foreach (var p in Scenery.Of(PropKind.Fern))
             if (Areas.DeepForestPath.Contains(p.Position.X, p.Position.Z))
                 ferns++;
-        foreach (var p in Scenery.Of(PropKind.Glow))
-            if (Areas.DeepForestPath.Contains(p.Position.X, p.Position.Z))
+        foreach (var p in Scenery.Of(PropKind.SmallCap))
+            if (p.Species == Fungus.Glowing && Areas.DeepForestPath.Contains(p.Position.X, p.Position.Z))
                 glow++;
         Assert.True(ferns >= 40, $"only {ferns} ferns on the path");
         Assert.True(glow >= 3, $"only {glow} glowing mushrooms on the path");

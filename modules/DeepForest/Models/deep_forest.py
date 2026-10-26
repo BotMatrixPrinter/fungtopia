@@ -10,7 +10,19 @@
 #   Cap     a broad old cap with a wavy, drooping rim: radius 1, top at y = 1, rim near y = 0;
 #           UV.y is 1 on the top, 0 on the gills underneath.
 #   Shelf   a bracket fungus shelf sticking out along +X from a stem's surface, about 1 m wide.
-#   Glow    a small glowing mushroom, 0.75 high: UV.y is 1 on its cap, 0 on its stem.
+#   Stalk   a smooth, slightly tapering little mushroom stem with a soft bulb at its foot: radius 1
+#           (1.25 at the bulb), height 1; for the medium and small fungi.
+#   Caps of the medium and small fungi, each radius 1 (about), from y = 0 (rim or bottom) to y = 1
+#   (top); UV.y is 1 on the top surface, 0 on gills or the underside:
+#   Dome    a round, plump fly-agaric/bolete dome.
+#   Flat    a wide flat parasol cap with a little bump in the middle.
+#   Funnel  a chanterelle funnel: a dip in the middle, a wavy turned-up rim, narrowing to its foot.
+#   Bell    a tall ink-cap bell, open underneath (the stem goes up inside it).
+#   Cone    a morel's pointed cone (the shader draws its honeycomb).
+#   Ball    a puffball, sitting on y = 0.
+#   Cup     a scarlet cup fungus, its open bowl up (UV.y 1 inside the bowl).
+#   Coral   a coral fungus: a tuft of branching, round-tipped arms.
+#   Jelly   a jelly fungus: a soft clump of folded, rounded lobes.
 #   Web     a flat round spider web in the XZ plane, radius 1 (thin strands; drawn double-sided).
 #   Root    an arching root from the origin out along +X to x = 1, rising about 0.3 in between.
 #   Fern    a low fern of drooping fronds, about 0.6 high and 1.2 across (drawn double-sided);
@@ -208,22 +220,197 @@ def shelf():
     return b.build("Shelf", (0.5, 0.32, 0.22))
 
 
-def glow():
+def stalk():
     b = Builder()
-    stem_profile = [(0.0, 0.62, 0.0)]
-    for k in range(7):
-        t = 1.0 - k / 6
-        stem_profile.append((0.07 + 0.03 * (1.0 - t) ** 2, 0.62 * t, 0.0))
-    stem_profile.append((0.0, 0.0, 0.0))
-    b.lathe(stem_profile, 10, lambda a, y, r: r * (1.0 + 0.1 * math.sin(3.0 * a + 8.0 * y)))
-    cap_profile = [(0.0, 0.78, 1.0)]
+    rows = 8
+    profile = [(0.0, 1.0, 0.0)]
+    for k in range(rows + 1):
+        t = 1.0 - k / rows  # 1 at the top, 0 at the foot
+        profile.append((0.85 + 0.15 * (1.0 - t) + 0.25 * math.exp(-t * t / 0.02), t, 0.0))
+    profile.append((0.0, 0.0, 0.0))
+    b.lathe(profile, 12)
+    return b.build("Stalk", (0.93, 0.87, 0.72))
+
+
+def dome():
+    b = Builder()
+    profile = [(0.0, 1.0, 1.0)]
+    for k in range(1, 9):
+        t = k / 8
+        profile.append((math.sin(t * math.pi * 0.55) / math.sin(math.pi * 0.55), 0.12 + 0.88 * math.cos(t * math.pi * 0.5) ** 0.7, 1.0))
+    profile.append((0.92, 0.04, 0.0))
+    profile.append((0.5, 0.12, 0.0))
+    profile.append((0.0, 0.16, 0.0))
+    b.lathe(profile, 24)
+    return b.build("Dome", (0.8, 0.1, 0.1))
+
+
+def flat():
+    b = Builder()
+    profile = [(0.0, 1.0, 1.0), (0.12, 0.95, 1.0), (0.22, 0.78, 1.0)]
+    for k in range(1, 6):
+        t = k / 5
+        profile.append((0.22 + 0.78 * t, 0.78 - 0.5 * t * t, 1.0))
+    profile.append((0.95, 0.12, 0.0))
+    profile.append((0.5, 0.3, 0.0))
+    profile.append((0.0, 0.4, 0.0))
+
+    def wave(a, y, r):
+        edge = max(0.0, r - 0.6) / 0.4
+        return r, y + 0.06 * math.sin(6.0 * a + 0.7) * edge
+
+    b.lathe(profile, 28, wave)
+    return b.build("Flat", (0.8, 0.6, 0.4))
+
+
+def funnel():
+    b = Builder()
+    profile = [(0.0, 0.78, 1.0)]
     for k in range(1, 7):
         t = k / 6
-        cap_profile.append((0.3 * math.sin(t * math.pi * 0.5), 0.56 + 0.22 * math.cos(t * math.pi * 0.5), 1.0))
-    cap_profile.append((0.2, 0.56, 1.0))
-    cap_profile.append((0.0, 0.6, 1.0))
-    b.lathe(cap_profile, 16)
-    return b.build("Glow", (0.6, 0.85, 0.95))
+        profile.append((t, 0.78 + 0.22 * t ** 1.6, 1.0))
+    profile.append((1.02, 0.9, 0.0))
+    for k in range(1, 6):
+        t = k / 5
+        profile.append((1.0 - 0.8 * t ** 0.7, 0.9 - 0.9 * t, 0.0))
+    profile.append((0.0, 0.0, 0.0))
+
+    def wavy(a, y, r):
+        edge = max(0.0, r - 0.7) / 0.3
+        w = 0.08 * math.sin(5.0 * a + 0.3) + 0.04 * math.sin(11.0 * a + 1.0)
+        return r * (1.0 + w * edge), y + 0.6 * w * edge
+
+    b.lathe(profile, 28, wavy)
+    return b.build("Funnel", (1.0, 0.7, 0.1))
+
+
+def bell():
+    b = Builder()
+    profile = [(0.0, 1.0, 1.0)]
+    for k in range(1, 10):
+        t = k / 9
+        profile.append((math.sin(t * math.pi * 0.5) ** 0.7, math.cos(t * math.pi * 0.5) ** 0.45, 1.0))
+    profile.append((0.92, 0.05, 0.0))
+    profile.append((0.7, 0.6, 0.0))
+    profile.append((0.0, 0.85, 0.0))
+
+    def shaggy(a, y, r):
+        return r * (1.0 + 0.05 * math.sin(14.0 * a) * (1.0 - y)), y
+
+    b.lathe(profile, 24, shaggy)
+    return b.build("Bell", (0.9, 0.85, 0.95))
+
+
+def cone():
+    b = Builder()
+    profile = [(0.0, 1.0, 1.0)]
+    for k in range(1, 9):
+        t = k / 8
+        profile.append((t ** 0.75 * (1.0 + 0.05 * math.sin(t * 9.0)), 1.0 - t, 1.0))
+    profile.append((0.5, 0.0, 0.0))
+    profile.append((0.0, 0.0, 0.0))
+    b.lathe(profile, 18)
+    return b.build("Cone", (0.8, 0.6, 0.3))
+
+
+def ball():
+    b = Builder()
+    profile = [(0.0, 1.0, 1.0)]
+    for k in range(1, 10):
+        t = k / 10
+        profile.append((math.sin(t * math.pi) * (1.0 - 0.15 * t * t), 0.5 + 0.5 * math.cos(t * math.pi), 1.0))
+    profile.append((0.0, 0.0, 1.0))
+    b.lathe(profile, 20)
+    return b.build("Ball", (0.95, 0.92, 1.0))
+
+
+def cup():
+    b = Builder()
+    profile = [(0.0, 0.0, 0.0)]
+    for k in range(1, 7):
+        t = k / 6
+        profile.append((math.sin(t * math.pi * 0.5), 1.0 - math.cos(t * math.pi * 0.5), 0.0))
+    profile.append((1.02, 1.0, 1.0))
+    for k in range(1, 6):
+        t = k / 5
+        profile.append((0.92 * math.cos(t * math.pi * 0.5), 1.0 - 0.75 * math.sin(t * math.pi * 0.5), 1.0))
+    profile.append((0.0, 0.25, 1.0))
+    profile.reverse()
+
+    def frill(a, y, r):
+        return r * (1.0 + 0.05 * math.sin(7.0 * a) * y), y + 0.04 * math.sin(7.0 * a) * y
+
+    b.lathe(profile, 20, frill)
+    return b.build("Cup", (0.95, 0.1, 0.12))
+
+
+def blob(b, center, radius, segments=10):
+    """A small round lump (a sphere of radius about `radius`), all of it top surface."""
+    cx, cy, cz = center
+    profile = [(0.0, radius, 1.0)]
+    for k in range(1, 6):
+        t = k / 6
+        profile.append((radius * math.sin(t * math.pi), radius * math.cos(t * math.pi), 1.0))
+    profile.append((0.0, -radius, 1.0))
+    b.lathe(profile, segments, center=center)
+
+
+def tube(b, a, c, ra, rc, segs=7):
+    """A tapering tube from point a (radius ra) to point c (radius rc), capped by a round tip."""
+    dx, dy, dz = c[0] - a[0], c[1] - a[1], c[2] - a[2]
+    ln = math.sqrt(dx * dx + dy * dy + dz * dz)
+    d = (dx / ln, dy / ln, dz / ln)
+    ref = (1.0, 0.0, 0.0) if abs(d[1]) > 0.9 else (0.0, 1.0, 0.0)
+    u = (d[1] * ref[2] - d[2] * ref[1], d[2] * ref[0] - d[0] * ref[2], d[0] * ref[1] - d[1] * ref[0])
+    ul = math.sqrt(sum(x * x for x in u))
+    u = tuple(x / ul for x in u)
+    w = (d[1] * u[2] - d[2] * u[1], d[2] * u[0] - d[0] * u[2], d[0] * u[1] - d[1] * u[0])
+    rings = []
+    for p, r in ((a, ra), (c, rc)):
+        ring = []
+        for s in range(segs):
+            t = TAU * s / segs
+            ring.append(b.vert(tuple(p[i] + r * (math.cos(t) * u[i] + math.sin(t) * w[i]) for i in range(3)), (s / segs, 1.0)))
+        rings.append(ring)
+    for s in range(segs):
+        t = (s + 1) % segs
+        b.faces.append((rings[0][s], rings[0][t], rings[1][t], rings[1][s]))
+    bottom = b.vert(a, (0.5, 1.0))
+    for s in range(segs):
+        b.faces.append((bottom, rings[0][(s + 1) % segs], rings[0][s]))
+    blob(b, c, rc * 1.25, 8)
+
+
+def coral():
+    b = Builder()
+    # A trunk splitting twice into upturned arms, each ending in a round tip, all inside radius 1, height 1.
+    def branch(a, d, r, depth, k):
+        c = (a[0] + d[0], a[1] + d[1], a[2] + d[2])
+        tube(b, a, c, r, r * 0.72)
+        if depth == 0:
+            return
+        for j in range(3 if depth == 2 else 2):
+            ang = TAU * (j + hash1(k, j)) / (3 if depth == 2 else 2)
+            spread = 0.55 + 0.25 * hash1(k, j + 5)
+            ln = math.sqrt(d[0] ** 2 + d[1] ** 2 + d[2] ** 2) * 0.85
+            nd = (d[0] * 0.4 + spread * ln * math.cos(ang), ln * 0.85, d[2] * 0.4 + spread * ln * math.sin(ang))
+            branch(c, nd, r * 0.72, depth - 1, k * 4 + j + 1)
+
+    for j in range(3):
+        ang = TAU * j / 3 + 0.4
+        branch((0.15 * math.cos(ang), 0.0, 0.15 * math.sin(ang)), (0.12 * math.cos(ang), 0.3, 0.12 * math.sin(ang)), 0.13, 2, j + 1)
+    return b.build("Coral", (1.0, 0.45, 0.55))
+
+
+def jelly():
+    b = Builder()
+    for k in range(7):
+        a = TAU * k / 7 + 0.5 * hash1(k, 7)
+        d = 0.15 + 0.45 * hash1(k, 8)
+        r = 0.32 + 0.12 * hash1(k, 9)
+        y = r * 0.9 + 0.35 * hash1(k, 10) * (1.0 - d)
+        blob(b, (d * math.cos(a), min(y, 1.0 - r), d * math.sin(a)), r, 12)
+    return b.build("Jelly", (1.0, 0.55, 0.1))
 
 
 def web():
@@ -297,7 +484,7 @@ def fern():
 
 def main():
     bpy.ops.wm.read_factory_settings(use_empty=True)
-    for make in (stem, skirt, cap, shelf, glow, web, root, fern):
+    for make in (stem, skirt, cap, shelf, web, root, fern, stalk, dome, flat, funnel, bell, cone, ball, cup, coral, jelly):
         make()
     out = os.path.join(HERE, "deep_forest.glb")
     bpy.ops.export_scene.gltf(filepath=out, export_format="GLB", export_apply=True,

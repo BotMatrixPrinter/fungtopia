@@ -10,7 +10,7 @@ namespace Fungtopia.DeepForest.View;
 /// <summary>
 /// Draws the Deep Forest from <see cref="DeepForestModule.Scenery"/>: the huge old giant mushrooms
 /// on the Map's Deep Forest obstacles with their side stems, canopy caps, shelves, roots and webs;
-/// glowing mushrooms, toadstools, ferns, drifting spores and low mist; FogVolumes (volumetric fog,
+/// the Map's medium mushrooms and small ground fungi of many kinds (caps by shape), ferns, drifting spores and low mist; FogVolumes (volumetric fog,
 /// switched on by DayNight) and a few soft lights. Every kind is one MultiMesh, from the unit models
 /// in Models/deep_forest.glb (built by Models/deep_forest.py). The canopy casts the sun's real
 /// shadows, so the ground under it is dark by day. Sun, sky and environment are DayNight's; the
@@ -139,34 +139,49 @@ public partial class DeepForestView : Node3D, IModuleView
         }
     }
 
+    /// <summary>The mesh in Models/deep_forest.glb of each cap shape.</summary>
+    private static string CapMesh(CapShape shape) => shape == CapShape.Wavy ? "Cap" : shape.ToString();
+
     private void BuildMushrooms(DeepForestScenery scenery, Dictionary<string, Mesh> meshes)
     {
         var stems = new Instances();
-        var caps = new Instances();
         foreach (var kind in new[] { PropKind.GiantStem, PropKind.BranchStem })
             foreach (var p in scenery.Of(kind))
                 stems.Add(Placed(p), C(p.Color));
-        foreach (var kind in new[] { PropKind.GiantCap, PropKind.BranchCap })
-            foreach (var p in scenery.Of(kind))
-                caps.Add(Placed(p), C(p.Color), new Color(p.Seed, p.Glow, 0f, 0f));
-        // Toadstools: a cream little stem and a vivid cap from the same meshes.
-        foreach (var p in scenery.Of(PropKind.Toadstool))
-        {
-            var t = Placed(p);
-            float s = p.Scale.X;
-            // Its stem is ToadstoolStem * Scale.Y tall: reaching down to its base where the ground drops away.
-            float stem = DeepForestScenery.ToadstoolStem * p.Scale.Y;
-            var stemBasis = t.Basis.Orthonormalized() * Basis.FromScale(new Godot.Vector3(0.055f * s, stem, 0.055f * s));
-            stems.Add(new Transform3D(stemBasis, t.Origin), C(DeepForestScenery.StemCream));
-            var capBasis = t.Basis.Orthonormalized() * Basis.FromScale(new Godot.Vector3(0.24f, 0.16f, 0.24f) * s);
-            caps.Add(new Transform3D(capBasis, t.Origin + Godot.Vector3.Up * (stem - 0.03f * s)), C(p.Color), new Color(p.Seed, 0.8f, 0f, 0f));
-        }
         AddChild(stems.Build("Stems", MeshOf(meshes, "Stem"), Material("toon_color.gdshader", outline: true)));
         var skirts = new Instances();
         foreach (var p in scenery.Of(PropKind.Skirt))
             skirts.Add(Placed(p), C(p.Color));
         AddChild(skirts.Build("Skirts", MeshOf(meshes, "Skirt"), Material("toon_color.gdshader", outline: true)));
-        AddChild(caps.Build("Caps", MeshOf(meshes, "Cap"), Material("cap.gdshader", outline: true)));
+
+        // The medium and small fungi's smooth little stems (glowing kinds' glow faintly).
+        var stalkMaterial = Material("toon_color.gdshader", outline: true);
+        stalkMaterial.SetShaderParameter("moss_height", 0.05f);
+        foreach (var (kind, name, shadows) in new[] { (PropKind.MediumStem, "MediumStalks", true), (PropKind.SmallStem, "SmallStalks", false) })
+        {
+            var stalks = new Instances();
+            foreach (var p in scenery.Of(kind))
+                stalks.Add(Placed(p), C(p.Color), new Color(p.Seed, p.Glow, 0f, 0f));
+            AddChild(stalks.Build(name, MeshOf(meshes, "Stalk"), stalkMaterial, shadows));
+        }
+
+        // Caps: one MultiMesh per cap mesh, the big ones (giant, side and medium caps) casting
+        // shadows, the small ground fungi not. Custom data: seed, spots, glow, pattern.
+        var capMaterial = Material("cap.gdshader", outline: true);
+        foreach (var (kinds, name, shadows) in new[]
+        {
+            (new[] { PropKind.GiantCap, PropKind.BranchCap, PropKind.MediumCap }, "Caps", true),
+            (new[] { PropKind.SmallCap }, "SmallCaps", false),
+        })
+        {
+            var byShape = new Instances[Enum.GetValues<CapShape>().Length];
+            foreach (var kind in kinds)
+                foreach (var p in scenery.Of(kind))
+                    (byShape[(int)p.Shape] ??= new Instances()).Add(Placed(p), C(p.Color), new Color(p.Seed, p.Spots, p.Glow, (float)p.Pattern));
+            for (int i = 0; i < byShape.Length; i++)
+                if (byShape[i] != null)
+                    AddChild(byShape[i].Build($"{name}{(CapShape)i}", MeshOf(meshes, CapMesh((CapShape)i)), capMaterial, shadows));
+        }
     }
 
     private void BuildProps(DeepForestScenery scenery, Dictionary<string, Mesh> meshes)
@@ -186,7 +201,6 @@ public partial class DeepForestView : Node3D, IModuleView
         Simple(PropKind.Shelf, "Shelves", "Shelf", shelfMaterial);
         Simple(PropKind.Root, "Roots", "Root", Material("toon_color.gdshader", outline: true));
         Simple(PropKind.Web, "Webs", "Web", Material("web.gdshader"), shadows: false);
-        Simple(PropKind.Glow, "GlowingMushrooms", "Glow", Material("glow.gdshader", outline: true), shadows: false);
         Simple(PropKind.Fern, "Ferns", "Fern", Material("fern.gdshader"), shadows: false);
 
         var quad = new QuadMesh { Size = Godot.Vector2.One };
@@ -200,15 +214,15 @@ public partial class DeepForestView : Node3D, IModuleView
 
     private void BuildAir(DeepForestScenery scenery)
     {
-        // Soft, low fog, a little lavender, faintly lit from within so it is not black in the shade.
+        // Soft, low fog, a deep violet-lavender, faintly lit (a little teal) from within so it is not black in the shade.
         int n = 0;
         foreach (var f in scenery.Fog)
         {
             var material = new FogMaterial
             {
                 Density = f.Density,
-                Albedo = new Color(0.62f, 0.6f, 0.74f),
-                Emission = new Color(0.03f, 0.03f, 0.05f),
+                Albedo = new Color(0.58f, 0.48f, 0.8f),
+                Emission = new Color(0.03f, 0.04f, 0.07f),
                 HeightFalloff = f.Ellipsoid ? 0f : 0.25f,
                 EdgeFade = f.Ellipsoid ? 1f : 0.35f,
             };
@@ -229,7 +243,7 @@ public partial class DeepForestView : Node3D, IModuleView
                 Name = $"GlowLight{n++}",
                 Position = V(l.Position),
                 LightColor = C(l.Color),
-                LightEnergy = 1.6f,
+                LightEnergy = 2f,
                 OmniRange = l.Range,
                 OmniAttenuation = 1.4f,
                 ShadowEnabled = false,
