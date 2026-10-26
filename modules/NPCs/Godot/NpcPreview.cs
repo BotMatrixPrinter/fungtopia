@@ -57,7 +57,8 @@ public partial class NpcPreview : Node3D
             var figure = NpcFigure.Create(single);
             figure.Rotation = new Vector3(0f, MathF.PI - 0.25f, 0f);
             AddChild(figure);
-            _camera.LookAtFromPosition(new Vector3(0.7f, 1.25f, 3.6f), new Vector3(0f, 0.95f, 0f));
+            float tall = single == NPCsModule.Pip ? 0.2f : 0f;
+            _camera.LookAtFromPosition(new Vector3(0.6f, 1.25f + tall, 3.0f + tall), new Vector3(0f, 0.85f + tall, 0f));
         }
         else
         {
@@ -71,7 +72,7 @@ public partial class NpcPreview : Node3D
                 if (i == NPCsModule.Millie)
                     _prompted = figure;
             }
-            _camera.LookAtFromPosition(new Vector3(0f, 1.4f, 7.6f), new Vector3(0f, 1.0f, 0f));
+            _camera.LookAtFromPosition(new Vector3(0f, 1.5f, 7.6f), new Vector3(0f, 0.85f, 0f));
             var layer = new CanvasLayer { Layer = 11 };
             AddChild(layer);
             (_prompt, var label) = NPCsView.BuildPrompt();
@@ -99,7 +100,7 @@ public partial class NpcPreview : Node3D
         var side = new System.Numerics.Vector3(spot.Facing.Z, 0f, -spot.Facing.X);
         var eye = spot.Position + spot.Facing * 2.6f + side * 1.3f + new System.Numerics.Vector3(0f, 1.9f, 0f);
         var pip = NPCsModule.Position(NPCsModule.Pip);
-        _camera.LookAtFromPosition(new Vector3(eye.X, eye.Y, eye.Z), new Vector3(pip.X, pip.Y + 1.3f, pip.Z));
+        _camera.LookAtFromPosition(new Vector3(eye.X, eye.Y, eye.Z), new Vector3(pip.X, pip.Y + 1.2f, pip.Z));
     }
 
     public override void _PhysicsProcess(double delta)

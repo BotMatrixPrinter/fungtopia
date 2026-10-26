@@ -82,14 +82,6 @@ public sealed class NPCsModule : IModule, IMessageHandler<PlayerInput>, IMessage
     /// <summary>How far to the left of the counter's middle (as Pip sees it) Pip stands, beside the soup pot (meters).</summary>
     public const float PipBesidePot = 0.4f;
 
-    /// <summary>How tall each one is (meters, feet to the top of the head), by NPC index: Models/npcs.py builds each
-    /// model to it (its 1.80 m rig scaled by height / 1.80).</summary>
-    public static readonly float[] Heights = { 1.86f, 1.72f, 1.78f, 1.75f, 1.70f };
-
-    /// <summary>The top of each one's model (meters above the feet: Jeremy's hair, Millie's cat ears, Lucy's
-    /// hair, Abby's top bun, Pip's chef's hat), what the view floats the prompt over.</summary>
-    public static readonly float[] Tops = { 1.88f, 1.79f, 1.80f, 1.89f, 1.82f };
-
     /// <summary>The <see cref="SaveData.Version"/> this module writes and reads.</summary>
     public const int SaveVersion = 1;
 
