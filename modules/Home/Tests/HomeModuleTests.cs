@@ -34,7 +34,10 @@ public class HomeModuleTests
         public readonly List<InteractAvailable> Available = new();
         public readonly List<SavePart> SaveParts = new();
         public readonly List<SetActivePet> ActivePets = new();
+        public readonly List<HealPlayer> Heals = new();
+        public readonly List<Type> Published = new();
         public int OpenWardrobes;
+        public int Sleeps;
         public int? Coins;
 
         public void Subscribe<T>(IMessageHandler<T> handler) where T : struct
@@ -46,8 +49,13 @@ public class HomeModuleTests
 
         public void Publish<T>(in T message) where T : struct
         {
+            Published.Add(typeof(T));
             if (message is TeleportPlayer teleport)
                 Teleports.Add(teleport);
+            if (message is HealPlayer heal)
+                Heals.Add(heal);
+            if (message is Fungtopia.DayNight.Sleep)
+                Sleeps++;
             if (message is HomeState state)
                 States.Add(state);
             if (message is UiFocus focus)
@@ -509,6 +517,21 @@ public class HomeModuleTests
         home.StartDecorating();
         home.Tick(Step);
         Assert.True(home.Decorating);
+        Assert.True(home.Picking);
+        // In the picker a step down moves the highlight (to "Move placed items"), not the cursor; up comes back.
+        input.Tick(home, bus, 0, 1);
+        Assert.Equal(1, home.PickerSelection);
+        for (int t = 0; t < 12; t++)
+            input.Tick(home, bus, 0, 0);
+        input.Tick(home, bus, 0, -1);
+        for (int t = 0; t < 12; t++)
+            input.Tick(home, bus, 0, 0);
+        Assert.Equal(0, home.PickerSelection);
+        Assert.Equal(FurnitureKind.PottedMushroom, home.PickerEntries[0].Kind);
+        home.Confirm();
+        home.Tick(Step);
+        Assert.False(home.Picking);
+        Assert.Equal(1, home.Held);
         home.MoveCursor(-100, -100);
 
         // A short flick right: one cell.
@@ -526,6 +549,7 @@ public class HomeModuleTests
         home.Tick(Step);
         Assert.True(home.Items[1].Placed);
         Assert.Equal((1, 3), (home.Items[1].Column, home.Items[1].Row));
+        Assert.True(home.Picking);
 
         // Confirm with no panel open does nothing (it is not an Interact press).
         home.Back();
@@ -556,11 +580,13 @@ public class HomeModuleTests
     private static IEnumerable<string> ButtonTexts(DeviceKind device)
     {
         foreach (var prompt in new[] { HomePrompt.Enter, HomePrompt.Leave, HomePrompt.Shop, HomePrompt.Decorate, HomePrompt.Wardrobe,
-                     HomePrompt.TakeCat, HomePrompt.TakeDog, HomePrompt.TakeCrow })
+                     HomePrompt.TakeCat, HomePrompt.TakeDog, HomePrompt.TakeCrow, HomePrompt.Sleep })
             yield return HomeText.Prompt(prompt, device);
         yield return HomeText.ShopHelp(device);
+        yield return HomeText.PickerHelp(device);
         yield return HomeText.DecorateHelp(device);
-        yield return HomeText.PickUpTitle(device);
+        yield return HomeText.MoveHelp(device, false);
+        yield return HomeText.MoveHelp(device, true);
     }
 
     [Theory]
@@ -572,6 +598,7 @@ public class HomeModuleTests
     [InlineData(HomePrompt.TakeCat, DeviceKind.KeyboardMouse, "key_e", "Take Mushroom Cat along")]
     [InlineData(HomePrompt.TakeDog, DeviceKind.PlayStation, "ps_cross", "Take Mushroom Dog along")]
     [InlineData(HomePrompt.TakeCrow, DeviceKind.Xbox, "xbox_a", "Take Mushroom Crow along")]
+    [InlineData(HomePrompt.Sleep, DeviceKind.Nintendo, "ns_b", "Sleep")]
     public void ThePromptIsTheInteractIconOfTheDeviceAndTheVerb(HomePrompt prompt, DeviceKind device, string icon, string verb)
     {
         Assert.Equal($"[img={HomeText.PromptIconSize}]res://modules/Input/Glyphs/{icon}.svg[/img] {verb}", HomeText.Prompt(prompt, device));
@@ -603,14 +630,23 @@ public class HomeModuleTests
         Assert.Equal(new[] { "key_up", "key_down", "key_e", "key_esc" }, IconsIn(HomeText.ShopHelp(DeviceKind.KeyboardMouse)));
         Assert.Equal(new[] { "xbox_dpad_up", "xbox_dpad_down", "xbox_a", "xbox_b" }, IconsIn(HomeText.ShopHelp(DeviceKind.Xbox)));
         Assert.Equal(new[] { "ps_dpad_up", "ps_dpad_down", "ps_cross", "ps_circle" }, IconsIn(HomeText.ShopHelp(DeviceKind.PlayStation)));
-        Assert.Equal(new[] { "key_wasd", "key_r", "key_tab", "key_e", "key_esc" }, IconsIn(HomeText.DecorateHelp(DeviceKind.KeyboardMouse)));
-        Assert.Equal(new[] { "xbox_ls", "xbox_rb", "xbox_lb", "xbox_a", "xbox_b" }, IconsIn(HomeText.DecorateHelp(DeviceKind.Xbox)));
-        Assert.Equal(new[] { "ps_ls", "ps_r1", "ps_l1", "ps_cross", "ps_circle" }, IconsIn(HomeText.DecorateHelp(DeviceKind.PlayStation)));
-        Assert.Equal(new[] { "ns_ls", "ns_r", "ns_l", "ns_b", "ns_a" }, IconsIn(HomeText.DecorateHelp(DeviceKind.Nintendo)));
+        Assert.Equal(new[] { "key_up", "key_down", "key_e", "key_esc" }, IconsIn(HomeText.PickerHelp(DeviceKind.KeyboardMouse)));
+        Assert.Equal(new[] { "ps_dpad_up", "ps_dpad_down", "ps_cross", "ps_circle" }, IconsIn(HomeText.PickerHelp(DeviceKind.PlayStation)));
+        Assert.Equal(new[] { "key_wasd", "key_r", "key_e", "key_esc" }, IconsIn(HomeText.DecorateHelp(DeviceKind.KeyboardMouse)));
+        Assert.Equal(new[] { "xbox_ls", "xbox_rb", "xbox_a", "xbox_b" }, IconsIn(HomeText.DecorateHelp(DeviceKind.Xbox)));
+        Assert.Equal(new[] { "ps_ls", "ps_r1", "ps_cross", "ps_circle" }, IconsIn(HomeText.DecorateHelp(DeviceKind.PlayStation)));
+        Assert.Equal(new[] { "ns_ls", "ns_r", "ns_b", "ns_a" }, IconsIn(HomeText.DecorateHelp(DeviceKind.Nintendo)));
+        // With nothing held, over a placed item: pick up (Interact) and put away (R; the left face button on a pad).
+        Assert.Equal(new[] { "key_wasd", "key_e", "key_r", "key_esc" }, IconsIn(HomeText.MoveHelp(DeviceKind.KeyboardMouse, true)));
+        Assert.Equal(new[] { "xbox_ls", "xbox_a", "xbox_x", "xbox_b" }, IconsIn(HomeText.MoveHelp(DeviceKind.Xbox, true)));
+        Assert.Equal(new[] { "ps_ls", "ps_cross", "ps_square", "ps_circle" }, IconsIn(HomeText.MoveHelp(DeviceKind.PlayStation, true)));
+        Assert.Equal(new[] { "ns_ls", "ns_b", "ns_y", "ns_a" }, IconsIn(HomeText.MoveHelp(DeviceKind.Nintendo, true)));
+        Assert.Equal(new[] { "xbox_ls", "xbox_b" }, IconsIn(HomeText.MoveHelp(DeviceKind.Xbox, false)));
         Assert.Contains("[/img] choose", HomeText.ShopHelp(DeviceKind.Xbox));
-        Assert.Contains("[/img] place / pick up", HomeText.DecorateHelp(DeviceKind.PlayStation));
-        Assert.Equal(new[] { "key_tab" }, IconsIn(HomeText.PickUpTitle(DeviceKind.KeyboardMouse)));
-        Assert.Equal(new[] { "ps_l1" }, IconsIn(HomeText.PickUpTitle(DeviceKind.PlayStation)));
+        Assert.Contains("[/img] place", HomeText.DecorateHelp(DeviceKind.PlayStation));
+        Assert.Contains("[/img] Pick up", HomeText.MoveHelp(DeviceKind.PlayStation, true));
+        Assert.Contains("[/img] Put away", HomeText.MoveHelp(DeviceKind.PlayStation, true));
+        Assert.DoesNotContain("Put away", HomeText.MoveHelp(DeviceKind.PlayStation, false));
         Assert.Contains("[img=40]", HomeText.ShopHelp(DeviceKind.Xbox, 40));
         Assert.DoesNotContain("[img=28]", HomeText.ShopHelp(DeviceKind.Xbox, 40));
     }
@@ -684,6 +720,7 @@ public class HomeModuleTests
         home.Buy(FurnitureKind.Table);
         Inside(home, bus);
         home.StartDecorating();
+        Assert.True(home.Choose(FurnitureKind.Table));
         Assert.Equal(1, home.Held);
 
         home.MoveCursor(-100, -100);
@@ -700,8 +737,14 @@ public class HomeModuleTests
         home.Tick(Step);
         Assert.Equal(new HomeState(2, 2, true), bus.States[^1]);
 
-        // Nothing held: the cursor on the table picks it back up.
+        // Placed from the picker: the picker opens again. Its "Move placed items" holds nothing,
+        // and the cursor on the table picks it back up.
+        Assert.True(home.Picking);
+        home.MovePlacedItems();
+        Assert.False(home.Picking);
+        Assert.Equal(-1, home.Held);
         home.MoveCursor(1, 1);
+        Assert.Equal(1, home.Highlighted);
         Assert.True(home.PlaceOrPickUp());
         Assert.Equal(1, home.Held);
         Assert.False(home.Items[1].Placed);
@@ -715,6 +758,7 @@ public class HomeModuleTests
         home.Buy(FurnitureKind.Bookshelf);
         Inside(home, bus);
         home.StartDecorating();
+        home.Choose(FurnitureKind.Bookshelf);
         home.MoveCursor(-100, -100);
         home.MoveCursor(0, 2);
         home.Rotate();
@@ -736,11 +780,12 @@ public class HomeModuleTests
         home.Buy(FurnitureKind.Chair);
         Inside(home, bus);
         home.StartDecorating();
+        home.Choose(FurnitureKind.Rug);
         home.MoveCursor(-100, -100);
         home.MoveCursor(8, 2);
         Assert.True(home.PlaceOrPickUp()); // the rug on cells 8..11 x 2..4
 
-        home.NextItem(1);
+        Assert.True(home.Choose(FurnitureKind.Chair));
         Assert.Equal(FurnitureKind.Chair, home.Items[home.Held].Kind);
         home.MoveCursor(-100, -100);
         home.MoveCursor(10, 3);
@@ -776,6 +821,7 @@ public class HomeModuleTests
         Assert.True(home.CanPlace(FurnitureKind.Bookshelf, HomeRoom.Columns - 2, 5, 1));
         // The cursor stays inside the room.
         home.StartDecorating();
+        home.MovePlacedItems();
         home.MoveCursor(1000, 1000);
         Assert.Equal((HomeRoom.Columns - 1, HomeRoom.Rows - 1), (home.CursorColumn, home.CursorRow));
     }
@@ -790,13 +836,272 @@ public class HomeModuleTests
         PressInteract(bus);
         home.Tick(Step);
         Assert.True(home.Decorating);
+        Assert.True(home.Picking);
+        // Interact in the picker takes the highlighted item (the pot), then places it.
+        PressInteract(bus);
+        home.Tick(Step);
+        Assert.Equal(1, home.Held);
         home.MoveCursor(-100, -100);
         PressInteract(bus);
         home.Tick(Step);
         Assert.True(home.Items[1].Placed);
         Assert.Equal((0, 0), (home.Items[1].Column, home.Items[1].Row));
+        Assert.True(home.Picking);
         home.Back();
         Assert.False(home.Decorating);
+    }
+
+    // Choosing what to place, and putting away
+
+    [Fact]
+    public void ThePickerListsExactlyTheUnplacedOwnedItemsWithCountsAndHoldingOneStartsPlacement()
+    {
+        var (home, bus) = Started(coins: 2000);
+        home.Buy(FurnitureKind.Chair);
+        home.Buy(FurnitureKind.Rug);
+        home.Buy(FurnitureKind.Chair);
+        home.Buy(FurnitureKind.Lamp);
+        Inside(home, bus);
+        home.StartDecorating();
+        home.Choose(FurnitureKind.Rug);
+        home.MoveCursor(-100, -100);
+        home.MoveCursor(8, 2);
+        Assert.True(home.PlaceOrPickUp());
+
+        // The rug and the bed stand in the house: the picker lists the lamp and the two chairs.
+        Assert.True(home.Decorating);
+        Assert.True(home.Picking);
+        Assert.Equal(-1, home.Held);
+        var entries = home.PickerEntries.ToArray();
+        Assert.Equal(new[] { (FurnitureKind.Lamp, 1), (FurnitureKind.Chair, 2) }, entries.Select(e => (e.Kind, e.Count)));
+        Assert.Equal(2, home.PickerCount);
+        Assert.Equal("Lamp x1", HomeText.PickerLine(entries[0]));
+        Assert.Equal("Chair x2", HomeText.PickerLine(entries[1]));
+        Assert.Equal("Move placed items", HomeText.MovePlacedLine);
+
+        // The highlight goes over both and "Move placed items" (index 2), wrapping.
+        Assert.Equal(0, home.PickerSelection);
+        home.MovePickerSelection(1);
+        Assert.Equal(1, home.PickerSelection);
+        home.MovePickerSelection(1);
+        Assert.Equal(2, home.PickerSelection);
+        home.MovePickerSelection(1);
+        Assert.Equal(0, home.PickerSelection);
+        home.MovePickerSelection(-1);
+        home.MovePickerSelection(-1);
+
+        // Confirm on "Chair x2" holds a chair and opens placement mode; the cursor moves, the picker does not.
+        Assert.Equal(1, home.PickerSelection);
+        home.Confirm();
+        home.Tick(Step);
+        Assert.False(home.Picking);
+        Assert.True(home.Decorating);
+        Assert.Equal(FurnitureKind.Chair, home.Items[home.Held].Kind);
+        Assert.False(home.Items[home.Held].Placed);
+        Assert.True(bus.States[^1].Decorating);
+        home.MovePickerSelection(1);
+        Assert.Equal(1, home.PickerSelection);
+
+        // Placed: the picker opens again with one chair left.
+        home.MoveCursor(-100, -100);
+        Assert.True(home.PlaceOrPickUp());
+        Assert.True(home.Picking);
+        Assert.Equal(new[] { (FurnitureKind.Lamp, 1), (FurnitureKind.Chair, 1) }, home.PickerEntries.ToArray().Select(e => (e.Kind, e.Count)));
+        // Placing everything leaves only "Move placed items".
+        Assert.True(home.Choose(FurnitureKind.Chair));
+        home.MoveCursor(0, 1);
+        Assert.True(home.PlaceOrPickUp());
+        Assert.True(home.Choose(FurnitureKind.Lamp));
+        home.MoveCursor(0, 1);
+        Assert.True(home.PlaceOrPickUp());
+        Assert.True(home.Picking);
+        Assert.Equal(0, home.PickerCount);
+        Assert.Equal(0, home.PickerSelection); // "Move placed items"
+        Assert.False(home.Choose(FurnitureKind.Lamp));
+        Assert.Equal("Everything is placed", HomeText.EverythingPlaced);
+        home.Choose();
+        Assert.False(home.Picking);
+        Assert.Equal(-1, home.Held);
+    }
+
+    [Fact]
+    public void BackStepsFromPlacementToThePickerThenClosesWithUiFocusHeldThroughout()
+    {
+        var (home, bus) = Started(coins: 1000);
+        home.Buy(FurnitureKind.Table);
+        var book = HomeRoom.BookPosition + new Vector3(0f, 0f, -0.8f);
+        Interact(home, bus, book);
+        Assert.True(home.Picking);
+        PressInteract(bus);
+        home.Tick(Step);
+        Assert.False(home.Picking);
+        Assert.Equal(1, home.Held);
+
+        // Back from placement mode: the picker again, the held table back in the inventory.
+        home.Back();
+        home.Tick(Step);
+        Assert.True(home.Decorating);
+        Assert.True(home.Picking);
+        Assert.Equal(-1, home.Held);
+        Assert.False(home.Items[1].Placed);
+        Assert.Equal((FurnitureKind.Table, 1), (home.PickerEntries[0].Kind, home.PickerEntries[0].Count));
+        Assert.True(bus.States[^1].Decorating);
+        // The same from "Move placed items".
+        home.MovePickerSelection(1);
+        home.Choose();
+        Assert.False(home.Picking);
+        home.Back();
+        Assert.True(home.Picking);
+
+        // Back from the picker closes decorating.
+        home.Back();
+        home.Tick(Step);
+        Assert.False(home.Decorating);
+        Assert.False(home.Picking);
+        Assert.False(bus.States[^1].Decorating);
+        // UiFocus was taken once on opening and released once on closing.
+        Assert.Equal(new[] { new UiFocus(HomeModule.DecorateFocusOwner, true), new UiFocus(HomeModule.DecorateFocusOwner, false) }, bus.Focus);
+    }
+
+    [Fact]
+    public void PutAwayReturnsAPlacedItemToTheInventoryAndSavesItAsNotPlaced()
+    {
+        var (home, bus) = Started(coins: 1000);
+        home.Buy(FurnitureKind.Chair);
+        Inside(home, bus);
+        home.StartDecorating();
+        // In the picker nothing is put away.
+        Assert.False(home.PutAway());
+        home.Choose(FurnitureKind.Chair);
+        home.MoveCursor(-100, -100);
+        Assert.True(home.PlaceOrPickUp());
+        home.MovePlacedItems();
+
+        // The cursor over the basic bed highlights it; put away, it is no longer placed but still owned.
+        home.MoveCursor(-100, -100);
+        Assert.Equal(1, home.Highlighted); // the chair, on cell (0, 0)
+        home.MoveCursor(2, 1);
+        Assert.Equal(0, home.Highlighted);
+        Assert.Equal(FurnitureKind.BasicBed, home.Items[home.Highlighted].Kind);
+        Assert.True(home.PutAway());
+        Assert.False(home.Items[0].Placed);
+        Assert.Equal(-1, home.Highlighted);
+        Assert.Equal(-1, home.Held);
+        Assert.Equal(2, home.ItemCount);
+        Assert.Equal(-1, home.ItemAt(2, 1));
+        Assert.False(home.PutAway());
+        home.Tick(Step);
+        Assert.Equal(new HomeState(2, 1, true), bus.States[^1]);
+
+        // The gamepad's put-away button also arrives as Interact, after it: on the now empty cell it picks nothing up.
+        PressInteract(bus);
+        home.Tick(Step);
+        Assert.Equal(-1, home.Held);
+        Assert.False(home.Items[0].Placed);
+
+        // Holding something, nothing is put away.
+        home.MoveCursor(-2, -1);
+        Assert.True(home.PlaceOrPickUp());
+        Assert.Equal(1, home.Held);
+        Assert.False(home.PutAway());
+        Assert.True(home.PlaceOrPickUp());
+        Assert.False(home.Picking); // picked up here, placed here: still moving placed items
+
+        // Counted again in the picker.
+        home.Back();
+        Assert.Equal((FurnitureKind.BasicBed, 1), (home.PickerEntries[0].Kind, home.PickerEntries[0].Count));
+        home.Back();
+
+        // Saved as not placed, and restored so.
+        string json = Save(home, bus);
+        Assert.Contains("{\"k\":\"BasicBed\",\"p\":false", json);
+        var (loaded, loadedBus) = Started();
+        loadedBus.Publish(new RestorePart(SaveModules.Home, json));
+        Assert.Equal(home.Items.ToArray(), loaded.Items.ToArray());
+        Assert.False(loaded.Items[0].Placed);
+        Assert.Equal(1, loaded.ItemsPlaced);
+    }
+
+    // Sleeping
+
+    /// <summary>A spot <paramref name="south"/> meters south of the basic bed's foot (the bed covers cells 2..3 x 0..3).</summary>
+    private static Vector3 BySouthOfBed(float south) =>
+        new(Areas.Home.MinX + 1.5f, Areas.HomeFloorY, Areas.Home.MinZ + 2f + south);
+
+    [Fact]
+    public void TheSleepPromptShowsOnlyNearAPlacedBasicOrMushroomBedAndNotWhileDecorating()
+    {
+        var (home, bus) = Started(coins: 1000);
+        Inside(home, bus);
+        StandAt(bus, BySouthOfBed(1.0f));
+        home.Tick(Step);
+        Assert.Equal(HomePrompt.Sleep, home.Prompt);
+        Assert.Equal("Sleep", HomeText.PromptVerb(HomePrompt.Sleep));
+        Assert.Equal(new InteractAvailable(HomeModule.InteractOwner, true), bus.Available[^1]);
+        // Beside the bed's long side too; but not 1.5 m away.
+        StandAt(bus, new Vector3(Areas.Home.MinX + 2f + 1.1f, Areas.HomeFloorY, Areas.Home.MinZ + 1f));
+        home.Tick(Step);
+        Assert.Equal(HomePrompt.Sleep, home.Prompt);
+        StandAt(bus, BySouthOfBed(1.5f));
+        home.Tick(Step);
+        Assert.Equal(HomePrompt.None, home.Prompt);
+        Assert.False(bus.Available[^1].Available);
+
+        // Not while decorating.
+        StandAt(bus, BySouthOfBed(1.0f));
+        home.StartDecorating();
+        home.Tick(Step);
+        Assert.Equal(HomePrompt.None, home.Prompt);
+
+        // The bed put away: no prompt. Other furniture there gives none either.
+        home.MovePlacedItems();
+        home.MoveCursor(2 - home.CursorColumn, -home.CursorRow);
+        Assert.True(home.PutAway());
+        home.Buy(FurnitureKind.Rug);
+        home.Buy(FurnitureKind.MushroomBed);
+        home.Back();
+        Assert.True(home.Choose(FurnitureKind.Rug));
+        home.MoveCursor(2 - home.CursorColumn, -home.CursorRow);
+        Assert.True(home.PlaceOrPickUp());
+        home.Back();
+        home.Tick(Step);
+        Assert.False(home.Decorating);
+        Assert.Equal(HomePrompt.None, home.Prompt);
+
+        // A Mushroom Bed placed elsewhere: Sleep by it.
+        home.StartDecorating();
+        Assert.True(home.Choose(FurnitureKind.MushroomBed));
+        home.MoveCursor(4 - home.CursorColumn, 6 - home.CursorRow);
+        Assert.True(home.PlaceOrPickUp()); // cells 4..6 x 6..9
+        home.Back();
+        StandAt(bus, new Vector3(Areas.Home.MinX + 2.75f, Areas.HomeFloorY, Areas.Home.MinZ + 5f + 0.8f));
+        home.Tick(Step);
+        Assert.Equal(HomePrompt.Sleep, home.Prompt);
+
+        // Not outside the house, nor while defeated.
+        StandAt(bus, new Vector3(Areas.Home.MinX + 2.75f, Areas.HomeFloorY, Areas.Home.MinZ + 5f + 0.8f), alive: false);
+        home.Tick(Step);
+        Assert.Equal(HomePrompt.None, home.Prompt);
+    }
+
+    [Fact]
+    public void InteractByTheBedPublishesSleepAndAFullHeal()
+    {
+        var (home, bus) = Started();
+        Interact(home, bus, BySouthOfBed(0.5f));
+        Assert.Equal(1, bus.Sleeps);
+        var heal = Assert.Single(bus.Heals);
+        Assert.Equal(HealPlayer.Full, heal.Amount);
+        Assert.Empty(bus.Teleports);
+        Assert.False(home.Decorating);
+        // Sleep, then the heal.
+        int sleepAt = bus.Published.IndexOf(typeof(Fungtopia.DayNight.Sleep));
+        Assert.Equal(sleepAt + 1, bus.Published.IndexOf(typeof(HealPlayer)));
+
+        // Away from the bed Interact sleeps no more.
+        Interact(home, bus, BySouthOfBed(2f));
+        Assert.Equal(1, bus.Sleeps);
+        Assert.Single(bus.Heals);
     }
 
     // The wardrobe
@@ -841,6 +1146,7 @@ public class HomeModuleTests
         home.Buy(FurnitureKind.Chair);
         Inside(home, bus);
         home.StartDecorating();
+        home.Choose(FurnitureKind.Chair);
         Assert.Equal(1, home.Held); // the chair
         home.MoveCursor(HomeRoom.WardrobeColumn + 1 - home.CursorColumn, HomeRoom.WardrobeRow - home.CursorRow);
         Assert.False(home.CanPlaceHeld);
@@ -850,8 +1156,11 @@ public class HomeModuleTests
         home.MoveCursor(0, HomeRoom.WardrobeDepth);
         Assert.True(home.PlaceOrPickUp());
         Assert.Equal(-1, home.Held);
+        home.MovePlacedItems();
         home.MoveCursor(0, -HomeRoom.WardrobeDepth);
+        Assert.Equal(-1, home.Highlighted);
         Assert.False(home.PlaceOrPickUp());
+        Assert.False(home.PutAway());
         Assert.Equal(-1, home.Held);
         Assert.Equal(2, home.ItemsPlaced);
     }
@@ -935,6 +1244,7 @@ public class HomeModuleTests
         home.Buy(FurnitureKind.Lamp);
         Inside(home, bus);
         home.StartDecorating();
+        home.Choose(FurnitureKind.Lamp);
         Assert.Equal(1, home.Held);
         WardrobeScreen(bus, open: true);
         home.Tick(Step);
@@ -1025,6 +1335,7 @@ public class HomeModuleTests
         home.Buy(FurnitureKind.Lamp);
         Inside(home, bus);
         home.StartDecorating();
+        home.Choose(FurnitureKind.Lamp);
         Assert.Equal(1, home.Held);
         StartScreen(bus, open: true);
         home.Tick(Step);
@@ -1095,6 +1406,7 @@ public class HomeModuleTests
         home.Buy(FurnitureKind.PetBed);
         Inside(home, bus);
         home.StartDecorating();
+        home.Choose(FurnitureKind.PetBed);
         home.MoveCursor(-100, -100);
         home.MoveCursor(16, 4);
         Assert.True(home.PlaceOrPickUp());
@@ -1301,15 +1613,16 @@ public class HomeModuleTests
         home.Buy(FurnitureKind.Lamp);
         Inside(home, bus);
         home.StartDecorating();
+        home.Choose(FurnitureKind.Rug);
         home.MoveCursor(-100, -100);
         home.MoveCursor(8, 2);
         Assert.True(home.PlaceOrPickUp()); // the rug
-        home.NextItem(1);
+        home.Choose(FurnitureKind.Bookshelf);
         home.MoveCursor(-100, -100);
         home.MoveCursor(0, 2);
         home.Rotate();
         Assert.True(home.PlaceOrPickUp()); // the bookshelf, a quarter turn
-        home.NextItem(1);
+        home.Choose(FurnitureKind.PetBed);
         home.MoveCursor(-100, -100);
         home.MoveCursor(16, 4);
         Assert.True(home.PlaceOrPickUp()); // the pet bed; the lamp stays in the inventory

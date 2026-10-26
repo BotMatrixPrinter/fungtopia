@@ -11,11 +11,14 @@ public static class HomeText
     /// <summary>Icons' size in pixels in the 18-pixel hint lines.</summary>
     public const int HelpIconSize = 28;
 
-    /// <summary>The Tab key's icon (the Input module has none); <c>HomePanels</c> makes it loadable.</summary>
-    public const string TabIcon = "res://modules/Home/Godot/Glyphs/key_tab.svg";
-
-    /// <summary>The R key's icon (decorating's turn on the keyboard).</summary>
+    /// <summary>The R key's icon (decorating's turn, and put away, on the keyboard).</summary>
     public const string RIcon = Prompts.GlyphDirectory + "key_r.svg";
+
+    /// <summary>The picker's last line: placement mode with nothing held.</summary>
+    public const string MovePlacedLine = "Move placed items";
+
+    /// <summary>The picker's line when every owned item stands in the house.</summary>
+    public const string EverythingPlaced = "Everything is placed";
 
     /// <summary>What a prompt does, e.g. "Enter".</summary>
     public static string PromptVerb(HomePrompt prompt) => prompt switch
@@ -28,6 +31,7 @@ public static class HomeText
         HomePrompt.TakeCat => "Take Mushroom Cat along",
         HomePrompt.TakeDog => "Take Mushroom Dog along",
         HomePrompt.TakeCrow => "Take Mushroom Crow along",
+        HomePrompt.Sleep => "Sleep",
         _ => "",
     };
 
@@ -45,17 +49,44 @@ public static class HomeText
         + $"{Prompts.Rich(Select(device), device, iconSize)} buy{Gap}"
         + $"{Prompts.Rich(PromptAction.Back, device, iconSize)} close";
 
-    /// <summary>Placement mode's hint line (BBCode) for <paramref name="device"/>; <c>HomeView</c> reads these buttons.</summary>
+    /// <summary>The decorating picker's hint line (BBCode) for <paramref name="device"/>; <c>HomeView</c> reads these buttons.</summary>
+    public static string PickerHelp(DeviceKind device, int iconSize = HelpIconSize) =>
+        $"{Icons(device, iconSize, PromptAction.MenuUp, PromptAction.MenuDown)} choose{Gap}"
+        + $"{Prompts.Rich(Select(device), device, iconSize)} take{Gap}"
+        + $"{Prompts.Rich(PromptAction.Back, device, iconSize)} done";
+
+    /// <summary>Placement mode's hint line with an item held (BBCode) for <paramref name="device"/>; <c>HomeView</c> reads these buttons.</summary>
     public static string DecorateHelp(DeviceKind device, int iconSize = HelpIconSize) =>
         $"{Prompts.Rich(PromptAction.Move, device, iconSize)} move{Gap}"
         + $"{Turn(device, iconSize)} turn{Gap}"
-        + $"{NextItem(device, iconSize)} next item{Gap}"
-        + $"{Prompts.Rich(Select(device), device, iconSize)} place / pick up{Gap}"
-        + $"{Prompts.Rich(PromptAction.Back, device, iconSize)} done";
+        + $"{Prompts.Rich(Select(device), device, iconSize)} place{Gap}"
+        + $"{Prompts.Rich(PromptAction.Back, device, iconSize)} back";
 
-    /// <summary>Placement mode's title with nothing held but unplaced items waiting (BBCode).</summary>
-    public static string PickUpTitle(DeviceKind device, int iconSize = PromptIconSize) =>
-        $"Decorating: pick something up, or {NextItem(device, iconSize)} for an item";
+    /// <summary>
+    /// Placement mode's hint line with nothing held (BBCode) for <paramref name="device"/>: over a
+    /// placed item (<paramref name="overItem"/>) also "[Interact] Pick up" and "[Put away] Put away".
+    /// </summary>
+    public static string MoveHelp(DeviceKind device, bool overItem, int iconSize = HelpIconSize) =>
+        $"{Prompts.Rich(PromptAction.Move, device, iconSize)} move{Gap}"
+        + (overItem
+            ? $"{Prompts.Rich(Select(device), device, iconSize)} Pick up{Gap}{PutAwayIcon(device, iconSize)} Put away{Gap}"
+            : "")
+        + $"{Prompts.Rich(PromptAction.Back, device, iconSize)} back";
+
+    /// <summary>
+    /// The put-away button's icon: R on the keyboard, the left face button on a gamepad (X on Xbox,
+    /// Square on PlayStation, Y on Nintendo; Godot's <c>JoyButton.X</c>).
+    /// </summary>
+    public static string PutAwayIcon(DeviceKind device, int size = HelpIconSize) => device switch
+    {
+        DeviceKind.KeyboardMouse => Image(RIcon, size),
+        DeviceKind.PlayStation => Image(Prompts.GlyphDirectory + "ps_square.svg", size),
+        DeviceKind.Nintendo => Image(Prompts.GlyphDirectory + "ns_y.svg", size),
+        _ => Image(Prompts.GlyphDirectory + "xbox_x.svg", size),
+    };
+
+    /// <summary>A line of the decorating picker, e.g. "Chair x2" (allocates: build it when the picker changes).</summary>
+    public static string PickerLine(PickerEntry entry) => $"{Furniture.Name(entry.Kind)} x{entry.Count}";
 
     // Buy / place: E on the keyboard (Interact), A / Cross / B on a gamepad (Confirm: it arrives as Interact while a panel is open; X / Square works too).
     private static PromptAction Select(DeviceKind device) =>
@@ -63,9 +94,6 @@ public static class HomeText
 
     private static string Turn(DeviceKind device, int size) =>
         device == DeviceKind.KeyboardMouse ? Image(RIcon, size) : Prompts.Rich(PromptAction.TurnRight, device, size);
-
-    private static string NextItem(DeviceKind device, int size) =>
-        device == DeviceKind.KeyboardMouse ? Image(TabIcon, size) : Prompts.Rich(PromptAction.TurnLeft, device, size);
 
     private static string Icons(DeviceKind device, int size, PromptAction first, PromptAction second) =>
         Prompts.Rich(first, device, size) + Prompts.Rich(second, device, size);

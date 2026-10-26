@@ -11,7 +11,8 @@ namespace Fungtopia.DayNight.View;
 /// clock and the palette in Core's Lighting: pink dawn, bright day, golden evening, pink-purple
 /// dusk, deep blue-purple night with a big moon, stars and soft
 /// fog. In the forest the fog thickens to a green-gold haze and the ambient drops, so cap
-/// shadows dapple the ground and glowing mushrooms read better.
+/// shadows dapple the ground and glowing mushrooms read better. While the player sleeps
+/// (<see cref="DayNightModule.Sleeping"/>) the screen fades to black and back after waking.
 /// </summary>
 public partial class DayNightView : Node3D, IModuleView
 {
@@ -32,6 +33,11 @@ public partial class DayNightView : Node3D, IModuleView
     private Godot.Environment _environment = null!;
     private DirectionalLight3D _light = null!;
     private float _forest;
+    private ColorRect _sleepFade = null!;
+    private float _sleep;
+
+    /// <summary>Seconds the sleep fade takes to darken fully, and to clear after waking (as the faint's fade).</summary>
+    private const float SleepFadeIn = 1.2f, SleepFadeOut = 2f;
 
     public void Bind(IModule module)
     {
@@ -79,10 +85,24 @@ public partial class DayNightView : Node3D, IModuleView
             ShadowBlur = 1.5f,
         };
         AddChild(_light);
+
+        // The fade to black while sleeping, over the panels (layer 11) so the bed's prompt hides too.
+        var layer = new CanvasLayer { Name = "SleepFade", Layer = 12 };
+        _sleepFade = new ColorRect { Color = new Color(0f, 0f, 0f, 0f), MouseFilter = Control.MouseFilterEnum.Ignore, Visible = false };
+        _sleepFade.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        layer.AddChild(_sleepFade);
+        AddChild(layer);
         Apply(0f);
     }
 
-    public override void _Process(double delta) => Apply((float)delta);
+    public override void _Process(double delta)
+    {
+        Apply((float)delta);
+        bool sleeping = _core?.Sleeping ?? false;
+        _sleep = Mathf.MoveToward(_sleep, sleeping ? 1f : 0f, (float)delta / (sleeping ? SleepFadeIn : SleepFadeOut));
+        _sleepFade.Visible = _sleep > 0f;
+        _sleepFade.Color = new Color(0f, 0f, 0f, 1f - (1f - _sleep) * (1f - _sleep));
+    }
 
     private void Apply(float delta)
     {

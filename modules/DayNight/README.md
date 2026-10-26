@@ -2,14 +2,15 @@
 
 The game's clock and its light. One in-game day lasts 20 real minutes, starting Day 1 at 9:00;
 night is 20:00-6:00. Fainting in a fight costs no coins: you wake up at Dr. Jeremy's clinic the
-next morning. The view owns the one sun, sky and WorldEnvironment of the whole game.
+next morning. Sleeping in a bed at home (the Home module's `Sleep`) skips to the next morning
+too, without leaving home. The view owns the one sun, sky and WorldEnvironment of the whole game.
 
 - `Contract/` — `Fungtopia.DayNight.Contract` (namespace `Fungtopia.DayNight`), see below.
 - `Core/` — `Fungtopia.DayNight.Core`: `DayNightModule`, the module's one `IModule`; `VolumetricFog`, the
   global volumetric fog settings; `Lighting` (with `Mood` and `Rgb`), the palette of the sun, sky and
   environment.
 - `Godot/` — `Main.tscn` with `DayNightView` (light, sky, environment); `Shaders/sky.gdshader`.
-- `Tests/` — `DayNightModuleTests.cs`: xUnit tests of `DayNightModule` (clock, faint and wake spot, save/restore) with a fake `IMessageBus`, of
+- `Tests/` — `DayNightModuleTests.cs`: xUnit tests of `DayNightModule` (clock, faint and wake spot, sleep, save/restore) with a fake `IMessageBus`, of
   `VolumetricFog`, and of `Lighting`'s palette (hues, saturation and fog checked at every quarter hour).
 
 Test it with `./test.sh DayNight` from the repository root.
@@ -20,10 +21,11 @@ Test it with `./test.sh DayNight` from the repository root.
 | --- | --- |
 | `TimeOfDay` | Published by DayNight once every tick: `Day` (from 1), `Hour` (float, 0 up to but never 24), `IsNight` (20:00-6:00). Constants `RealSecondsPerDay` (1200), `NightStartHour` (20), `NightEndHour` (6); `IsNightAt(hour)`. |
 | `WokeUp` | Published once when the player wakes at the clinic after fainting: `Day`, the day woken on. |
+| `Sleep` | Published by the Home module when the player sleeps in a bed (no fields): go to sleep now. |
 
 ## Core
 
-`DayNightModule` reads `Fungtopia.Player.PlayerDefeated` and `PlayerState` (only its `Area`, for
+`DayNightModule` reads `Sleep`, `Fungtopia.Player.PlayerDefeated` and `PlayerState` (only its `Area`, for
 the view) and `Fungtopia.Save.CollectSave` and `RestorePart`, and uses `Fungtopia.Map`'s `Places.ClinicDoor`, `Ground.Blocks` and `Areas.Walkable`. Each tick it adds the step to the clock
 (50 real seconds per hour; the day counts up at midnight) and publishes `TimeOfDay`.
 
@@ -42,23 +44,30 @@ and the clinic. If that spot is not free (`Areas.Walkable` with `WakeClearance` 
 `Ground.Blocks` for a 0.5 m walker), it tries the left side, then both sides again 0.5 m further
 out each time (up to 3 m more); every candidate is at least 1.2 m from Jeremy.
 
+On `Sleep` it starts a sleep (ignored while fainting or already sleeping; a `PlayerDefeated` during
+a sleep turns it into a faint): the same `FaintSeconds` (3 s) screen fade, then the same skip to the
+next morning at `WakeHour` (7:00; the same day before 7:00), but with no teleport (the player stays
+by the bed) and no `WokeUp`. `Sleeping` and `SleepProgress` (0..1 over the sleep) are for the view.
+
 Saving (`Fungtopia.Save`): on `CollectSave` it answers at once with one `SavePart` (Module
 `"DayNight"`) whose Json is compact, e.g. `{"v":1,"day":3,"hour":14.25}` (`SaveVersion` 1; the hour
 as a double, so a round trip is exact). On `RestorePart` for `"DayNight"` it sets exactly that day
-and hour and drops a faint in progress, publishing nothing (no `WokeUp`, no teleport); the next
+and hour and drops a faint or sleep in progress, publishing nothing (no `WokeUp`, no teleport); the next
 tick's `TimeOfDay` shows the restored time. Bad or empty Json, another version, day < 1 or an hour
 outside 0..24 reset the clock to its defaults (Day 1, 9:00) and write one line to `Log` (the
 console by default). `RestorePart`s for other modules are ignored.
 
 For the view and tests: `Day`, `Hour` (double), `HourF` (as published), `IsNight`, `Fainting`,
-`FaintProgress` (0..1 over the faint), `PlayerArea`, `Ticks`, `SetTime(day, hour)` and `Log`. No
+`FaintProgress` (0..1 over the faint), `Sleeping`, `SleepProgress`, `PlayerArea`, `Ticks`, `SetTime(day, hour)` and `Log`. No
 allocations per tick.
 
 ## View
 
 `DayNightView` builds a `WorldEnvironment` (sky shader, colored ambient, filmic tonemap, glow,
 fog, and a color adjustment: saturation 1.25, contrast 1.05, brightness 1.02) and one shadowed
-`DirectionalLight3D` named `Sun` in code, and each frame applies `Lighting.At(hour)`.
+`DirectionalLight3D` named `Sun` in code, and each frame applies `Lighting.At(hour)`. While
+`Sleeping` a black `ColorRect` on its own `CanvasLayer` (layer 12, over the Home prompts) fades the
+screen in over 1.2 s, and after waking out over 2 s, as the HUD does for a faint.
 
 `Lighting` is the look of a cheerful cartoon: rich, saturated, never grey or washed out. Its
 `Moods` are keyed by hour: deep blue-purple night (dim violet ambient, strong glow so glowing

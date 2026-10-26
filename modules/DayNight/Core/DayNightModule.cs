@@ -15,10 +15,12 @@ namespace Fungtopia.DayNight;
 /// (<see cref="PlayerDefeated"/>) it waits <see cref="FaintSeconds"/>, skips to the next
 /// morning at <see cref="WakeHour"/>, and sends the player to Dr. Jeremy's clinic
 /// (<see cref="TeleportPlayer"/> to <see cref="WakeSpot"/>, beside Jeremy facing the clinic) with one <see cref="WokeUp"/>.
+/// On <see cref="Sleep"/> (the player went to bed) the same fade and skip happen, without a teleport or
+/// <see cref="WokeUp"/>: the player wakes where they lay down.
 /// It saves its day and hour as one <see cref="SavePart"/> and restores them from a <see cref="RestorePart"/>.
 /// </summary>
 public sealed class DayNightModule : IModule, IMessageHandler<PlayerDefeated>, IMessageHandler<PlayerState>,
-    IMessageHandler<CollectSave>, IMessageHandler<RestorePart>
+    IMessageHandler<CollectSave>, IMessageHandler<RestorePart>, IMessageHandler<Sleep>
 {
     /// <summary>The version written in the saved JSON; other versions are not restored.</summary>
     public const int SaveVersion = 1;
@@ -29,7 +31,7 @@ public sealed class DayNightModule : IModule, IMessageHandler<PlayerDefeated>, I
     /// <summary>The hour the player wakes at the clinic after fainting.</summary>
     public const double WakeHour = 7.0;
 
-    /// <summary>Real seconds from fainting to waking (the screen fades meanwhile).</summary>
+    /// <summary>Real seconds from fainting (or going to sleep) to waking (the screen fades meanwhile).</summary>
     public const double FaintSeconds = 3.0;
 
     /// <summary>How far further out from the clinic than <see cref="Places.ClinicDoor"/> the player wakes (meters).</summary>
@@ -54,6 +56,7 @@ public sealed class DayNightModule : IModule, IMessageHandler<PlayerDefeated>, I
     private IMessageBus? _bus;
     private double _secondsIntoDay = StartHour * SecondsPerHour;
     private double _faintElapsed = -1.0;
+    private double _sleepElapsed = -1.0;
 
     /// <summary>Day number, from 1.</summary>
     public int Day { get; private set; } = 1;
@@ -72,6 +75,12 @@ public sealed class DayNightModule : IModule, IMessageHandler<PlayerDefeated>, I
     /// <summary>0 while awake; rises from 0 to 1 over the <see cref="FaintSeconds"/> of a faint.</summary>
     public float FaintProgress => Fainting ? (float)Math.Min(1.0, _faintElapsed / FaintSeconds) : 0f;
 
+    /// <summary>Whether the player went to sleep (<see cref="Sleep"/>) and is waiting for the morning.</summary>
+    public bool Sleeping => _sleepElapsed >= 0.0;
+
+    /// <summary>0 while awake; rises from 0 to 1 over the <see cref="FaintSeconds"/> of a sleep (the view's fade).</summary>
+    public float SleepProgress => Sleeping ? (float)Math.Min(1.0, _sleepElapsed / FaintSeconds) : 0f;
+
     /// <summary>The area the player was last in (from <see cref="PlayerState"/>); the view tunes its mood to it.</summary>
     public Area PlayerArea { get; private set; } = Area.Town;
 
@@ -89,6 +98,7 @@ public sealed class DayNightModule : IModule, IMessageHandler<PlayerDefeated>, I
         bus.Subscribe<PlayerState>(this);
         bus.Subscribe<CollectSave>(this);
         bus.Subscribe<RestorePart>(this);
+        bus.Subscribe<Sleep>(this);
     }
 
     /// <summary>Sets the clock (tests, screenshots). <paramref name="hour"/> wraps into 0..24.</summary>
@@ -107,6 +117,15 @@ public sealed class DayNightModule : IModule, IMessageHandler<PlayerDefeated>, I
     {
         if (!Fainting)
             _faintElapsed = 0.0;
+        // Fainting wins over a sleep in progress: the player wakes at the clinic.
+        _sleepElapsed = -1.0;
+    }
+
+    /// <summary>Goes to sleep: fades for <see cref="FaintSeconds"/>, then the next morning. Ignored while fainting or already asleep.</summary>
+    public void Handle(in Sleep message)
+    {
+        if (!Fainting && !Sleeping)
+            _sleepElapsed = 0.0;
     }
 
     public void Handle(in PlayerState message) => PlayerArea = message.Area;
@@ -122,7 +141,7 @@ public sealed class DayNightModule : IModule, IMessageHandler<PlayerDefeated>, I
 
     /// <summary>
     /// Restores the day and hour saved by <see cref="Handle(in CollectSave)"/>, quietly: nothing is
-    /// published (no <see cref="WokeUp"/>, no teleport) and a faint in progress is dropped. Bad JSON, an
+    /// published (no <see cref="WokeUp"/>, no teleport) and a faint or sleep in progress is dropped. Bad JSON, an
     /// unknown version or out-of-range values put the clock back to its defaults (Day 1, 9:00) and log one line.
     /// </summary>
     public void Handle(in RestorePart message)
@@ -130,6 +149,7 @@ public sealed class DayNightModule : IModule, IMessageHandler<PlayerDefeated>, I
         if (message.Module != SaveModules.DayNight)
             return;
         _faintElapsed = -1.0;
+        _sleepElapsed = -1.0;
         DayNightSave? save = null;
         try
         {
@@ -174,6 +194,16 @@ public sealed class DayNightModule : IModule, IMessageHandler<PlayerDefeated>, I
             if (_faintElapsed >= FaintSeconds - 1e-9)
                 WakeAtClinic();
         }
+        else if (Sleeping)
+        {
+            _sleepElapsed += step;
+            if (_sleepElapsed >= FaintSeconds - 1e-9)
+            {
+                // Waking in bed: the player stays where they are, and no WokeUp (that is the clinic's).
+                _sleepElapsed = -1.0;
+                SkipToMorning();
+            }
+        }
 
         _bus.Publish(new TimeOfDay(Day, HourF, IsNight));
     }
@@ -181,13 +211,18 @@ public sealed class DayNightModule : IModule, IMessageHandler<PlayerDefeated>, I
     private void WakeAtClinic()
     {
         _faintElapsed = -1.0;
-        // The next morning: later the same day when fainting in the small hours, else tomorrow.
-        if (Hour >= WakeHour)
-            Day++;
-        _secondsIntoDay = WakeHour * SecondsPerHour;
+        SkipToMorning();
         var wake = WakeSpot;
         _bus!.Publish(new TeleportPlayer(wake.Position, wake.Yaw));
         _bus.Publish(new WokeUp(Day));
+    }
+
+    /// <summary>The next morning at <see cref="WakeHour"/>: later the same day in the small hours, else tomorrow.</summary>
+    private void SkipToMorning()
+    {
+        if (Hour >= WakeHour)
+            Day++;
+        _secondsIntoDay = WakeHour * SecondsPerHour;
     }
 
     private static Place FindWakeSpot()

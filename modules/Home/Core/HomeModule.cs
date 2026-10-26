@@ -1,5 +1,6 @@
 using System;
 using System.Numerics;
+using Fungtopia.DayNight;
 using Fungtopia.Input;
 using Fungtopia.Map;
 using Fungtopia.Pet;
@@ -30,6 +31,16 @@ public enum HomePrompt
 
     /// <summary>Near the Mushroom Crow at home.</summary>
     TakeCrow,
+
+    /// <summary>Near a placed Basic Bed or Mushroom Bed: Interact publishes <see cref="DayNight.Sleep"/> and a full <see cref="HealPlayer"/>.</summary>
+    Sleep,
+}
+
+/// <summary>A line of decorating's picker: a kind of furniture owned and not placed, and how many of it.</summary>
+public struct PickerEntry
+{
+    public FurnitureKind Kind;
+    public int Count;
 }
 
 /// <summary>How the latest purchase went.</summary>
@@ -112,7 +123,7 @@ public struct HomePet
 /// town (bought with <see cref="SpendCoins"/>), placing furniture on the home's floor grid, and
 /// the pets that stay at home, and the wardrobe that comes with the house (Interact publishes
 /// <see cref="OpenWardrobe"/>; nothing else is usable while a wardrobe screen is open, and
-/// nothing at all while the start screen is open). Publishes <see cref="HomeState"/> every tick. Its furniture
+/// nothing at all while the start screen is open), and sleeping in a placed bed (<see cref="DayNight.Sleep"/>). Publishes <see cref="HomeState"/> every tick. Its furniture
 /// (owned and placed) is saved through the Save module: <see cref="CollectSave"/> is answered with a
 /// <see cref="SavePart"/> for <see cref="SaveModules.Home"/> and <see cref="RestorePart"/> restores it (<see cref="HomeSave"/>).
 /// </summary>
@@ -145,7 +156,7 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
     /// <summary>The <see cref="UiFocus.Owner"/> of placement mode (the decorating catalog and grid).</summary>
     public const int DecorateFocusOwner = 7461002;
 
-    /// <summary>The <see cref="InteractAvailable.Owner"/> published while a prompt shows (door, shop, decorate, wardrobe, a pet at home), so the gamepad's A uses it instead of jumping.</summary>
+    /// <summary>The <see cref="InteractAvailable.Owner"/> published while a prompt shows (door, shop, decorate, wardrobe, a pet at home, a bed), so the gamepad's A uses it instead of jumping.</summary>
     public const int InteractOwner = 7461003;
 
     private static readonly Vector3[] PetSpawns =
@@ -166,6 +177,8 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
     private uint _random = 0x9E3779B9u;
     private bool _shopFocus, _decorateFocus, _offered;
     private readonly FurnitureItem[] _restored = new FurnitureItem[MaxItems];
+    private readonly PickerEntry[] _picker = new PickerEntry[Furniture.KindCount];
+    private bool _heldFromPicker;
 
     public HomeModule()
     {
@@ -234,10 +247,26 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
 
     // Decorating
 
+    /// <summary>Decorating is open: the picker (<see cref="Picking"/>) or placement mode.</summary>
     public bool Decorating { get; private set; }
+
+    /// <summary>Decorating's picker is open (choosing what to place); otherwise, while <see cref="Decorating"/>, placement mode is.</summary>
+    public bool Picking { get; private set; }
+
+    /// <summary>The picker's lines: each kind owned and not placed, with how many, in <see cref="FurnitureKind"/> order.</summary>
+    public ReadOnlySpan<PickerEntry> PickerEntries => _picker.AsSpan(0, PickerCount);
+
+    /// <summary>How many kinds the picker lists (its last line, "Move placed items", comes after them).</summary>
+    public int PickerCount { get; private set; }
+
+    /// <summary>The picker's highlighted line: an index into <see cref="PickerEntries"/>, or <see cref="PickerCount"/> for "Move placed items".</summary>
+    public int PickerSelection { get; private set; }
 
     /// <summary>The item being moved (index into <see cref="Items"/>, not placed), or -1 when only the cursor moves.</summary>
     public int Held { get; private set; } = -1;
+
+    /// <summary>In placement mode with nothing held: the placed item under the cursor (Interact picks it up, <see cref="PutAway"/> puts it away), else -1.</summary>
+    public int Highlighted => Decorating && !Picking && Held < 0 ? ItemAt(CursorColumn, CursorRow) : -1;
 
     /// <summary>The cursor's north-west cell (the held item's footprint starts there).</summary>
     public int CursorColumn { get; private set; }
@@ -290,6 +319,8 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
             _interact = false;
             if (ShopOpen)
                 Buy();
+            else if (Decorating && Picking)
+                Choose();
             else if (Decorating)
                 PlaceOrPickUp();
             else
@@ -453,7 +484,7 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
 
     /// <summary>
     /// The view's confirm button (Enter; the gamepad's A arrives as Interact), acted on at the next tick like an Interact
-    /// press: buys in the shop, places or picks up while decorating. Nothing when no panel is open.
+    /// press: buys in the shop, chooses in the picker, places or picks up in placement mode. Nothing when no panel is open.
     /// </summary>
     public void Confirm()
     {
@@ -463,8 +494,8 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
 
     /// <summary>
     /// The Input module's paced menu step (one when a direction is first pushed, then at most one per
-    /// 0.2 s while held): moves the shop's highlight (Vertical) or the decorating cursor (both) by
-    /// one. Nothing when no panel is open.
+    /// 0.2 s while held): moves the shop's or the picker's highlight (Vertical) or the decorating
+    /// cursor (both) by one. Nothing when no panel is open.
     /// </summary>
     public void Handle(in MenuNav message)
     {
@@ -472,6 +503,11 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
         {
             if (message.Vertical != 0)
                 MoveShopSelection(message.Vertical);
+        }
+        else if (Decorating && Picking)
+        {
+            if (message.Vertical != 0)
+                MovePickerSelection(message.Vertical);
         }
         else if (Decorating && message.Any)
         {
@@ -489,6 +525,8 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
                 return HomePrompt.Decorate;
             if (Distance(p, HomeRoom.WardrobeFront) <= IndoorReach)
                 return HomePrompt.Wardrobe;
+            if (NearBed(p))
+                return HomePrompt.Sleep;
             // The nearest pet at home within reach can be taken along.
             int nearest = -1;
             float nearestDistance = IndoorReach;
@@ -508,6 +546,23 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
         if (Distance(p, Places.FurnitureShopSpot.Position) <= OutdoorReach)
             return HomePrompt.Shop;
         return HomePrompt.None;
+    }
+
+    /// <summary>Whether <paramref name="p"/> is within <see cref="IndoorReach"/> of a placed Basic Bed or Mushroom Bed's footprint.</summary>
+    private bool NearBed(Vector3 p)
+    {
+        for (int i = 0; i < ItemCount; i++)
+        {
+            ref readonly var item = ref _items[i];
+            if (!item.Placed || (item.Kind != FurnitureKind.BasicBed && item.Kind != FurnitureKind.MushroomBed))
+                continue;
+            float minX = Areas.Home.MinX + item.Column * HomeRoom.Cell, minZ = Areas.Home.MinZ + item.Row * HomeRoom.Cell;
+            float dx = MathF.Max(0f, MathF.Max(minX - p.X, p.X - (minX + item.Width * HomeRoom.Cell)));
+            float dz = MathF.Max(0f, MathF.Max(minZ - p.Z, p.Z - (minZ + item.Depth * HomeRoom.Cell)));
+            if (dx * dx + dz * dz <= IndoorReach * IndoorReach)
+                return true;
+        }
+        return false;
     }
 
     /// <summary>The prompt that takes <paramref name="kind"/> along.</summary>
@@ -546,6 +601,11 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
             case HomePrompt.TakeCrow:
                 _bus!.Publish(new SetActivePet(PetKind.Crow));
                 break;
+            case HomePrompt.Sleep:
+                // DayNight fades and skips to the morning; a night's sleep heals fully.
+                _bus!.Publish(new Sleep());
+                _bus.Publish(new HealPlayer(HealPlayer.Full));
+                break;
         }
     }
 
@@ -572,12 +632,17 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
         LastShopResult = ShopResult.None;
     }
 
-    /// <summary>Closes the shop's panel or ends decorating (the view's Back button).</summary>
+    /// <summary>
+    /// The view's Back button: closes the shop's panel; in placement mode goes back to the picker (a
+    /// held item back to the inventory); in the picker ends decorating.
+    /// </summary>
     public void Back()
     {
         ShopOpen = false;
-        if (Decorating)
+        if (Decorating && Picking)
             StopDecorating();
+        else if (Decorating)
+            OpenPicker();
     }
 
     /// <summary>Moves the shop's highlight up (-1) or down (+1), wrapping around.</summary>
@@ -618,47 +683,117 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
 
     // Decorating
 
-    /// <summary>Opens placement mode, holding the first furniture not yet placed (if any); not while a wardrobe screen or the start screen is open.</summary>
+    /// <summary>Opens decorating at its picker (not while a wardrobe screen or the start screen is open).</summary>
     public void StartDecorating()
     {
         if (WardrobeOpen || StartScreenOpen)
             return;
         Decorating = true;
-        Held = -1;
         CursorRotation = 0;
         CursorColumn = HomeRoom.Columns / 2;
         CursorRow = HomeRoom.Rows / 2 - 2;
-        NextItem(1);
+        PickerSelection = 0;
+        OpenPicker();
     }
 
-    /// <summary>Ends placement mode; a held item goes back to the inventory.</summary>
+    /// <summary>Ends decorating (picker and placement mode); a held item goes back to the inventory.</summary>
     public void StopDecorating()
     {
         Decorating = false;
+        Picking = false;
         Held = -1;
+        _heldFromPicker = false;
     }
 
-    /// <summary>Holds the next (+1) or previous (-1) furniture not yet placed instead of the held one.</summary>
-    public void NextItem(int step)
+    /// <summary>Shows the picker (a held item goes back to the inventory), its lines counted afresh.</summary>
+    private void OpenPicker()
     {
-        if (!Decorating || ItemCount == 0)
-            return;
-        int start = Held >= 0 ? Held : (step > 0 ? -1 : 0);
-        for (int k = 1; k <= ItemCount; k++)
+        Picking = true;
+        Held = -1;
+        _heldFromPicker = false;
+        PickerCount = 0;
+        for (int k = 0; k < Furniture.KindCount; k++)
         {
-            int i = ((start + step * k) % ItemCount + ItemCount) % ItemCount;
-            if (!_items[i].Placed && i != Held)
-            {
-                Hold(i, _items[i].Rotation, CursorColumn, CursorRow);
-                return;
-            }
+            int count = 0;
+            for (int i = 0; i < ItemCount; i++)
+                if (!_items[i].Placed && (int)_items[i].Kind == k)
+                    count++;
+            if (count > 0)
+                _picker[PickerCount++] = new PickerEntry { Kind = (FurnitureKind)k, Count = count };
         }
+        PickerSelection = Math.Min(PickerSelection, PickerCount);
+    }
+
+    /// <summary>Moves the picker's highlight up (-1) or down (+1) over its kinds and "Move placed items", wrapping around.</summary>
+    public void MovePickerSelection(int step)
+    {
+        if (!Decorating || !Picking)
+            return;
+        int n = PickerCount + 1;
+        PickerSelection = ((PickerSelection + step) % n + n) % n;
+    }
+
+    /// <summary>The picker's confirm: holds an item of the highlighted kind, or on "Move placed items" opens placement mode with nothing held.</summary>
+    public void Choose()
+    {
+        if (!Decorating || !Picking)
+            return;
+        if (PickerSelection < PickerCount)
+            Choose(_picker[PickerSelection].Kind);
+        else
+            MovePlacedItems();
+    }
+
+    /// <summary>Holds the first unplaced item of <paramref name="kind"/> and switches to placement mode (false when there is none).</summary>
+    public bool Choose(FurnitureKind kind)
+    {
+        if (!Decorating || !Picking)
+            return false;
+        for (int i = 0; i < ItemCount; i++)
+        {
+            if (_items[i].Placed || _items[i].Kind != kind)
+                continue;
+            Picking = false;
+            Hold(i, _items[i].Rotation, CursorColumn, CursorRow);
+            _heldFromPicker = true;
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>The picker's "Move placed items": placement mode with nothing held, to pick up or put away what stands.</summary>
+    public void MovePlacedItems()
+    {
+        if (!Decorating || !Picking)
+            return;
+        Picking = false;
+        Held = -1;
+        _heldFromPicker = false;
+        ClampCursor();
+    }
+
+    /// <summary>
+    /// In placement mode with nothing held, puts the placed item under the cursor (<see cref="Highlighted"/>)
+    /// back in the inventory: no longer placed, still owned. False when there is none.
+    /// </summary>
+    public bool PutAway()
+    {
+        int under = Highlighted;
+        if (under < 0)
+            return false;
+        ref var item = ref _items[under];
+        item.Placed = false;
+        // As saved: an unplaced item has no spot.
+        item.Column = 0;
+        item.Row = 0;
+        RebuildPetGrid();
+        return true;
     }
 
     /// <summary>Moves the cursor (and the held item) by whole cells, staying inside the room.</summary>
     public void MoveCursor(int columns, int rows)
     {
-        if (!Decorating)
+        if (!Decorating || Picking)
             return;
         CursorColumn += columns;
         CursorRow += rows;
@@ -668,7 +803,7 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
     /// <summary>Turns the held item a quarter turn.</summary>
     public void Rotate()
     {
-        if (!Decorating || Held < 0)
+        if (!Decorating || Picking || Held < 0)
             return;
         CursorRotation = (CursorRotation + 1) & 3;
         ClampCursor();
@@ -676,11 +811,12 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
 
     /// <summary>
     /// Places the held item at the cursor if it fits (true), or with nothing held picks up the
-    /// placed item under the cursor (true). False when nothing happened.
+    /// placed item under the cursor (true). False when nothing happened. Placing an item chosen in
+    /// the picker opens the picker again; placing one picked up here keeps placement mode open.
     /// </summary>
     public bool PlaceOrPickUp()
     {
-        if (!Decorating)
+        if (!Decorating || Picking)
             return false;
         if (Held >= 0)
         {
@@ -693,6 +829,8 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
             item.Rotation = CursorRotation;
             Held = -1;
             RebuildPetGrid();
+            if (_heldFromPicker)
+                OpenPicker();
             return true;
         }
         int under = ItemAt(CursorColumn, CursorRow);
@@ -700,6 +838,7 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
             return false;
         _items[under].Placed = false;
         Hold(under, _items[under].Rotation, _items[under].Column, _items[under].Row);
+        _heldFromPicker = false;
         RebuildPetGrid();
         return true;
     }

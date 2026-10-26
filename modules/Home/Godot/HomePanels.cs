@@ -6,8 +6,9 @@ namespace Fungtopia.Home.View;
 
 /// <summary>
 /// The Home module's 2D panels (a <see cref="CanvasLayer"/> on layer 11): the Interact prompt,
-/// the furniture shop's catalog (prices, the wallet's coins, the answer to the last purchase) and
-/// the decorating help with the held item's name. Rounded cream panels with an ink outline and a
+/// the furniture shop's catalog (prices, the wallet's coins, the answer to the last purchase), the
+/// decorating picker (the unplaced furniture with counts, and "Move placed items") and placement
+/// mode's title and help. Rounded cream panels with an ink outline and a
 /// pink title tab; texts change only when the Core's values do. Prompts and hint lines are
 /// RichTextLabels with the icons of the active device's buttons only, rebuilt when it changes.
 /// </summary>
@@ -27,10 +28,15 @@ public partial class HomePanels : CanvasLayer
     private RichTextLabel _decorateTitle = null!;
     private RichTextLabel _shopHelp = null!;
     private RichTextLabel _decorateHelp = null!;
+    private PanelContainer _picker = null!;
+    private readonly Label[] _pickerLines = new Label[Furniture.KindCount + 1];
+    private Label _pickerEmpty = null!;
+    private RichTextLabel _pickerHelp = null!;
 
     private HomePrompt _shownPrompt = (HomePrompt)(-1);
     private DeviceKind _shownDevice = (DeviceKind)(-1);
     private int _shownCoins = -1, _shownSelection = -1, _shownAnswer = -1, _shownHeld = -2, _shownItems = -1;
+    private int _shownHighlight = -2, _shownPicker = -1;
 
     private static Font? s_font;
 
@@ -105,7 +111,29 @@ public partial class HomePanels : CanvasLayer
         box.AddChild(_decorateHelp);
         root.AddChild(_decorate);
 
-        _prompt.Visible = _shop.Visible = _decorate.Visible = false;
+        _picker = Panel(Cream, 26);
+        _picker.SetAnchorsPreset(Control.LayoutPreset.CenterLeft);
+        _picker.GrowVertical = Control.GrowDirection.Both;
+        _picker.OffsetLeft = 60;
+        _picker.CustomMinimumSize = new Vector2(480, 0);
+        var pickerList = new VBoxContainer();
+        pickerList.AddThemeConstantOverride("separation", 6);
+        _picker.AddChild(pickerList);
+        var pickerTitle = new HBoxContainer();
+        pickerTitle.AddChild(Tab("Decorate"));
+        pickerList.AddChild(pickerTitle);
+        _pickerEmpty = Text(HomeText.EverythingPlaced, 22, new Color(0.45f, 0.3f, 0.5f));
+        pickerList.AddChild(_pickerEmpty);
+        for (int i = 0; i < _pickerLines.Length; i++)
+        {
+            _pickerLines[i] = Text("", 26, Ink);
+            pickerList.AddChild(_pickerLines[i]);
+        }
+        _pickerHelp = Rich(18, new Color(0.5f, 0.4f, 0.42f));
+        pickerList.AddChild(_pickerHelp);
+        root.AddChild(_picker);
+
+        _prompt.Visible = _shop.Visible = _decorate.Visible = _picker.Visible = false;
     }
 
     public void Refresh(HomeModule home)
@@ -114,7 +142,7 @@ public partial class HomePanels : CanvasLayer
         {
             _shownDevice = home.Device;
             SetRich(_shopHelp, HomeText.ShopHelp(home.Device));
-            SetRich(_decorateHelp, HomeText.DecorateHelp(home.Device));
+            SetRich(_pickerHelp, HomeText.PickerHelp(home.Device));
             _shownPrompt = (HomePrompt)(-1);
             _shownHeld = -2;
         }
@@ -155,23 +183,49 @@ public partial class HomePanels : CanvasLayer
             }
         }
 
-        _decorate.Visible = home.Decorating;
-        if (home.Decorating && (home.Held != _shownHeld || home.ItemCount != _shownItems))
+        _picker.Visible = home.Decorating && home.Picking;
+        if (_picker.Visible)
+        {
+            // The picker's lines change when the highlight, the furniture owned or what stands do.
+            int key = home.PickerSelection + 100 * (home.PickerCount + 100 * (home.ItemCount + 100 * home.ItemsPlaced));
+            if (key != _shownPicker)
+            {
+                _shownPicker = key;
+                var entries = home.PickerEntries;
+                _pickerEmpty.Visible = entries.Length == 0;
+                for (int i = 0; i < _pickerLines.Length; i++)
+                {
+                    var line = _pickerLines[i];
+                    line.Visible = i <= entries.Length;
+                    if (!line.Visible)
+                        continue;
+                    bool selected = i == home.PickerSelection;
+                    line.Text = (selected ? "▶ " : "   ") + (i < entries.Length ? HomeText.PickerLine(entries[i]) : HomeText.MovePlacedLine);
+                    line.AddThemeColorOverride("font_color", selected ? new Color(0.85f, 0.3f, 0.42f) : Ink);
+                }
+            }
+        }
+        else
+        {
+            _shownPicker = -1;
+        }
+
+        _decorate.Visible = home.Decorating && !home.Picking;
+        if (_decorate.Visible && (home.Held != _shownHeld || home.Highlighted != _shownHighlight || home.ItemCount != _shownItems))
         {
             _shownHeld = home.Held;
+            _shownHighlight = home.Highlighted;
             _shownItems = home.ItemCount;
+            var items = home.Items;
             SetRich(_decorateTitle, home.Held >= 0
-                ? $"Decorating: {Furniture.Name(home.Items[home.Held].Kind)}"
-                : HasUnplaced(home) ? HomeText.PickUpTitle(home.Device) : "Decorating: buy more furniture at the shop in town!");
+                ? $"Decorating: {Furniture.Name(items[home.Held].Kind)}"
+                : home.Highlighted >= 0 ? $"Decorating: {Furniture.Name(items[home.Highlighted].Kind)}" : "Decorating: move placed items");
+            SetRich(_decorateHelp, home.Held >= 0 ? HomeText.DecorateHelp(home.Device) : HomeText.MoveHelp(home.Device, home.Highlighted >= 0));
         }
-    }
-
-    private static bool HasUnplaced(HomeModule home)
-    {
-        foreach (var item in home.Items)
-            if (!item.Placed)
-                return true;
-        return false;
+        else if (!_decorate.Visible)
+        {
+            _shownHeld = -2;
+        }
     }
 
     private static PanelContainer Panel(Color fill, int padding)

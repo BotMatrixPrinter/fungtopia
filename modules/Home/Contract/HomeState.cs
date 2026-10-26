@@ -9,7 +9,7 @@ public readonly struct HomeState
     /// <summary>Pieces of furniture standing in the house.</summary>
     public readonly int ItemsPlaced;
 
-    /// <summary>The player is arranging furniture (placement mode).</summary>
+    /// <summary>The player is arranging furniture (the decorating picker or placement mode is open).</summary>
     public readonly bool Decorating;
 
     public HomeState(int itemsOwned, int itemsPlaced, bool decorating)

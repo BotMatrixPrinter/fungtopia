@@ -606,6 +606,101 @@ public class DayNightModuleTests
         Assert.Equal(_bus.Times[^1].Hour, otherBus.Times[^1].Hour);
     }
 
+    // ---- Sleeping ----
+
+    private void GoToSleep() => _bus.Publish(new Sleep());
+
+    [Fact]
+    public void SleepFadesForThreeSecondsThenSkipsToSevenTheNextDayWithoutTeleportOrWokeUp()
+    {
+        _clock.SetTime(2, 21.0);
+        Ticks(1);
+        GoToSleep();
+        Assert.True(_clock.Sleeping);
+        Assert.False(_clock.Fainting);
+        Seconds(1.5);
+        Assert.Equal(0.5f, _clock.SleepProgress, 2);
+        Ticks(3 * TicksPerSecond / 2 - 1);
+        Assert.True(_clock.Sleeping);
+        Assert.True(_clock.SleepProgress > 0.99f);
+        Assert.Equal(2, Last.Day);
+
+        Ticks(1);
+        Assert.False(_clock.Sleeping);
+        Assert.Equal(0f, _clock.SleepProgress);
+        Assert.Equal(3, Last.Day);
+        Assert.Equal(7f, Last.Hour, 3);
+        Assert.False(Last.IsNight);
+        // The player stays by the bed: no teleport, and no WokeUp (that is waking at the clinic).
+        Assert.Empty(_bus.Teleports);
+        Assert.Empty(_bus.Wakes);
+        Assert.DoesNotContain(typeof(TeleportPlayer), _bus.Published);
+        Assert.DoesNotContain(typeof(WokeUp), _bus.Published);
+
+        // Then the clock runs on from the morning.
+        Seconds(50);
+        Assert.Equal(8f, Last.Hour, 2);
+    }
+
+    [Fact]
+    public void SleepingInTheSmallHoursWakesThatSameMorning()
+    {
+        _clock.SetTime(4, 2.0);
+        GoToSleep();
+        Seconds(3);
+        Assert.False(_clock.Sleeping);
+        Assert.Equal(4, Last.Day);
+        Assert.Equal(7f, Last.Hour, 3);
+        Assert.Empty(_bus.Teleports);
+    }
+
+    [Fact]
+    public void SleepIsIgnoredWhileFaintingOrAlreadySleeping()
+    {
+        _clock.SetTime(1, 15.0);
+        GoToSleep();
+        Seconds(2);
+        GoToSleep(); // a second Sleep does not start the fade over
+        Seconds(1);
+        Assert.False(_clock.Sleeping);
+        Assert.Equal(2, Last.Day);
+        Assert.Equal(7f, Last.Hour, 2);
+
+        // While fainting, Sleep changes nothing: the faint still wakes at the clinic.
+        _clock.SetTime(2, 15.0);
+        Faint();
+        Ticks(30);
+        GoToSleep();
+        Assert.False(_clock.Sleeping);
+        Seconds(3);
+        Assert.Single(_bus.Teleports);
+        Assert.Equal(3, Assert.Single(_bus.Wakes).Day);
+        Assert.False(_clock.Sleeping);
+        Assert.Equal(3, Last.Day);
+    }
+
+    [Fact]
+    public void RestoringDropsASleepInProgress()
+    {
+        var (other, otherBus, _) = Fresh();
+        _clock.SetTime(5, 21.5);
+        var saved = Save();
+
+        other.SetTime(2, 10.0);
+        otherBus.Publish(new Sleep());
+        Assert.True(other.Sleeping);
+        otherBus.Published.Clear();
+        otherBus.Publish(new RestorePart(saved.Module, saved.Json));
+        Assert.Equal(new[] { typeof(RestorePart) }, otherBus.Published);
+        Assert.False(other.Sleeping);
+        for (int i = 0; i < 5 * TicksPerSecond; i++)
+            other.Tick(new TickContext(i, Step));
+        // No morning skip: the restored evening just runs on.
+        Assert.Equal(5, otherBus.Times[^1].Day);
+        Assert.True(otherBus.Times[^1].Hour > 21.5f);
+        Assert.Empty(otherBus.Teleports);
+    }
+
     [Fact]
     public void RestoringPublishesNothingAndDropsAFaint()
     {

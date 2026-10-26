@@ -16,8 +16,8 @@ namespace Fungtopia.Home.View;
 /// bus that also answers purchases like the wallet, buys a room full of furniture, places it,
 /// and keeps the Cat and the Dog at home (the Crow is out). The room's walls and floor are a simple
 /// backdrop (the Map module draws the real ones), its south wall left out so the camera can look
-/// in. The environment variable HOME_PREVIEW = "decorate" shows placement mode with an item held,
-/// "shop" the furniture shop's catalog, "wardrobe" the player by the wardrobe (its prompt showing);
+/// in. The environment variable HOME_PREVIEW = "decorate" shows placement mode with an item held, "picker"
+/// decorating's picker, "shop" the furniture shop's catalog, "wardrobe" the player by the wardrobe (its prompt showing);
 /// HOME_PREVIEW_DEVICE = "xbox", "playstation", "nintendo" or "generic" shows that pad's buttons
 /// (keyboard and mouse otherwise).
 /// </summary>
@@ -89,7 +89,16 @@ public partial class HomePreview : Node3D
         {
             _home.Buy(FurnitureKind.Bookshelf);
             _home.StartDecorating();
+            _home.Choose(FurnitureKind.Bookshelf);
             _home.MoveCursor(4, 2);
+        }
+        if (_mode == "picker")
+        {
+            _home.Buy(FurnitureKind.Chair);
+            _home.Buy(FurnitureKind.Chair);
+            _home.Buy(FurnitureKind.Lamp);
+            _home.StartDecorating();
+            _home.MovePickerSelection(1);
         }
         if (_mode == "wardrobe")
         {
@@ -105,8 +114,7 @@ public partial class HomePreview : Node3D
     {
         _home.Buy(kind);
         _home.StartDecorating();
-        while (_home.Held >= 0 && _home.Items[_home.Held].Kind != kind)
-            _home.NextItem(1);
+        _home.Choose(kind);
         _home.MoveCursor(column - _home.CursorColumn, row - _home.CursorRow);
         for (int r = 0; r < rotation; r++)
             _home.Rotate();
@@ -118,10 +126,11 @@ public partial class HomePreview : Node3D
 
     private void Furnish()
     {
-        // Swap the basic bed for a mushroom bed.
+        // Swap the basic bed for a mushroom bed: put it away.
         _home.StartDecorating();
+        _home.MovePlacedItems();
         _home.MoveCursor(2 - _home.CursorColumn, -_home.CursorRow);
-        _home.PlaceOrPickUp();
+        _home.PutAway();
         _home.StopDecorating();
         Place(FurnitureKind.MushroomBed, 2, 0, 0);
         Place(FurnitureKind.Lamp, 5, 0, 0);

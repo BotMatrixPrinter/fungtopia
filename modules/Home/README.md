@@ -1,7 +1,7 @@
 # Home module
 
 The player's house in Mushroom Town: the front door (in and out by teleporting), the furniture
-shop in town, arranging furniture on the home's floor grid, the pets that stay at home, and the
+shop in town, arranging furniture on the home's floor grid, sleeping in a bed, the pets that stay at home, and the
 wardrobe (the Wardrobe module's screen for changing your look). The house starts cozy but sparse:
 a basic bed under the round window and a big wooden wardrobe in the north-east corner (the room,
 its windows and its door are drawn by the Map module). The furniture is saved with the game
@@ -11,8 +11,8 @@ through the Save module (see **Saving** below).
 - `Core/` — `Fungtopia.Home.Core`: `HomeModule`, the module's one `IModule`; `Furniture` (the
   catalog), `HomeRoom` (the floor grid), `HomeText` (the texts, and the prompts and hint lines as RichTextLabel BBCode with button icons per device), `HomeSave` (the saved furniture's JSON).
 - `Godot/` — `Main.tscn` with `HomeView` (furniture, the catalog book, pets at home, the grid and
-  cursor while decorating), `HomePanels` (prompt, shop catalog and decorating help, a
-  `CanvasLayer` on layer 11); `Glyphs/key_tab.svg` (the Tab key's icon, which the Input module lacks), `HomePetModel`, `HomeModels` (loads .glb models at run time, toon
+  cursor while decorating), `HomePanels` (prompt, shop catalog, decorating picker and decorating help, a
+  `CanvasLayer` on layer 11); `HomePetModel`, `HomeModels` (loads .glb models at run time, toon
   materials), `HomeLook` (each material's glow, gloss and rim, plain C#); `Preview.tscn` (a decorated room, for screenshots); `Shaders/` (toon surface, ink
   outline, floor grid).
 - `Models/` — `furniture.py`, the Blender script that builds and exports `furniture.glb` next to it.
@@ -26,14 +26,14 @@ Test it with `./test.sh Home` from the repository root.
 
 | Message | Who publishes it | What it is |
 | --- | --- | --- |
-| `HomeState` | Home, once every tick | `ItemsOwned` (furniture owned, placed or not, the starting bed included), `ItemsPlaced` (standing in the house), `Decorating` (placement mode is open). |
+| `HomeState` | Home, once every tick | `ItemsOwned` (furniture owned, placed or not, the starting bed included), `ItemsPlaced` (standing in the house), `Decorating` (decorating is open: the picker or placement mode). |
 
 ## Core
 
 `HomeModule` reads `Fungtopia.Player.PlayerState`, `Fungtopia.Input.PlayerInput` (`Interact`), `Fungtopia.Input.MenuNav` (menu steps), `Fungtopia.Input.ActiveDevice` (`Device`, for the prompts),
 `Fungtopia.Wallet.WalletState` and `SpendResult`, `Fungtopia.Pet.OwnedPets`,
 `Fungtopia.Wardrobe.WardrobeState`, `Fungtopia.StartScreen.StartScreenState` and `Fungtopia.Save.CollectSave` and
-`RestorePart`; it publishes `Fungtopia.Save.SavePart`, `Fungtopia.Player.TeleportPlayer`,
+`RestorePart`; it publishes `Fungtopia.Save.SavePart`, `Fungtopia.Player.TeleportPlayer`, `Fungtopia.Player.HealPlayer`, `Fungtopia.DayNight.Sleep`,
 `Fungtopia.Wallet.SpendCoins`, `Fungtopia.Wardrobe.OpenWardrobe`, `Fungtopia.Pet.SetActivePet`, `Fungtopia.Input.UiFocus`, `Fungtopia.Input.InteractAvailable` and `HomeState`, and takes the
 world's spots from the Map Contract (`Places`, `Areas`). An Interact press is acted on at the
 next tick, for whatever `Prompt` shows then (only while the player is alive, and never while
@@ -54,31 +54,50 @@ the start screen is open, below):
   when its `SpendResult` is `Ok` the item goes into the inventory (owned, not placed);
   `LastShopResult` is `Bought`, `TooFewCoins` or `Full` (64 items at most).
 - **Smart A.** While a prompt shows (`Prompt` is not `None`: the door outside or inside, the shop,
-  decorating, the wardrobe or a pet at home) the module holds `Fungtopia.Input.InteractAvailable(InteractOwner,
+  decorating, the wardrobe, a bed or a pet at home) the module holds `Fungtopia.Input.InteractAvailable(InteractOwner,
   true)` (7461003), published on the tick the prompt appears and released (false) on the tick it
   goes, so the gamepad's A button interacts there instead of jumping.
-- **Menus and UiFocus.** The shop's panel (`ShopFocusOwner`) and placement mode
-  (`DecorateFocusOwner`) each publish `UiFocus(owner, true)` at the tick they open and
+- **Menus and UiFocus.** The shop's panel (`ShopFocusOwner`) and decorating (`DecorateFocusOwner`,
+  held from opening the picker until decorating closes, through placement mode and back) each publish `UiFocus(owner, true)` at the tick they open and
   `UiFocus(owner, false)` at the tick they close, however they close (Back, walking away, leaving
   the house, fainting, a wardrobe screen or the start screen), so the Input module stops walking,
   looking, jumping and firing while one is open. Selections move only on the Input module's
   `MenuNav` steps (one when a direction is first pushed, then at most one per 0.2 s while held,
-  from the left stick, D-pad, arrow keys and WASD alike): in the shop each `Vertical` step moves
-  the highlight one line (wrapping), while decorating each step moves the cursor one cell; with no
+  from the left stick, D-pad, arrow keys and WASD alike): in the shop and the decorating picker each
+  `Vertical` step moves the highlight one line (wrapping), in placement mode each step moves the cursor one cell; with no
   panel open they do nothing. The module reads no stick or keys of its own for this. `Confirm()` (Enter; a gamepad's A arrives as Interact)
   acts like an Interact press at the next tick, only while a panel is open.
 - **Catalog.** `Furniture.ForSale`, prices in M¢: Mushroom Bed 300, Rug 120, Lamp 150, Table 200,
   Chair 100, Potted Mushroom 80, Painting (on an easel) 250, Pet Bed 180, Bookshelf 220,
   Toadstool Stool 90. The Basic Bed comes with the house and is not sold.
 - **Decorating.** Inside, within 1.2 m of the little catalog book on its stand (south wall, east
-  of the door, `HomeRoom.BookPosition`): "[Interact] Decorate" opens placement mode. It holds the
-  first owned item not yet placed (`Held`); `NextItem` holds the next one, `MoveCursor` moves it
-  on the 0.5 m floor grid (24 x 20 cells over `Areas.Home`, staying inside), `Rotate` turns it a
-  quarter turn (odd turns swap its footprint), and Interact (`PlaceOrPickUp`) places it if it
-  fits, or with nothing held picks up the placed item under the cursor. An item fits
-  (`CanPlace`) only inside the room, off the door's way in (2 m wide, from the door to 0.5 m past
-  `HomeInterior`), off the catalog book's stand, and overlapping no other furniture (rugs
-  included). Back, leaving the house or fainting ends it; a held item goes back to the inventory.
+  of the door, `HomeRoom.BookPosition`): "[Interact] Decorate" opens decorating at its **picker**
+  (`Picking`): a list of the owned furniture not yet placed, one line per kind with how many
+  (`PickerEntries`, `PickerEntry` `Kind` and `Count`, in `FurnitureKind` order; `HomeText.PickerLine`,
+  e.g. "Chair x2"), then a last line "Move placed items" (`PickerSelection == PickerCount`); with
+  nothing to place the list says "Everything is placed" above that line. `MenuNav` moves the
+  highlight (`MovePickerSelection`), and Interact / Confirm (`Choose()`) holds the first unplaced
+  item of the highlighted kind (`Held`; `Choose(kind)` does it directly) and switches to
+  **placement mode**, or on "Move placed items" (`MovePlacedItems`) opens placement mode with
+  nothing held. There `MoveCursor` moves on the 0.5 m floor grid (24 x 20 cells over `Areas.Home`,
+  staying inside), `Rotate` turns the held item a quarter turn (odd turns swap its footprint), and
+  Interact (`PlaceOrPickUp`) places it if it fits, or with nothing held picks up the placed item
+  under the cursor (`Highlighted`) to move it. Placing an item chosen in the picker opens the
+  picker again; placing one picked up in placement mode stays there with nothing held. An item
+  fits (`CanPlace`) only inside the room, off the door's way in (2 m wide, from the door to 0.5 m
+  past `HomeInterior`), off the catalog book's stand, and overlapping no other furniture (rugs
+  included). Back in placement mode returns to the picker (a held item goes back to the
+  inventory); Back in the picker closes decorating. Leaving the house or fainting ends it too.
+- **Putting away.** In placement mode with nothing held, the placed item under the cursor
+  (`Highlighted`) can be put away (`PutAway`, the view's R key or the gamepad's left face button):
+  it goes back to the inventory, no longer placed (saved as `"p":false`), still owned, and counted
+  again in the picker. The Basic Bed can be put away too. (The gamepad button also arrives as
+  Interact from the Input module, after the view's put away: on the now empty cell it does nothing.)
+- **Sleeping.** Inside, within 1.2 m of the footprint of a placed Basic Bed or Mushroom Bed (and no
+  door, catalog book or wardrobe prompt there): "[Interact] Sleep" publishes
+  `Fungtopia.DayNight.Sleep` (the DayNight module fades the screen and skips to 7:00 the next
+  morning; the player stays by the bed) and `HealPlayer(HealPlayer.Full)`. Like every prompt, not
+  while decorating, in the shop or a wardrobe screen, on the start screen or while defeated.
 - **Wardrobe.** A big wooden wardrobe stands in the house from the start, against the north wall
   in the north-east corner (`HomeRoom.WardrobeColumn`/`WardrobeRow`, 3 x 2 cells, doors facing
   into the room). It is not furniture: not in `Items`, never moved or picked up, and no furniture
@@ -121,8 +140,11 @@ Pet Bed 2 x 2, Bookshelf 3 x 1, the rest 1 x 1. No allocations per tick.
 `HomeView` draws the wardrobe and each placed item from `furniture.glb` at its footprint's center, turned by its
 rotation, toon-shaded (`HomeLook`): mushroom caps (`Cap`, `CapPink`, `CapGlow`, the pets' mushroom
 hats included) get a small soft white specular band and a brighter rim light (0.6, everything else
-0.3); the lamp's `Glow` bulb glows at 2.4 (twice its old 1.2) and its `CapGlow` cap at 0.5; while decorating it shows a soft grid over the floor and the held item floating at the
-cursor over a green (fits) or red (does not) footprint. The pets at home use the Pet module's
+0.3); the lamp's `Glow` bulb glows at 2.4 (twice its old 1.2) and its `CapGlow` cap at 0.5; in placement mode it shows a soft grid over the floor and the held item floating at the
+cursor over a green (fits) or red (does not) footprint, or with nothing held the footprint of the
+placed item under the cursor in yellow (`Highlighted`). `HomePanels` shows the picker as a list
+panel on the left, like the shop's, with the hint line under it, and placement mode's title (the
+held or highlighted item's name) and hint line at the top. The pets at home use the Pet module's
 models (`modules/Pet/Models/*.glb`, loaded read-only at run time; nothing shows if they are
 missing) with their own simple animation: a bouncy walk, hops while playing, curled up with
 floating "z z" while napping. Buttons for the panels, read by the view (Interact comes from the
@@ -131,21 +153,24 @@ Input module):
 | Action | Keyboard | Gamepad |
 | --- | --- | --- |
 | Shop: choose | Up / Down, W / S (`MenuNav`) | D-pad up / down, left stick (`MenuNav`) |
+| Decorating picker: choose | Up / Down, W / S (`MenuNav`) | D-pad up / down, left stick (`MenuNav`) |
 | Decorating: move | Arrow keys, WASD (`MenuNav`) | D-pad, left stick (`MenuNav`) |
-| Decorating: turn | R | RB |
-| Decorating: next item | Tab | LB |
-| Buy / place / pick up | E or Enter | A / Cross (through Interact; X / Square works too) |
+| Decorating: turn (an item held) | R | RB |
+| Decorating: put away (nothing held) | R | X / Square / Nintendo Y (the left face button) |
+| Buy / take / place / pick up | E or Enter | A / Cross (through Interact; X / Square works too) |
 | Close / done | Q or Esc | B / Circle |
 
 **Prompts.** Every prompt and hint shows only the buttons of the device used last
 (`HomeModule.Device`, the latest `ActiveDevice`), as icons in `RichTextLabel`s, rebuilt the moment
 it changes. `HomeText.Prompt(prompt, device)` is the Interact icon (`Prompts.Rich`) and the verb
 ("[E key] Enter", "[A] Enter" on Xbox and Generic pads, "[Cross] Enter" on PlayStation, "[B] Enter"
-on Nintendo); `HomeText.ShopHelp(device)` and `DecorateHelp(device)` the hint lines and
-`PickUpTitle(device)` decorating's "pick something up" title. On the keyboard they show Up / Down
-(choose), WASD (move), R (turn), Tab (next item), E (buy / place) and Esc (close / done); on a
-gamepad D-pad Up / Down, the left stick, RB, LB, Confirm (A / Cross / B) and Back (B / Circle / A),
-each family's own icons. Icon sizes are parameters (`PromptIconSize` 40 next to 30 px text,
+on Nintendo); `HomeText.ShopHelp(device)`, `PickerHelp(device)` (choose, take, done),
+`DecorateHelp(device)` (an item held: move, turn, place, back) and `MoveHelp(device, overItem)`
+(nothing held: move, back, and over a placed item "[Interact] Pick up" and "[Put away] Put away",
+`PutAwayIcon(device)`) the hint lines. On the keyboard they show Up / Down (choose), WASD (move),
+R (turn, put away), E (buy / take / place / pick up) and Esc (close / back); on a gamepad D-pad Up
+/ Down, the left stick, RB, X / Square / Y (put away), Confirm (A / Cross / B) and Back (B / Circle
+/ A), each family's own icons. Icon sizes are parameters (`PromptIconSize` 40 next to 30 px text,
 `HelpIconSize` 28 in the 18 px hints); the labels fit their content, so the panels grow with the
 icons. `HomePanels` makes each icon it shows loadable when Godot has not imported it (as the Input
 view does for its own), so the preview works without the Input module. E, X / Square and A / Cross
@@ -177,7 +202,7 @@ knobs and handle `Knob`, the catalog's cover `BookCover` (0.98, 0.6, 0.68) and r
 
 `./screenshot.sh modules/Home/Godot/Preview.tscn` shows a decorated room (the Cat napping on the
 pet bed, the Dog about); `HOME_PREVIEW=decorate` shows placement mode with an item held,
-`HOME_PREVIEW=shop` the furniture shop's catalog, `HOME_PREVIEW=wardrobe` the wardrobe with its
+`HOME_PREVIEW=picker` the decorating picker, `HOME_PREVIEW=shop` the furniture shop's catalog, `HOME_PREVIEW=wardrobe` the wardrobe with its
 prompt. `HOME_PREVIEW_DEVICE=xbox` (or `playstation`, `nintendo`, `generic`) shows that pad's
 buttons instead of the keyboard's, e.g. `HOME_PREVIEW=shop HOME_PREVIEW_DEVICE=playstation
 ./screenshot.sh modules/Home/Godot/Preview.tscn`.

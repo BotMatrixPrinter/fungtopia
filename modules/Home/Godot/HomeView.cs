@@ -8,9 +8,10 @@ namespace Fungtopia.Home.View;
 
 /// <summary>
 /// Draws the home from the Home Core: the furniture placed in the house, the catalog book on its
-/// stand, the wardrobe, the pets at home (wandering, napping, playing), and while decorating the floor grid,
-/// the held item at the cursor over a green (fits) or red (does not) footprint. Its
-/// <see cref="HomePanels"/> show the prompts, the shop's catalog and the decorating help. Reads
+/// stand, the wardrobe, the pets at home (wandering, napping, playing), and in placement mode the floor grid,
+/// the held item at the cursor over a green (fits) or red (does not) footprint, or with nothing held
+/// the placed item under the cursor highlighted. Its <see cref="HomePanels"/> show the prompts, the
+/// shop's catalog, the decorating picker and the decorating help. Reads
 /// the shop's and decorating's own buttons and hands them to the Core (Interact comes through
 /// the Input module).
 /// </summary>
@@ -102,13 +103,13 @@ public partial class HomeView : Node3D, IModuleView
             var node = Furniture(i, items[i].Kind);
             if (node == null)
                 continue;
-            bool held = _home.Decorating && _home.Held == i;
+            bool held = _home.Decorating && !_home.Picking && _home.Held == i;
             node.Visible = items[i].Placed || held;
             if (items[i].Placed)
                 node.Transform = Pose(items[i].Center, items[i].Yaw, 0f);
         }
 
-        bool decorating = _home.Decorating;
+        bool decorating = _home.Decorating && !_home.Picking;
         _grid.Visible = decorating;
         _footprint.Visible = decorating;
         if (decorating)
@@ -146,8 +147,19 @@ public partial class HomeView : Node3D, IModuleView
         }
         else
         {
-            bool over = _home.ItemAt(_home.CursorColumn, _home.CursorRow) >= 0;
-            _footprintMaterial.AlbedoColor = over ? new Color(1f, 0.85f, 0.3f, 0.55f) : new Color(1f, 1f, 1f, 0.35f);
+            // The placed item under the cursor is highlighted: its whole footprint glows yellow.
+            int over = _home.Highlighted;
+            if (over >= 0)
+            {
+                var item = items[over];
+                (w, d) = (item.Width, item.Depth);
+                var c0 = HomeRoom.CellsCenter(item.Column, item.Row, w, d);
+                _footprint.Transform = new Transform3D(Basis.FromScale(new Vector3(w * HomeRoom.Cell, 1f, d * HomeRoom.Cell)),
+                    new Vector3(c0.X, c0.Y + 0.02f, c0.Z));
+                _footprintMaterial.AlbedoColor = new Color(1f, 0.85f, 0.3f, 0.55f);
+                return;
+            }
+            _footprintMaterial.AlbedoColor = new Color(1f, 1f, 1f, 0.35f);
         }
         var c = HomeRoom.CellsCenter(_home.CursorColumn, _home.CursorRow, w, d);
         _footprint.Transform = new Transform3D(Basis.FromScale(new Vector3(w * HomeRoom.Cell, 1f, d * HomeRoom.Cell)),
@@ -181,10 +193,12 @@ public partial class HomeView : Node3D, IModuleView
             _home.Back();
         else if (e is InputEventKey && (Pressed(e, Key.Enter, JoyButton.A) || Pressed(e, Key.KpEnter, JoyButton.A)))
             _home.Confirm();
-        else if (_home.Decorating && Pressed(e, Key.R, JoyButton.RightShoulder))
+        else if (_home.Decorating && _home.Held >= 0 && Pressed(e, Key.R, JoyButton.RightShoulder))
             _home.Rotate();
-        else if (_home.Decorating && Pressed(e, Key.Tab, JoyButton.LeftShoulder))
-            _home.NextItem(1);
+        // Put away: R with nothing held, or the gamepad's left face button (X / Square / Nintendo Y). That
+        // button also arrives as Interact, but only after this, on a cell now empty: it picks nothing up.
+        else if (_home.Decorating && _home.Held < 0 && Pressed(e, Key.R, JoyButton.X))
+            _home.PutAway();
     }
 
     private static bool Pressed(InputEvent e, Key key, JoyButton button) => e switch
