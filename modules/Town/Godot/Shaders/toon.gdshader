@@ -1,4 +1,4 @@
-// The town's toon surface: soft two-band light, a gentle rim, optional glow (lamps, windows) and,
+// The town's toon surface: richer colors, soft two-band light, a gentle rim, optional glow (lamps, windows) and,
 // on mushroom caps, a soft glossy band and a light rim along the edge.
 shader_type spatial;
 render_mode specular_disabled;
@@ -9,10 +9,14 @@ uniform float self_light = 0.0;
 // Mushroom caps only (0 elsewhere): the small specular band and the light rim.
 uniform float gloss = 0.0;
 uniform float rim_light = 0.0;
+// Richer colors (TownLook.Vividness): saturation pushed away from grey, whites and greys unchanged.
+uniform float vivid = 1.0;
 
 void fragment() {
-	ALBEDO = albedo;
-	EMISSION = albedo * self_light;
+	float grey = dot(albedo, vec3(0.2126, 0.7152, 0.0722));
+	vec3 color = clamp(mix(vec3(grey), albedo, vivid), 0.0, 1.0);
+	ALBEDO = color;
+	EMISSION = color * self_light;
 }
 
 void light() {

@@ -27,6 +27,8 @@ public enum TownPiece
     Crate,
     /// <summary>The "Mushroom Munchies" food stall on the square (the Map's <see cref="BuildingKind.FoodStall"/>).</summary>
     FoodStall,
+    /// <summary>A small garden mushroom or fungus (free ground decoration, walked over); its <see cref="TownPlacement.Variant"/> is its <see cref="MushroomKind"/>.</summary>
+    Mushroom,
 }
 
 /// <summary>
@@ -34,7 +36,9 @@ public enum TownPiece
 /// by <see cref="Yaw"/> (radians about +Y; at 0 its front faces -Z), sized
 /// <see cref="Width"/> (local X) by <see cref="Depth"/> (local Z) by <see cref="Height"/>.
 /// A building of the Map Contract keeps its index in <see cref="Buildings.All"/>, a solid prop its
-/// index in <see cref="Props.All"/>; free decoration has neither.
+/// index in <see cref="Props.All"/>; free decoration has neither. A garden mushroom leans by
+/// <see cref="Tilt"/> (radians about its local X, after the yaw) and belongs to group
+/// <see cref="Group"/> (a single, pair or cluster growing together; -1 for anything else).
 /// </summary>
 public readonly struct TownPlacement
 {
@@ -50,9 +54,13 @@ public readonly struct TownPlacement
     public readonly int BuildingIndex;
     /// <summary>Index in <see cref="Props.All"/>, or -1.</summary>
     public readonly int PropIndex;
+    public readonly float Tilt;
+    public readonly int Group;
 
-    public TownPlacement(TownPiece piece, int variant, float x, float z, float yaw, float width, float depth, float height, int buildingIndex, int propIndex = -1)
+    public TownPlacement(TownPiece piece, int variant, float x, float z, float yaw, float width, float depth, float height, int buildingIndex, int propIndex = -1, float tilt = 0f, int group = -1)
     {
+        Tilt = tilt;
+        Group = group;
         Piece = piece;
         Variant = variant;
         X = x;
@@ -83,6 +91,9 @@ public static class TownLayout
 {
     /// <summary>Plain houses come in this many looks (cap colors, doors).</summary>
     public const int HouseVariants = 4;
+
+    /// <summary>Flower clumps come in this many palettes (Flowers0..3); neighbors differ.</summary>
+    public const int FlowerVariants = 4;
 
     /// <summary>Free decoration stays at most this tall and this wide (meters); anything bigger is a Map prop.</summary>
     public const float DecorationMaxHeight = 0.4f;
@@ -195,7 +206,7 @@ public static class TownLayout
     }
 
     /// <summary>
-    /// Whether a flower clump of <paramref name="radius"/> at (x, z) is on walkable town ground,
+    /// Whether a flower clump or mushroom of <paramref name="radius"/> at (x, z) is on walkable town ground,
     /// off every obstacle (buildings and props), the dirt paths and the named spots.
     /// </summary>
     public static bool FlowersFit(float x, float z, float radius)
@@ -220,6 +231,16 @@ public static class TownLayout
         return MathF.Sqrt(dx * dx + dz * dz);
     }
 
+    /// <summary>Whether a placement of <paramref name="piece"/> and <paramref name="variant"/> after index <paramref name="from"/> stands within <paramref name="distance"/> of (x, z).</summary>
+    private static bool NearSame(List<TownPlacement> list, int from, TownPiece piece, int variant, float x, float z, float distance)
+    {
+        for (int k = from; k < list.Count; k++)
+            if (list[k].Piece == piece && list[k].Variant == variant
+                && Vector2.Distance(new Vector2(x, z), new Vector2(list[k].X, list[k].Z)) < distance)
+                return true;
+        return false;
+    }
+
     private static TownPlacement[] Build()
     {
         var list = new List<TownPlacement>();
@@ -242,16 +263,57 @@ public static class TownLayout
                 list.Add(ForProp(props[i], piece, i));
         int decoration = list.Count;
 
+        bool Free(float x, float z, float radius, int from)
+        {
+            if (!FlowersFit(x, z, radius))
+                return false;
+            for (int k = decoration; k < from; k++)
+                if (Vector2.Distance(new Vector2(x, z), new Vector2(list[k].X, list[k].Z)) < radius + list[k].Radius)
+                    return false;
+            return true;
+        }
+
         bool Add(float x, float z, float yaw)
         {
             float radius = MathF.Max(FlowersSize.X, FlowersSize.Z) * 0.5f;
-            if (!FlowersFit(x, z, radius))
+            if (!Free(x, z, radius, list.Count))
                 return false;
-            for (int k = decoration; k < list.Count; k++)
-                if (Vector2.Distance(new Vector2(x, z), new Vector2(list[k].X, list[k].Z)) < radius + list[k].Radius)
-                    return false;
-            list.Add(new TownPlacement(TownPiece.Flowers, 0, x, z, yaw, FlowersSize.X, FlowersSize.Z, FlowersSize.Y, -1));
+            // Its palette from the spot's seed, unlike the nearest clumps'.
+            int variant = (int)(TownMushrooms.Seed(x, z) % FlowerVariants);
+            for (int tries = 0; tries < FlowerVariants && NearSame(list, decoration, TownPiece.Flowers, variant, x, z, 1.6f); tries++)
+                variant = (variant + 1) % FlowerVariants;
+            list.Add(new TownPlacement(TownPiece.Flowers, variant, x, z, yaw, FlowersSize.X, FlowersSize.Z, FlowersSize.Y, -1));
             return true;
+        }
+
+        int groups = 0;
+        // A group of garden mushrooms rooted at (x, z): its kind from the spot's seed, unlike any
+        // group within NeighborDistance; all its members must fit, or none is placed.
+        void AddMushrooms(float x, float z)
+        {
+            uint seed = TownMushrooms.Seed(x, z);
+            int kind = (int)(seed % (uint)TownMushrooms.KindCount);
+            int tries = 0;
+            while (NearSame(list, decoration, TownPiece.Mushroom, kind, x, z, TownMushrooms.NeighborDistance + 2f * TownMushrooms.GroupRadius))
+            {
+                if (++tries == TownMushrooms.KindCount)
+                    return;
+                kind = (kind + TownMushrooms.KindStep) % TownMushrooms.KindCount;
+            }
+            var k = (MushroomKind)kind;
+            int count = TownMushrooms.GroupSize(k, seed);
+            int start = list.Count;
+            for (int m = 0; m < count; m++)
+            {
+                var (mx, mz, yaw, tilt, width, height) = TownMushrooms.Member(k, seed, m, count, x, z);
+                if (!Free(mx, mz, width * 0.5f, start))
+                {
+                    list.RemoveRange(start, list.Count - start);
+                    return;
+                }
+                list.Add(new TownPlacement(TownPiece.Mushroom, kind, mx, mz, yaw, width, width, height, -1, -1, tilt, groups));
+            }
+            groups++;
         }
 
         // Flower clumps along each building's front, either side of the door.
@@ -276,6 +338,48 @@ public static class TownLayout
             float angle = a * MathF.Tau / 40f + 0.04f;
             float r = a % 2 == 0 ? 16.5f : 19.5f;
             Add(square.X + MathF.Sin(angle) * r, square.Y + MathF.Cos(angle) * r, angle * 3f);
+        }
+
+        // Garden mushrooms: round each building's walls (outside its footprint), along the fences,
+        // by the lamps and planters, and in the gaps round the square.
+        for (int i = 0; i < buildings; i++)
+        {
+            var p = list[i];
+            float gap = p.Piece == TownPiece.Fountain ? 0.9f : 0.75f;
+            int around = 6 + (int)((p.Width + p.Depth) * 0.6f);
+            for (int a = 0; a < around; a++)
+            {
+                float angle = (a + 0.37f) * MathF.Tau / around;
+                float c = MathF.Cos(angle), sn = MathF.Sin(angle), m = MathF.Max(MathF.Abs(c), MathF.Abs(sn));
+                var b = all[p.BuildingIndex];
+                var w = b.ToWorld(c / m * (p.Width * 0.5f + gap), sn / m * (p.Depth * 0.5f + gap));
+                AddMushrooms(w.X, w.Y);
+            }
+        }
+        for (int i = buildings; i < decoration; i++)
+        {
+            var p = list[i];
+            var prop = props[p.PropIndex];
+            if (p.Piece == TownPiece.Fence)
+            {
+                // One group each side, at different ends.
+                foreach (float side in Sides)
+                    AddMushrooms(p.X + prop.Along.X * side * p.Width * 0.3f + prop.Front.X * side * 0.75f,
+                                 p.Z + prop.Along.Y * side * p.Width * 0.3f + prop.Front.Y * side * 0.75f);
+            }
+            else if (p.Piece is TownPiece.StreetLamp or TownPiece.Planter)
+            {
+                for (int a = 0; a < 2; a++)
+                {
+                    float angle = a * MathF.PI + p.Yaw + 0.5f;
+                    AddMushrooms(p.X + MathF.Sin(angle) * (p.Radius + 0.7f), p.Z + MathF.Cos(angle) * (p.Radius + 0.7f));
+                }
+            }
+        }
+        for (int a = 0; a < 30; a++)
+        {
+            float angle = (a + 0.5f) * MathF.Tau / 30f + 0.04f;
+            AddMushrooms(square.X + MathF.Sin(angle) * 18f, square.Y + MathF.Cos(angle) * 18f);
         }
 
         return list.ToArray();

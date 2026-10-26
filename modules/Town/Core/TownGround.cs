@@ -43,7 +43,7 @@ public static class TownGround
     /// <summary>Meters the base goes below the lowest ground under the footprint.</summary>
     public const float Sink = 0.15f;
 
-    /// <summary>A flower clump sinks only this much (it has no stem to hide).</summary>
+    /// <summary>A flower clump or garden mushroom sinks only this much (it is small, with no tall stem to hide).</summary>
     public const float FlowersSink = 0.05f;
 
     /// <summary>Points on the footprint's edge (an ellipse, or a rectangle for boxy pieces).</summary>
@@ -65,7 +65,7 @@ public static class TownGround
             or TownPiece.ClothingShop or TownPiece.Fountain or TownPiece.StreetLamp or TownPiece.Planter;
 
     /// <summary>The sink of a piece below its lowest ground.</summary>
-    public static float SinkOf(TownPiece piece) => piece == TownPiece.Flowers ? FlowersSink : Sink;
+    public static float SinkOf(TownPiece piece) => piece is TownPiece.Flowers or TownPiece.Mushroom ? FlowersSink : Sink;
 
     /// <summary>
     /// Footprint point <paramref name="k"/> (0 .. <see cref="FootprintPoints"/> - 1) of a piece of

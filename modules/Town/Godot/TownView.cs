@@ -9,8 +9,8 @@ namespace Fungtopia.Town.View;
 /// <summary>
 /// Draws Mushroom Town from <see cref="TownLayout"/>: each Town building of the Map exactly where
 /// the Map puts it, the Map's street lamps, benches, fences, planters and crates exactly where and as
-/// large as the Map says, and small flower clumps, all from town.glb. The
-/// street lamps' bulbs and every window light up while <see cref="TownModule.LampsLit"/> (night),
+/// large as the Map says, and small flower clumps and garden mushrooms (each leaning by its tilt), all from town.glb. The
+/// street lamps' bulbs, the glowing mushrooms and every window light up while <see cref="TownModule.LampsLit"/> (night),
 /// fading over a second or two, each lamp (and the food stall's lanterns) with a warm light of its own. Nothing else moves.
 /// The town's song plays on loop at <see cref="TownModule.MusicLevel"/> (paused while it is 0).
 /// </summary>
@@ -38,11 +38,11 @@ public partial class TownView : Node3D, IModuleView
             var node = TownModels.Instance(ModelName(p));
             if (node == null)
                 continue;
-            var model = ModelSize(p.Piece);
+            var model = ModelSize(p);
             node.Name = $"{ModelName(p)}_{GetChildCount()}";
             var fit = TownGround.Fit(p);
             node.Position = new Vector3(p.X, fit.Base, p.Z);
-            node.Rotation = new Vector3(0f, p.Yaw, 0f);
+            node.Rotation = new Vector3(p.Tilt, p.Yaw, 0f);
             node.Scale = new Vector3(p.Width / model.X, fit.DrawnHeight / model.Y, p.Depth / model.Z);
             AddChild(node);
             if (TownGround.HasRootFlare(p.Piece))
@@ -107,7 +107,8 @@ public partial class TownView : Node3D, IModuleView
     {
         _lit = lit;
         // How bright bulbs, glowing caps and windows glow, day to night: TownLook.
-        TownModels.Glow?.SetShaderParameter("self_light", TownLook.GlowAt(lit));
+        foreach (var glow in TownModels.Glowing())
+            glow.SetShaderParameter("self_light", TownLook.GlowAt(lit));
         TownModels.Window?.SetShaderParameter("self_light", TownLook.WindowGlowAt(lit));
         foreach (var light in _lights)
         {
@@ -117,11 +118,16 @@ public partial class TownView : Node3D, IModuleView
     }
 
     /// <summary>The object of town.glb a placement draws.</summary>
-    public static string ModelName(in TownPlacement p) =>
-        p.Piece == TownPiece.House ? $"House{p.Variant}" : p.Piece.ToString();
+    public static string ModelName(in TownPlacement p) => p.Piece switch
+    {
+        TownPiece.House => $"House{p.Variant}",
+        TownPiece.Flowers => $"Flowers{p.Variant}",
+        TownPiece.Mushroom => TownMushrooms.ModelName((MushroomKind)p.Variant),
+        _ => p.Piece.ToString(),
+    };
 
     /// <summary>The size (width, height, depth) each object is modelled at in town.py.</summary>
-    private static Vector3 ModelSize(TownPiece piece) => piece switch
+    private static Vector3 ModelSize(in TownPlacement p) => p.Piece switch
     {
         TownPiece.PlayerHouse => new(12f, 10f, 12f),
         TownPiece.MillieHouse => new(10f, 8f, 10f),
@@ -137,10 +143,13 @@ public partial class TownView : Node3D, IModuleView
         TownPiece.Planter => new(1.2f, 0.7f, 1.2f),
         TownPiece.Crate => new(0.71f, 0.8f, 0.71f),
         TownPiece.Flowers => Size(TownLayout.FlowersSize),
-        _ => throw new ArgumentOutOfRangeException(nameof(piece)),
+        TownPiece.Mushroom => MushroomSize(TownMushrooms.Shape((MushroomKind)p.Variant)),
+        _ => throw new ArgumentOutOfRangeException(nameof(p)),
     };
 
     private static Vector3 Size(System.Numerics.Vector3 v) => new(v.X, v.Y, v.Z);
+
+    private static Vector3 MushroomSize(in MushroomShape s) => new(s.ModelWidth, s.ModelHeight, s.ModelWidth);
 
     /// <summary>
     /// A stone skirt round the foot of a big stem, foundation or basin: as wide as its foot at the

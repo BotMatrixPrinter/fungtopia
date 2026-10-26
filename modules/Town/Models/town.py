@@ -5,7 +5,8 @@
 # One object per Fungtopia.Town TownPiece: PlayerHouse (12 x 12 m, 10 m tall), MillieHouse
 # (10 x 10 x 8), Clinic (12 x 10 x 8.5), FurnitureShop (7 x 4 x 3.5), Fountain (7 x 7 x 2.2),
 # House0..House3 (9 x 9 x 7, four looks), ClothingShop (10 x 9 x 8), FoodStall (4.2 x 2.4 x 3), StreetLamp, Bench, Fence (one 3.5 m segment),
-# Planter, Crate and Flowers (a small clump): each the size of its footprint in the Map Contract, standing on the ground at the
+# Planter, Crate, Flowers0..3 (a small clump, four palettes) and Mushroom<Kind> (the fourteen garden
+# mushrooms of TownMushrooms): each the size of its footprint in the Map Contract (or the Core's), standing on the ground at the
 # origin (a little foundation below it, for uneven ground), its front (door, counter, seat)
 # toward Blender +Y (Godot -Z, a building's front at rotation 0). Chunky and cute; no eyes or
 # faces on anything (only creatures have them). Materials carry plain colors only; the game draws
@@ -16,68 +17,90 @@ import os
 
 import bmesh
 import bpy
-from mathutils import Matrix
+from mathutils import Matrix, Vector
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
+# Vibrant, like a cheerful cartoon: lush bright greens with yellow-green highlights, warm golden
+# wood, clean bright stone, candy-bright paints and flowers in many hues; never washed-out white
+# nor neon (every paint keeps some depth so the ink-outlined toon shading still reads).
 COLORS = {
     "Wall": (1.0, 0.95, 0.84),
     "WallWhite": (0.97, 0.97, 0.95),
-    "Stone": (0.72, 0.7, 0.66),
-    "StoneDark": (0.56, 0.54, 0.52),
-    "Wood": (0.72, 0.46, 0.28),
-    "WoodDark": (0.5, 0.3, 0.18),
+    "Stone": (0.84, 0.81, 0.76),
+    "StoneDark": (0.66, 0.62, 0.6),
+    "Wood": (0.88, 0.54, 0.24),
+    "WoodDark": (0.56, 0.28, 0.12),
     "Cap": (0.97, 0.1, 0.1),
     "CapPink": (1.0, 0.36, 0.64),
-    "CapPinkInner": (1.0, 0.82, 0.86),
+    "CapPinkInner": (1.0, 0.78, 0.86),
     "CapWhite": (1.0, 1.0, 1.0),
     "CapOrange": (1.0, 0.46, 0.06),
     "CapLilac": (0.68, 0.34, 1.0),
     "CapBlue": (0.18, 0.52, 1.0),
     "CapYellow": (1.0, 0.8, 0.08),
-    "Gills": (0.96, 0.86, 0.7),
+    "Gills": (1.0, 0.9, 0.72),
     "Spots": (1.0, 1.0, 1.0),
     "SpotsPale": (0.92, 0.9, 0.94),
-    "Cross": (0.92, 0.18, 0.2),
-    "DoorRed": (0.82, 0.32, 0.26),
-    "DoorBlue": (0.44, 0.6, 0.86),
-    "DoorGreen": (0.44, 0.7, 0.44),
-    "Knob": (1.0, 0.82, 0.36),
-    "Window": (1.0, 0.86, 0.5),
-    "Mat": (0.86, 0.58, 0.32),
-    "MatStripe": (0.98, 0.84, 0.5),
-    "Awning": (0.98, 0.5, 0.58),
-    "AwningCream": (1.0, 0.95, 0.86),
-    "Cushion": (0.66, 0.78, 0.98),
+    "Cross": (0.96, 0.14, 0.18),
+    "DoorRed": (1.0, 0.3, 0.32),
+    "DoorBlue": (0.26, 0.6, 1.0),
+    "DoorGreen": (0.28, 0.95, 0.4),
+    "Knob": (1.0, 0.8, 0.2),
+    "Window": (1.0, 0.86, 0.42),
+    "Mat": (1.0, 0.56, 0.24),
+    "MatStripe": (1.0, 0.88, 0.36),
+    "Awning": (1.0, 0.36, 0.54),
+    "AwningCream": (1.0, 0.95, 0.84),
+    "Cushion": (0.4, 0.7, 1.0),
     "Glow": (1.0, 0.88, 0.5),
-    "Metal": (0.3, 0.32, 0.38),
-    "Water": (0.46, 0.8, 0.98),
-    "Picket": (1.0, 0.97, 0.9),
-    "Soil": (0.4, 0.27, 0.18),
-    "Leaf": (0.42, 0.74, 0.36),
-    "PetalPink": (1.0, 0.6, 0.72),
-    "PetalYellow": (1.0, 0.86, 0.32),
-    "PetalBlue": (0.56, 0.7, 1.0),
+    "Metal": (0.16, 0.4, 0.42),
+    "Water": (0.3, 0.8, 1.0),
+    "Picket": (1.0, 0.98, 0.92),
+    "Soil": (0.58, 0.34, 0.16),
+    "Leaf": (0.26, 0.8, 0.2),
+    "LeafLight": (0.66, 0.95, 0.16),
+    "PetalPink": (1.0, 0.42, 0.7),
+    "PetalYellow": (1.0, 0.86, 0.12),
+    "PetalBlue": (0.3, 0.58, 1.0),
     "PetalWhite": (1.0, 1.0, 0.97),
+    "PetalPurple": (0.68, 0.34, 1.0),
+    "PetalOrange": (1.0, 0.52, 0.1),
+    "PetalRed": (1.0, 0.18, 0.28),
     "Soot": (0.24, 0.2, 0.22),
     "CapMint": (0.26, 0.96, 0.72),
-    "WallPink": (1.0, 0.88, 0.88),
-    "DoorLilac": (0.76, 0.62, 0.92),
+    "WallPink": (1.0, 0.8, 0.86),
+    "DoorLilac": (0.72, 0.4, 1.0),
     "Display": (1.0, 0.95, 0.97),
-    "SignText": (0.62, 0.24, 0.46),
-    "Hanger": (0.86, 0.68, 0.36),
-    "Basket": (0.84, 0.64, 0.38),
-    "Muffin": (0.74, 0.47, 0.26),
-    "Berry": (0.56, 0.2, 0.52),
-    "Soup": (0.96, 0.62, 0.26),
-    "Pie": (0.92, 0.72, 0.42),
+    "SignText": (0.7, 0.16, 0.5),
+    "Hanger": (0.96, 0.7, 0.28),
+    "Basket": (0.94, 0.66, 0.3),
+    "Muffin": (0.84, 0.48, 0.2),
+    "Berry": (0.66, 0.14, 0.6),
+    "Soup": (1.0, 0.6, 0.16),
+    "Pie": (0.98, 0.74, 0.36),
     "Steam": (0.97, 0.97, 1.0),
-    # Things that are not mushrooms but once shared the caps' colors (cushions, outfits, jars).
-    "FabricPink": (0.98, 0.62, 0.74),
-    "FabricYellow": (0.98, 0.8, 0.3),
-    "FabricBlue": (0.42, 0.66, 0.94),
-    "FabricOrange": (0.98, 0.56, 0.24),
+    "FabricPink": (1.0, 0.42, 0.68),
+    "FabricYellow": (1.0, 0.82, 0.2),
+    "FabricBlue": (0.3, 0.62, 1.0),
+    "FabricOrange": (1.0, 0.54, 0.16),
     "Jar": (0.99, 0.98, 0.96),
+    # The garden mushrooms and fungi (vivid caps, as every mushroom), and their details.
+    "CapBrown": (0.96, 0.58, 0.3),
+    "CapGold": (1.0, 0.74, 0.08),
+    "CapTan": (1.0, 0.7, 0.36),
+    "CapMorel": (0.98, 0.66, 0.28),
+    "CapAmethyst": (0.74, 0.3, 1.0),
+    "CapScarlet": (1.0, 0.1, 0.18),
+    "CapCoral": (1.0, 0.36, 0.5),
+    "CapJelly": (1.0, 0.62, 0.04),
+    "CapBracket": (1.0, 0.55, 0.12),
+    "CapGlowBlue": (0.18, 0.72, 1.0),
+    "CapGlowGreen": (0.32, 1.0, 0.5),
+    "Scales": (0.72, 0.38, 0.16),
+    "Ink": (0.3, 0.24, 0.4),
+    "MorelPit": (0.62, 0.34, 0.12),
+    "CupInner": (0.86, 0.04, 0.14),
 }
 ORDER = list(COLORS)
 
@@ -222,10 +245,10 @@ def on_wall(rx, ry, angle, z, out=0.0):
     return T(math.sin(a) * (rx + out), math.cos(a) * (ry + out), z) @ R("Z", -angle) @ R("X", -90)
 
 
-def round_window(piece, rx, ry, angle, z, radius=0.55):
+def round_window(piece, rx, ry, angle, z, radius=0.55, frame="Wood"):
     m = on_wall(rx, ry, angle, z, out=0.02)
     piece.add(cylinder(radius, 0.16, m, segments=24), "Window")
-    piece.add(torus(radius + 0.05, 0.1, m @ T(0, 0, 0.06), segments=24, sides=8), "Wood")
+    piece.add(torus(radius + 0.05, 0.1, m @ T(0, 0, 0.06), segments=24, sides=8), frame)
     piece.add(box((0.08, radius * 2, 0.06), m @ T(0, 0, 0.09), bevel=0.02), "Wood")
     piece.add(box((radius * 2, 0.08, 0.06), m @ T(0, 0, 0.09), bevel=0.02), "Wood")
 
@@ -265,6 +288,14 @@ def mushroom_house(name, width, depth, height, cap_mat, spot_mat="Spots", wall_m
     p.add(cylinder(1.0, 0.3, T(0, 0, base) @ S(capx * 0.97, capy * 0.97, 1), segments=40), "Gills")
     p.add(dome(1.0, 1.0, T(0, 0, base) @ S(capx, capy, cap_h), segments=40, rings=16), cap_mat)
     cap_spots(p, capx, capy, cap_h, base, spots, min(capx, capy) * 0.16, spot_mat, seed=0.4)
+    # Shelf fungi growing on the stem and small mushrooms of many kinds on the foundation, round
+    # the sides and back (each house its own mix).
+    seed = sum(map(ord, name))
+    for k, angle in enumerate((70, -68, 160)):
+        bracket_fungi(p, rx, ry, wall, angle + seed % 9, wall * (0.2 + 0.1 * k), 0.5 - 0.06 * k)
+    kinds = [kind for kind, _, _, _ in MUSHROOMS]
+    picks = [(72 + seed % 9, 1.6), (96, 1.1), (-78 - seed % 7, 1.4), (-104, 0.95), (150, 1.3), (178, 1.0), (-160, 1.5)]
+    foot_mushrooms(p, rx, ry, [(angle, kinds[(seed + 5 * i) % len(kinds)], scale) for i, (angle, scale) in enumerate(picks)])
     return p, rx, ry, wall, (capx, capy, base, cap_h)
 
 
@@ -298,7 +329,287 @@ def flower(piece, matrix, petal, scale=1.0):
         piece.add(sphere(0.06 * scale, top @ T(math.cos(a) * 0.07 * scale, math.sin(a) * 0.07 * scale, 0),
                          scale=(1, 1, 0.5), segments=10, rings=5), petal)
     piece.add(sphere(0.045 * scale, top @ T(0, 0, 0.02 * scale), segments=10, rings=5), "PetalYellow" if petal != "PetalYellow" else "PetalWhite")
-    piece.add(sphere(0.06 * scale, matrix @ T(0.05 * scale, 0, 0.12 * scale) @ R("Y", 50), scale=(1.4, 0.6, 0.3), segments=10, rings=5), "Leaf")
+    piece.add(sphere(0.06 * scale, matrix @ T(0.05 * scale, 0, 0.12 * scale) @ R("Y", 50), scale=(1.4, 0.6, 0.3), segments=10, rings=5), "LeafLight")
+
+
+# ---- Garden mushrooms and fungi: cartoon-simple, cute, no faces ----
+# One object per Fungtopia.Town MushroomKind (Mushroom<Kind>), normalized to the size TownMushrooms
+# says (width across x and y, height to its top), so the game scales each instance from there.
+# The same builders put small mushrooms on the houses' foundations and in the planters.
+
+
+def lathe(profile, matrix, segments=20, wave=0.0, waves=5, mat=None):
+    """A closed surface of revolution about +Z through `profile`, a list of (radius, z) from the
+    top center round to the bottom center (each end on the axis). `wave` ripples it (wavy caps)."""
+    part = bmesh.new()
+    rmax = max(r for r, _ in profile) or 1.0
+    rings = []
+    for r, z in profile:
+        if r <= 0.0:
+            rings.append([part.verts.new((0.0, 0.0, z))])
+            continue
+        k = r / rmax
+        ring = []
+        for j in range(segments):
+            a = 2 * math.pi * j / segments
+            rr = r * (1 + wave * k * math.sin(waves * a))
+            zz = z + wave * k * k * rmax * 0.5 * math.cos(waves * a)
+            ring.append(part.verts.new((rr * math.cos(a), rr * math.sin(a), zz)))
+        rings.append(ring)
+    for a, b in zip(rings, rings[1:]):
+        for j in range(segments):
+            if len(a) == 1 and len(b) == 1:
+                continue
+            if len(a) == 1:
+                part.faces.new((a[0], b[j], b[(j + 1) % segments]))
+            elif len(b) == 1:
+                part.faces.new((a[j], b[0], a[(j + 1) % segments]))
+            else:
+                part.faces.new((a[j], b[j], b[(j + 1) % segments], a[(j + 1) % segments]))
+    bmesh.ops.recalc_face_normals(part, faces=list(part.faces))
+    bmesh.ops.transform(part, matrix=matrix, verts=part.verts)
+    return part
+
+
+def radius_at(profile, z):
+    """The outermost radius of a lathe profile at height z (for things sitting on its surface)."""
+    best = 0.0
+    for (r0, z0), (r1, z1) in zip(profile, profile[1:]):
+        if min(z0, z1) <= z <= max(z0, z1) and z0 != z1:
+            best = max(best, r0 + (r1 - r0) * (z - z0) / (z1 - z0))
+    return best
+
+
+def rod(piece, a, b, radius, mat, matrix=Matrix(), radius2=None, segments=8):
+    """A round rod from point a to point b (3D, in `matrix`'s space)."""
+    a, b = Vector(a), Vector(b)
+    d = b - a
+    rot = Vector((0, 0, 1)).rotation_difference(d).to_matrix().to_4x4()
+    m = matrix @ Matrix.Translation((a + b) / 2) @ rot
+    piece.add(cylinder(radius, d.length, m, segments=segments, radius2=radius2), mat)
+
+
+def dome_spots(piece, matrix, radius, height, count, size, mat="Spots", seed=0.0):
+    """Crisp round spots on a dome cap of `radius` x `height` whose base is at `matrix`."""
+    for i in range(count):
+        a = 2 * math.pi * i / count + seed
+        t = 0.66 if i % 2 == 0 else 0.32
+        sn = math.sqrt(1 - t * t)
+        tilt = math.degrees(math.acos(t))
+        r = size * (1.0 if i % 3 else 0.7)
+        rot = R("Z", math.degrees(a) - 90) @ R("X", -tilt)
+        piece.add(sphere(r, matrix @ T(math.cos(a) * sn * radius, math.sin(a) * sn * radius, t * height) @ rot,
+                         scale=(1, 1, 0.32), segments=10, rings=5), mat)
+    piece.add(sphere(size * 1.1, matrix @ T(0, 0, height), scale=(1, 1, 0.3), segments=10, rings=5), mat)
+
+
+def stem(piece, matrix, radius, height, foot=1.2, mat="Wall"):
+    piece.add(lathe([(0, height), (radius * 0.9, height), (radius, height * 0.5), (radius * foot, height * 0.08),
+                     (radius * foot * 0.9, 0), (0, 0)], matrix, segments=14), mat)
+
+
+def fly_agaric(p, m):
+    stem(p, m, 0.045, 0.2)
+    p.add(torus(0.05, 0.012, m @ T(0, 0, 0.15), segments=16, sides=6), "Wall")
+    p.add(cylinder(0.135, 0.02, m @ T(0, 0, 0.185), segments=20), "Gills")
+    p.add(dome(0.15, 0.12, m @ T(0, 0, 0.18), segments=22, rings=8), "Cap")
+    dome_spots(p, m @ T(0, 0, 0.18), 0.15, 0.12, 7, 0.026, seed=0.3)
+
+
+def porcini(p, m):
+    p.add(lathe([(0, 0.15), (0.06, 0.15), (0.085, 0.1), (0.095, 0.05), (0.075, 0.0), (0, 0)], m, segments=16), "Wall")
+    p.add(cylinder(0.14, 0.03, m @ T(0, 0, 0.145), segments=22), "Gills")
+    p.add(lathe([(0, 0.26), (0.07, 0.25), (0.13, 0.21), (0.152, 0.17), (0.14, 0.14), (0.06, 0.135), (0, 0.135)],
+                m, segments=22), "CapBrown")
+
+
+def chanterelle(p, m):
+    stem(p, m, 0.028, 0.07, foot=1.1)
+    p.add(lathe([(0, 0.18), (0.04, 0.19), (0.08, 0.205), (0.11, 0.22), (0.112, 0.208), (0.09, 0.18),
+                 (0.05, 0.12), (0.03, 0.06), (0, 0.06)], m, segments=24, wave=0.1, waves=6), "CapGold")
+
+
+PARASOL = [(0, 0.38), (0.03, 0.372), (0.1, 0.35), (0.17, 0.318), (0.18, 0.306), (0.16, 0.3), (0.05, 0.31), (0, 0.31)]
+
+
+def parasol(p, m):
+    p.add(sphere(0.034, m @ T(0, 0, 0.022), scale=(1, 1, 0.75), segments=12, rings=6), "Wall")
+    rod(p, (0, 0, 0.02), (0, 0, 0.32), 0.016, "Wall", m, radius2=0.012)
+    p.add(torus(0.024, 0.008, m @ T(0, 0, 0.23), segments=14, sides=6), "Wall")
+    p.add(cylinder(0.16, 0.012, m @ T(0, 0, 0.305), segments=22), "Gills")
+    p.add(lathe(PARASOL, m, segments=24), "CapTan")
+    p.add(sphere(0.03, m @ T(0, 0, 0.375), scale=(1, 1, 0.45), segments=10, rings=5), "Scales")
+    for ring, (rad, n) in enumerate(((0.07, 6), (0.12, 9), (0.155, 12))):
+        z = 0.38 - (0.38 - 0.318) * (rad / 0.17) ** 1.4
+        for k in range(n):
+            a = 2 * math.pi * (k + 0.5 * ring) / n
+            p.add(sphere(0.011, m @ T(math.cos(a) * rad, math.sin(a) * rad, z + 0.003), scale=(1.2, 1, 0.35), segments=8, rings=4), "Scales")
+
+
+INKCAP = [(0, 0.34), (0.03, 0.335), (0.058, 0.3), (0.074, 0.22), (0.075, 0.13), (0.08, 0.075), (0.06, 0.08),
+          (0.02, 0.1), (0, 0.1)]
+
+
+def ink_cap(p, m):
+    stem(p, m, 0.024, 0.11)
+    p.add(lathe(INKCAP, m, segments=22, wave=0.04, waves=9), "CapWhite")
+    p.add(torus(0.076, 0.011, m @ T(0, 0, 0.078), segments=20, sides=6), "Ink")
+    for row, z in enumerate((0.15, 0.2, 0.25, 0.29)):
+        r = radius_at(INKCAP, z)
+        for k in range(7):
+            a = 2 * math.pi * (k + 0.5 * row) / 7
+            p.add(sphere(0.012, m @ T(math.cos(a) * r, math.sin(a) * r, z) @ R("Z", math.degrees(a)), scale=(0.5, 1, 1.4), segments=8, rings=4), "Gills")
+
+
+MOREL = [(0, 0.26), (0.02, 0.252), (0.044, 0.21), (0.056, 0.15), (0.052, 0.1), (0.036, 0.075), (0, 0.075)]
+
+
+def morel(p, m):
+    stem(p, m, 0.032, 0.09, foot=1.15)
+    p.add(lathe(MOREL, m, segments=18), "CapMorel")
+    for row in range(6):
+        z = 0.095 + row * 0.027
+        r = radius_at(MOREL, z)
+        n = max(4, int(r * 130))
+        for k in range(n):
+            a = 2 * math.pi * (k + 0.5 * (row % 2)) / n
+            p.add(sphere(0.014, m @ T(math.cos(a) * (r - 0.004), math.sin(a) * (r - 0.004), z) @ R("Z", math.degrees(a)), scale=(0.3, 1, 1.25), segments=8, rings=4), "MorelPit")
+
+
+def enoki(p, m):
+    p.add(sphere(0.05, m @ T(0, 0, 0.012), scale=(1, 1, 0.45), segments=14, rings=6), "Wall")
+    for k in range(8):
+        a = 2 * math.pi * k / 8 + 0.3 * (k % 2)
+        spread = 0.035 + 0.045 * ((k * 5) % 3) / 2
+        top = (math.cos(a) * spread, math.sin(a) * spread, 0.2 + 0.08 * ((k * 3) % 5) / 4)
+        rod(p, (math.cos(a) * 0.012, math.sin(a) * 0.012, 0.01), top, 0.0085, "Wall", m, segments=6)
+        p.add(dome(0.022, 0.016, m @ T(*top), segments=12, rings=5), "CapWhite")
+
+
+AMETHYST = [(0, 0.2), (0.04, 0.196), (0.08, 0.175), (0.104, 0.14), (0.11, 0.124), (0.092, 0.12), (0.03, 0.124), (0, 0.124)]
+
+
+def amethyst(p, m):
+    stem(p, m, 0.026, 0.13)
+    p.add(cylinder(0.09, 0.01, m @ T(0, 0, 0.123), segments=18), "Gills")
+    p.add(lathe(AMETHYST, m, segments=24, wave=0.12, waves=5), "CapAmethyst")
+
+
+PUFFBALL = [(0, 0.16), (0.03, 0.157), (0.07, 0.138), (0.095, 0.1), (0.1, 0.07), (0.085, 0.03), (0.05, 0.004), (0, 0)]
+
+
+def puffball(p, m):
+    p.add(lathe(PUFFBALL, m, segments=22), "CapWhite")
+    for row, z in enumerate((0.115, 0.14)):
+        r = radius_at(PUFFBALL, z)
+        for k in range(8 - row * 3):
+            a = 2 * math.pi * (k + 0.5 * row) / (8 - row * 3)
+            p.add(sphere(0.009, m @ T(math.cos(a) * r, math.sin(a) * r, z), segments=8, rings=4), "Gills")
+    p.add(sphere(0.012, m @ T(0, 0, 0.158), segments=8, rings=4), "Gills")
+
+
+def cup_fungus(p, m):
+    p.add(sphere(0.12, m @ T(0, 0, 0.0), scale=(1, 0.85, 0.15), segments=16, rings=6), "Leaf")
+    for (x, y, s, tilt) in ((0.0, 0.0, 1.0, 0), (0.07, 0.035, 0.75, 18), (-0.06, 0.045, 0.62, -22), (0.02, -0.07, 0.55, 25)):
+        cm = m @ T(x, y, 0.0) @ R("Z", x * 900) @ R("X", tilt) @ S(s, s, s)
+        p.add(lathe([(0, 0.035), (0.03, 0.045), (0.05, 0.07), (0.056, 0.082), (0.06, 0.1), (0.055, 0.075),
+                     (0.035, 0.035), (0.016, 0.006), (0, 0)], cm, segments=18), "CapScarlet")
+        p.add(cylinder(0.04, 0.008, cm @ T(0, 0, 0.055), segments=16), "CupInner")
+
+
+def coral(p, m):
+    def branch(a, direction, length, radius, depth):
+        b = a + direction * length
+        rod(p, a, b, radius, "CapCoral", m, radius2=radius * 0.8)
+        if depth == 0:
+            p.add(sphere(radius * 1.25, m @ T(*b), segments=8, rings=4), "CapOrange")
+            return
+        side = Vector((direction.y, -direction.x, 0)).normalized() if abs(direction.z) < 0.99 else Vector((1, 0, 0))
+        for k, turn in enumerate((-32, 30)):
+            d = (Matrix.Rotation(math.radians(turn), 3, side) @ direction).normalized()
+            d = (d + Vector((0, 0, 0.35))).normalized()
+            branch(b, d, length * 0.72, radius * 0.75, depth - 1)
+    for k in range(4):
+        a = 2 * math.pi * k / 4 + 0.4
+        d = Vector((math.cos(a) * 0.45, math.sin(a) * 0.45, 1)).normalized()
+        branch(Vector((0, 0, 0)), d, 0.085, 0.014, 2)
+
+
+def jelly(p, m):
+    p.add(cylinder(0.03, 0.22, m @ T(0, 0, 0.026) @ R("Y", 90), segments=12), "WoodDark")
+    for (x, y, z, s) in ((-0.06, 0.02, 0.04, 0.9), (0.02, -0.025, 0.045, 1.0), (0.08, 0.02, 0.035, 0.7), (0.0, 0.04, 0.03, 0.6)):
+        p.add(lathe([(0, 0.075), (0.03, 0.08), (0.06, 0.06), (0.07, 0.035), (0.05, 0.0), (0, 0.0)],
+                    m @ T(x, y, z) @ S(s, s, s), segments=18, wave=0.25, waves=4), "CapJelly")
+
+
+GLOWCONE = [(0, 0.26), (0.02, 0.246), (0.05, 0.19), (0.08, 0.142), (0.086, 0.13), (0.07, 0.132), (0, 0.142)]
+
+
+def glow_blue(p, m):
+    for (x, y, s, lean) in ((0.0, 0.0, 1.0, 0), (0.055, 0.04, 0.55, 18)):
+        gm = m @ T(x, y, 0) @ R("X", lean) @ S(s, s, s)
+        stem(p, gm, 0.018, 0.145)
+        p.add(lathe(GLOWCONE, gm, segments=18), "CapGlowBlue")
+
+
+def glow_green(p, m):
+    for (x, y, s, lean) in ((0.0, 0.0, 1.0, 0), (0.07, 0.035, 0.7, 20), (-0.05, 0.06, 0.55, -24)):
+        gm = m @ T(x, y, 0) @ R("Y", lean) @ S(s, s, s)
+        stem(p, gm, 0.02, 0.12)
+        p.add(lathe([(0, 0.2), (0.04, 0.192), (0.07, 0.165), (0.078, 0.14), (0.06, 0.125), (0, 0.13)],
+                    gm, segments=18, wave=0.15, waves=5), "CapGlowGreen")
+
+
+# (kind, builder, width, height): the order and sizes of Fungtopia.Town TownMushrooms.Shapes.
+MUSHROOMS = [
+    ("FlyAgaric", fly_agaric, 0.3, 0.32),
+    ("Porcini", porcini, 0.3, 0.26),
+    ("Chanterelle", chanterelle, 0.22, 0.22),
+    ("Parasol", parasol, 0.36, 0.38),
+    ("InkCap", ink_cap, 0.16, 0.34),
+    ("Morel", morel, 0.14, 0.26),
+    ("Enoki", enoki, 0.2, 0.3),
+    ("Amethyst", amethyst, 0.22, 0.22),
+    ("Puffball", puffball, 0.2, 0.16),
+    ("CupFungus", cup_fungus, 0.24, 0.1),
+    ("Coral", coral, 0.24, 0.22),
+    ("Jelly", jelly, 0.22, 0.14),
+    ("GlowBlue", glow_blue, 0.2, 0.26),
+    ("GlowGreen", glow_green, 0.24, 0.2),
+]
+MUSHROOM_BUILDERS = {kind: build for kind, build, _, _ in MUSHROOMS}
+
+
+def garden_mushroom(kind, build, width, height):
+    p = Piece(f"Mushroom{kind}")
+    build(p, Matrix())
+    # Exactly `width` across (about its stem) and `height` tall, as the game expects.
+    across = 2 * max(max(abs(v.co.x), abs(v.co.y)) for v in p.bm.verts)
+    top = max(v.co.z for v in p.bm.verts)
+    for v in p.bm.verts:
+        v.co.x *= width / across
+        v.co.y *= width / across
+        v.co.z *= height / top
+    p.finish()
+
+
+def bracket_fungi(piece, rx, ry, wall, angle, z, size):
+    """A little stack of shelf (bracket) fungi growing out of a big stem's wall."""
+    a = math.radians(angle)
+    for k, (dz, s) in enumerate(((0.0, 1.0), (size * 0.55, 0.75), (-size * 0.5, 0.6))):
+        f = 1 - 0.1 * (z + dz) / (wall + 0.2)
+        m = T(math.sin(a) * rx * f, math.cos(a) * ry * f, z + dz) @ R("Z", -angle + (k - 1) * 9)
+        r = size * s
+        piece.add(sphere(r, m @ T(0, r * 0.1, 0), scale=(1, 0.72, 0.28), segments=18, rings=7), "CapBracket")
+        piece.add(sphere(r * 0.96, m @ T(0, r * 0.1, -r * 0.1), scale=(1, 0.7, 0.14), segments=16, rings=5), "Gills")
+
+
+def foot_mushrooms(piece, rx, ry, picks):
+    """Small mushrooms by a house's stone foundation (inside its footprint), round its stem: (angle, kind, scale)."""
+    for angle, kind, scale in picks:
+        a = math.radians(angle)
+        m = T(math.sin(a) * (rx + 0.5), math.cos(a) * (ry + 0.5), 0.15) @ R("Z", angle * 3) @ S(scale, scale, scale)
+        MUSHROOM_BUILDERS[kind](piece, m)
 
 
 def player_house():
@@ -308,10 +619,10 @@ def player_house():
     round_door(p, ry, 1.25, "DoorRed")
     welcome_mat(p, ry)
     for angle in (-42, 42):
-        round_window(p, rx, ry, angle, 2.3, 0.6)
+        round_window(p, rx, ry, angle, 2.3, 0.6, "DoorRed")
         window_box(p, rx, ry, angle, 1.45)
     for angle in (-100, 100, 160, -160):
-        round_window(p, rx, ry, angle, 2.4, 0.55)
+        round_window(p, rx, ry, angle, 2.4, 0.55, "DoorRed")
     # A little chimney on the cap.
     x, y, z = cap_point(cap, 140, 0.7)
     p.add(cylinder(0.38, 1.6, T(x, y, z + 0.5), segments=16), "Stone")
@@ -330,7 +641,7 @@ def millie_house():
     p, rx, ry, wall, cap = mushroom_house("MillieHouse", 10, 10, 8, "CapPink", spots=9)
     round_door(p, ry, 1.05, "DoorBlue")
     for angle in (-45, 45, 110, -110, 180):
-        round_window(p, rx, ry, angle, 1.9, 0.5)
+        round_window(p, rx, ry, angle, 1.9, 0.5, "DoorBlue")
     window_box(p, rx, ry, 45, 1.15, ("PetalWhite", "PetalBlue"))
     for side in (-1, 1):
         x, y, z = cap_point(cap, side * 52, 0.72)
@@ -353,7 +664,7 @@ def clinic():
     p, rx, ry, wall, cap = mushroom_house("Clinic", 12, 10, 8.5, "CapWhite", spot_mat="SpotsPale", spots=7)
     arched_door(p, ry, 1.7, 2.4, "DoorBlue")
     for angle in (-40, 40, 100, -100, 160, -160):
-        round_window(p, rx, ry, angle, 2.0, 0.5)
+        round_window(p, rx, ry, angle, 2.0, 0.5, "DoorBlue")
     # A red cross on the cap's front and one standing on top.
     x, y, z = cap_point(cap, 0, 0.42)
     red_cross(p, T(x, y + 0.05, z) @ R("X", -65), 2.4)
@@ -471,7 +782,7 @@ def house(index):
     else:
         arched_door(p, ry, 1.3, 2.1, door)
     for angle in (-48, 48, 115, -115, 180):
-        round_window(p, rx, ry, angle, 1.7, 0.45)
+        round_window(p, rx, ry, angle, 1.7, 0.45, door)
     window_box(p, rx, ry, 48 if index % 2 else -48, 1.0, flowers)
     if chimney:
         x, y, z = cap_point(cap, 150 if index else -140, 0.66)
@@ -748,7 +1059,11 @@ def planter():
     flower(p, T(0, 0, 0.32), "PetalWhite", scale=1.05)
     for k in range(4):
         a = 2 * math.pi * k / 4 + 0.4
-        p.add(sphere(0.13, T(math.cos(a) * 0.36, math.sin(a) * 0.36, 0.38), scale=(1, 0.8, 0.5), segments=10, rings=5), "Leaf")
+        p.add(sphere(0.13, T(math.cos(a) * 0.36, math.sin(a) * 0.36, 0.38), scale=(1, 0.8, 0.5), segments=10, rings=5),
+              "Leaf" if k % 2 else "LeafLight")
+    # Two little mushrooms growing among the flowers.
+    fly_agaric(p, T(0.2, -0.18, 0.32) @ S(0.75, 0.75, 0.75))
+    amethyst(p, T(-0.24, 0.12, 0.32) @ R("Z", 40) @ S(0.8, 0.8, 0.8))
     p.finish()
 
 
@@ -767,15 +1082,33 @@ def crate():
     p.finish()
 
 
-def flowers():
-    # A small clump of flowers (free ground decoration, walked over): 0.5 m across, 0.35 m tall.
-    p = Piece("Flowers")
-    petals = ("PetalPink", "PetalYellow", "PetalBlue")
+# The flower clumps' palettes (Fungtopia.Town TownLayout.FlowerVariants), many hues.
+FLOWER_PALETTES = [
+    ("PetalPink", "PetalYellow", "PetalBlue"),
+    ("PetalRed", "PetalOrange", "PetalWhite"),
+    ("PetalPurple", "PetalPink", "PetalYellow"),
+    ("PetalBlue", "PetalWhite", "PetalOrange"),
+]
+
+
+def flowers(index):
+    # A small clump of flowers (free ground decoration, walked over): 0.5 m across, 0.35 m tall,
+    # in lush green leaves and grass with yellow-green highlights.
+    p = Piece(f"Flowers{index}")
+    petals = FLOWER_PALETTES[index]
     for k, (x, y) in enumerate(((-0.1, -0.06), (0.11, -0.03), (0.0, 0.12))):
-        flower(p, T(x, y, 0) @ R("Z", k * 70), petals[k], scale=0.85 + 0.1 * k)
+        flower(p, T(x, y, 0) @ R("Z", k * 70 + index * 25), petals[k], scale=0.85 + 0.1 * ((k + index) % 3))
     for k in range(3):
-        a = 2 * math.pi * k / 3 + 0.5
-        p.add(sphere(0.1, T(math.cos(a) * 0.14, math.sin(a) * 0.14, 0.03), scale=(1, 0.8, 0.5), segments=10, rings=5), "Leaf")
+        a = 2 * math.pi * k / 3 + 0.5 + index
+        p.add(sphere(0.1, T(math.cos(a) * 0.14, math.sin(a) * 0.14, 0.03), scale=(1, 0.8, 0.5), segments=10, rings=5),
+              "LeafLight" if k == index % 3 else "Leaf")
+    for k in range(7):
+        a = 2 * math.pi * k / 7 + index * 0.4
+        r = 0.12 + 0.07 * (k % 2)
+        h = 0.14 + 0.05 * ((k * 3) % 4) / 3
+        base = T(math.cos(a) * r, math.sin(a) * r, 0)
+        p.add(cylinder(0.022, h, base @ R("Y", 18 * math.cos(a)) @ R("X", -18 * math.sin(a)) @ T(0, 0, h / 2), segments=5,
+                       radius2=0.002), "LeafLight" if k % 3 == 0 else "Leaf")
     p.finish()
 
 
@@ -797,7 +1130,10 @@ bench()
 fence()
 planter()
 crate()
-flowers()
+for i in range(len(FLOWER_PALETTES)):
+    flowers(i)
+for kind, build, width, height in MUSHROOMS:
+    garden_mushroom(kind, build, width, height)
 
 path = os.path.join(HERE, "town.glb")
 bpy.ops.export_scene.gltf(filepath=path, export_format="GLB", export_yup=True)

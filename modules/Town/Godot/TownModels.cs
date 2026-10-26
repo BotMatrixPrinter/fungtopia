@@ -4,8 +4,8 @@ using Godot;
 namespace Fungtopia.Town.View;
 
 /// <summary>
-/// Loads town.glb at run time and draws it toon-shaded with ink outlines. The Glow (lamp bulbs)
-/// and Window surfaces share one material each, so the view lights them all up at night at once.
+/// Loads town.glb at run time and draws it toon-shaded with ink outlines. The glowing surfaces
+/// (<see cref="TownLook.Glows"/>: lamp bulbs, glowing mushrooms) and Window share one material each, so the view lights them all up at night at once.
 /// Mushroom caps (<see cref="TownLook.Caps"/>) get a soft glossy band and a light rim.
 /// </summary>
 public static class TownModels
@@ -14,7 +14,7 @@ public static class TownModels
     private const string Shaders = "res://modules/Town/Godot/Shaders/";
 
     /// <summary>Surfaces drawn without an ink outline (small soft details).</summary>
-    private static readonly HashSet<string> NoOutline = new() { "Spots", "SpotsPale", "MatStripe", "Water", "Soot", "Glow", "SignText", "Steam" };
+    private static readonly HashSet<string> NoOutline = new() { "Spots", "SpotsPale", "MatStripe", "Water", "Soot", "Glow", "SignText", "Steam", "Scales", "MorelPit", "CupInner" };
 
     private static Shader? s_toon;
     private static ShaderMaterial? s_outline;
@@ -22,8 +22,13 @@ public static class TownModels
     private static Node3D? s_scene;
     private static bool s_loaded;
 
-    /// <summary>The lamp bulbs' material (null until the model is loaded).</summary>
-    public static ShaderMaterial? Glow => s_materials.GetValueOrDefault("Glow");
+    /// <summary>The materials that glow at night (<see cref="TownLook.Glows"/>: lamp bulbs, glowing mushroom caps) that the model has.</summary>
+    public static IEnumerable<ShaderMaterial> Glowing()
+    {
+        foreach (var name in TownLook.Glows)
+            if (s_materials.TryGetValue(name, out var material))
+                yield return material;
+    }
 
     /// <summary>The windows' material (null until the model is loaded).</summary>
     public static ShaderMaterial? Window => s_materials.GetValueOrDefault("Window");
@@ -67,6 +72,7 @@ public static class TownModels
         var material = new ShaderMaterial { Shader = s_toon };
         material.SetShaderParameter("albedo", color);
         material.SetShaderParameter("self_light", glow);
+        material.SetShaderParameter("vivid", TownLook.Vividness);
         material.SetShaderParameter("gloss", cap ? TownLook.CapGloss : 0f);
         material.SetShaderParameter("rim_light", cap ? TownLook.CapRim : 0f);
         if (outline)
@@ -116,7 +122,7 @@ public static class TownModels
             return cached;
         // glTF stores linear colors; the shader's albedo is an sRGB color like Blender's swatch.
         var color = source is BaseMaterial3D standard ? standard.AlbedoColor : Colors.White;
-        float glow = name is "Water" or "Steam" ? 0.25f : name is "Glow" ? TownLook.DayGlow : name is "Window" ? TownLook.WindowDayGlow : 0f;
+        float glow = name is "Water" or "Steam" ? 0.25f : TownLook.Glowing(name) ? TownLook.DayGlow : name is "Window" ? TownLook.WindowDayGlow : 0f;
         var material = Toon(color.SrgbToLinear(), !NoOutline.Contains(name), glow, TownLook.IsCap(name));
         s_materials[name] = material;
         return material;

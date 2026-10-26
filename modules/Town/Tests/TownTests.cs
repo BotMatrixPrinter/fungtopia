@@ -176,6 +176,15 @@ public class TownTests
         return names;
     }
 
+    /// <summary>The town.glb object a placement draws (as TownView.ModelName): a House or flower clump by its look, a mushroom by its kind, anything else by its piece.</summary>
+    private static string ModelName(in TownPlacement p) => p.Piece switch
+    {
+        TownPiece.House => $"House{p.Variant}",
+        TownPiece.Flowers => $"Flowers{p.Variant}",
+        TownPiece.Mushroom => TownMushrooms.ModelName((MushroomKind)p.Variant),
+        _ => p.Piece.ToString(),
+    };
+
     [Fact]
     public void TheModelHasAnObjectForEveryPlacementIncludingAbbysShop()
     {
@@ -184,9 +193,7 @@ public class TownTests
         Assert.Contains("FoodStall", names);
         foreach (var p in TownLayout.All)
         {
-            // TownView.ModelName: a House by its look, anything else by its piece.
-            string name = p.Piece == TownPiece.House ? $"House{p.Variant}" : p.Piece.ToString();
-            Assert.Contains(name, names);
+            Assert.Contains(ModelName(p), names);
         }
     }
 
@@ -283,40 +290,352 @@ public class TownTests
         Assert.Equal(2f * 2.2f, TownLook.GlowAt(1f), 4);
         Assert.Equal(0.12f * 0.7f, TownLook.WindowGlowAt(0f), 4);
         Assert.Equal(2.2f * 0.7f, TownLook.WindowGlowAt(1f), 4);
+        // The bioluminescent mushrooms' caps glow with the lamps (clearly at night), and are caps.
+        foreach (var name in new[] { "Glow", "CapGlowBlue", "CapGlowGreen" })
+            Assert.True(TownLook.Glowing(name), name);
+        Assert.True(TownLook.IsCap("CapGlowBlue") && TownLook.IsCap("CapGlowGreen"));
+        Assert.False(TownLook.Glowing("Cap"));
+        Assert.False(TownLook.Glowing("Window"));
+        Assert.True(TownLook.GlowAt(1f) > 10f * TownLook.GlowAt(0f));
+        foreach (var shape in TownMushrooms.Shapes)
+        {
+            var used = ModelMaterials(TownMushrooms.ModelName(shape.Kind));
+            bool glows = false;
+            foreach (var mat in used)
+                glows |= TownLook.Glowing(mat);
+            Assert.Equal(shape.Glows, glows);
+        }
+        Assert.Contains("CapGlowBlue", ModelMaterials("MushroomGlowBlue"));
+        Assert.Contains("CapGlowGreen", ModelMaterials("MushroomGlowGreen"));
     }
 
+    /// <summary>Hue in degrees (0..360) of a color.</summary>
+    private static float Hue(Vector3 c)
+    {
+        float max = MathF.Max(c.X, MathF.Max(c.Y, c.Z)), min = MathF.Min(c.X, MathF.Min(c.Y, c.Z)), d = max - min;
+        if (d <= 0f)
+            return 0f;
+        float h = max == c.X ? (c.Y - c.Z) / d : max == c.Y ? 2f + (c.Z - c.X) / d : 4f + (c.X - c.Y) / d;
+        return (h * 60f + 360f) % 360f;
+    }
+
+    private static float Luminance(Vector3 c) => 0.2126f * c.X + 0.7152f * c.Y + 0.0722f * c.Z;
+
     [Fact]
-    public void ThingsThatAreNotMushroomsKeepTheirColors()
+    public void TheTownIsVibrantCheerfulAndStillReadable()
     {
         var colors = ModelColors();
-        // Cushions, the outfits in Abby's window and the berry jars used to share the caps'
-        // materials; they keep their old colors under their own.
-        var kept = new Dictionary<string, Vector3>
+        // Every surface drawn a little richer than its material, mildly (never neon).
+        Assert.InRange(TownLook.Vividness, 1.05f, 1.3f);
+        // Lush bright greens (no grey olive: the old leaf was 0.51 saturated), with yellow-green highlights.
+        foreach (var leaf in new[] { "Leaf", "LeafLight" })
         {
-            ["FabricPink"] = new(0.98f, 0.62f, 0.74f),
-            ["FabricYellow"] = new(0.98f, 0.8f, 0.3f),
-            ["FabricBlue"] = new(0.42f, 0.66f, 0.94f),
-            ["FabricOrange"] = new(0.98f, 0.56f, 0.24f),
-            ["Jar"] = new(0.99f, 0.98f, 0.96f),
-            ["WallWhite"] = new(0.97f, 0.97f, 0.95f),
-            ["WallPink"] = new(1.0f, 0.88f, 0.88f),
-            ["Stone"] = new(0.72f, 0.7f, 0.66f),
-            ["Wood"] = new(0.72f, 0.46f, 0.28f),
-            ["WoodDark"] = new(0.5f, 0.3f, 0.18f),
-            ["Leaf"] = new(0.42f, 0.74f, 0.36f),
-            ["Awning"] = new(0.98f, 0.5f, 0.58f),
-            ["DoorRed"] = new(0.82f, 0.32f, 0.26f),
-            ["Window"] = new(1.0f, 0.86f, 0.5f),
-            ["Glow"] = new(1.0f, 0.88f, 0.5f),
-            ["Water"] = new(0.46f, 0.8f, 0.98f),
-            ["PetalPink"] = new(1.0f, 0.6f, 0.72f),
-            ["Cross"] = new(0.92f, 0.18f, 0.2f),
-        };
-        foreach (var (name, color) in kept)
-            Assert.True(Vector3.Distance(color, colors[name]) < 1e-3f, $"{name} {colors[name]}");
+            var c = colors[leaf];
+            Assert.True(c.Y >= c.X && c.Y >= c.Z && Saturation(c) >= 0.7f && c.Y >= 0.8f, $"{leaf} {c}");
+        }
+        Assert.InRange(Hue(colors["Leaf"]), 100f, 140f);
+        Assert.InRange(Hue(colors["LeafLight"]), 70f, 95f);
+        // Warm golden wood and soil, clean bright stone, darker trims for contrast.
+        foreach (var warm in new[] { "Wood", "Soil", "Basket", "Hanger" })
+        {
+            var c = colors[warm];
+            Assert.True(c.X > c.Y && c.Y > c.Z && Saturation(c) >= 0.65f, $"{warm} {c}");
+        }
+        Assert.True(colors["Wood"].X >= 0.85f);
+        var stone = colors["Stone"];
+        Assert.True(MathF.Min(stone.X, MathF.Min(stone.Y, stone.Z)) >= 0.74f && Saturation(stone) <= 0.12f, $"Stone {stone}");
+        Assert.True(Luminance(colors["StoneDark"]) < Luminance(stone) * 0.8f);
+        Assert.True(Luminance(colors["WoodDark"]) < Luminance(colors["Wood"]) * 0.6f);
+        // Flowers in many hues: white and at least six clearly different bright hues.
+        var hues = new List<float>();
+        foreach (var (name, c) in colors)
+        {
+            if (!name.StartsWith("Petal") || name == "PetalWhite")
+                continue;
+            Assert.True(Saturation(c) >= 0.55f && MathF.Max(c.X, MathF.Max(c.Y, c.Z)) >= 0.95f, $"{name} {c}");
+            hues.Add(Hue(c));
+        }
+        Assert.True(colors.ContainsKey("PetalWhite") && hues.Count >= 6, $"{hues.Count} petal colors");
+        int distinct = 0;
+        for (int i = 0; i < hues.Count; i++)
+        {
+            bool alike = false;
+            for (int k = 0; k < i; k++)
+                alike |= MathF.Min(MathF.Abs(hues[i] - hues[k]), 360f - MathF.Abs(hues[i] - hues[k])) < 15f;
+            if (!alike)
+                distinct++;
+        }
+        Assert.True(distinct >= 6, $"{distinct} petal hues");
+        // Candy-bright paints on doors, awnings, mats, cushions and fabrics; never neon (some depth
+        // left in every paint) nor washed out to white.
+        foreach (var paint in new[] { "DoorRed", "DoorBlue", "DoorGreen", "DoorLilac", "Awning", "Mat", "Cushion", "Knob", "FabricPink", "FabricYellow", "FabricBlue", "FabricOrange", "Water", "Cross" })
+        {
+            var c = colors[paint];
+            Assert.True(Saturation(c) is >= 0.55f and <= 0.9f, $"{paint} {c}");
+            Assert.True(MathF.Max(c.X, MathF.Max(c.Y, c.Z)) >= 0.95f, $"{paint} {c}");
+        }
+        foreach (var (name, c) in colors)
+            Assert.False(Saturation(c) > 0.97f && !TownLook.IsCap(name), $"{name} {c} is neon");
+        // The lamp posts dark enough to stand out against the bright town; windows still warm.
+        Assert.True(MathF.Max(colors["Metal"].X, MathF.Max(colors["Metal"].Y, colors["Metal"].Z)) <= 0.5f);
+        Assert.InRange(Hue(colors["Window"]), 35f, 55f);
+        // Cushions, the outfits in Abby's window and the berry jars keep materials of their own.
         Assert.Contains("FabricPink", ModelMaterials("FurnitureShop"));
         Assert.Contains("FabricBlue", ModelMaterials("ClothingShop"));
         Assert.Contains("Jar", ModelMaterials("FoodStall"));
+        // The gardens: planters and flower clumps with bright and yellow-green leaves.
+        Assert.Contains("LeafLight", ModelMaterials("Planter"));
+        for (int v = 0; v < TownLayout.FlowerVariants; v++)
+        {
+            var used = ModelMaterials($"Flowers{v}");
+            Assert.Contains("Leaf", used);
+            Assert.Contains("LeafLight", used);
+        }
+    }
+
+    // ---- Garden mushrooms ----
+
+    /// <summary>The bounds (min, max; glTF axes, Y up) of object <paramref name="name"/>'s mesh in Models/town.glb.</summary>
+    private static (Vector3 Min, Vector3 Max) ModelBounds(string name)
+    {
+        using var json = ModelJson();
+        var root = json.RootElement;
+        var min = new Vector3(float.MaxValue);
+        var max = new Vector3(float.MinValue);
+        bool found = false;
+        foreach (var node in root.GetProperty("nodes").EnumerateArray())
+        {
+            if (!node.TryGetProperty("name", out var n) || n.GetString() != name)
+                continue;
+            found = true;
+            var mesh = root.GetProperty("meshes")[node.GetProperty("mesh").GetInt32()];
+            foreach (var primitive in mesh.GetProperty("primitives").EnumerateArray())
+            {
+                var accessor = root.GetProperty("accessors")[primitive.GetProperty("attributes").GetProperty("POSITION").GetInt32()];
+                var lo = accessor.GetProperty("min");
+                var hi = accessor.GetProperty("max");
+                min = Vector3.Min(min, new Vector3(lo[0].GetSingle(), lo[1].GetSingle(), lo[2].GetSingle()));
+                max = Vector3.Max(max, new Vector3(hi[0].GetSingle(), hi[1].GetSingle(), hi[2].GetSingle()));
+            }
+        }
+        Assert.True(found, name);
+        return (min, max);
+    }
+
+    [Fact]
+    public void EveryMushroomKindHasAModelOfTheSizeTheGameScalesFrom()
+    {
+        Assert.Equal(Enum.GetValues<MushroomKind>().Length, TownMushrooms.KindCount);
+        for (int k = 0; k < TownMushrooms.KindCount; k++)
+        {
+            var shape = TownMushrooms.Shapes[k];
+            Assert.Equal((MushroomKind)k, shape.Kind);
+            var (min, max) = ModelBounds(TownMushrooms.ModelName(shape.Kind));
+            string what = shape.Kind.ToString();
+            float across = 2f * MathF.Max(MathF.Max(-min.X, max.X), MathF.Max(-min.Z, max.Z));
+            Assert.True(MathF.Abs(across - shape.ModelWidth) < 0.005f, $"{what} {across} across");
+            Assert.True(MathF.Abs(max.Y - shape.ModelHeight) < 0.005f, $"{what} {max.Y} tall");
+            Assert.True(min.Y > -0.03f, $"{what} reaches {min.Y} below its base");
+            // Even the largest stays small ground decoration.
+            Assert.True(shape.ModelHeight * shape.MaxScale <= TownLayout.DecorationMaxHeight - 0.02f, what);
+            Assert.True(shape.ModelWidth * shape.MaxScale * 1.2f <= TownLayout.DecorationMaxWidth - 0.02f, what);
+        }
+        // Clean cream stems and vivid caps (and the fly agaric's crisp white spots).
+        var fly = ModelMaterials("MushroomFlyAgaric");
+        foreach (var mat in new[] { "Cap", "Spots", "Wall", "Gills" })
+            Assert.Contains(mat, fly);
+        var expected = new Dictionary<string, string>
+        {
+            ["MushroomPorcini"] = "CapBrown", ["MushroomChanterelle"] = "CapGold", ["MushroomParasol"] = "CapTan",
+            ["MushroomInkCap"] = "Ink", ["MushroomMorel"] = "MorelPit", ["MushroomEnoki"] = "CapWhite",
+            ["MushroomAmethyst"] = "CapAmethyst", ["MushroomPuffball"] = "CapWhite", ["MushroomCupFungus"] = "CapScarlet",
+            ["MushroomCoral"] = "CapCoral", ["MushroomJelly"] = "CapJelly",
+        };
+        foreach (var (name, mat) in expected)
+            Assert.Contains(mat, ModelMaterials(name));
+    }
+
+    /// <summary>The garden mushroom placements.</summary>
+    private static List<TownPlacement> Mushrooms()
+    {
+        var list = new List<TownPlacement>();
+        foreach (var p in TownLayout.All)
+            if (p.Piece == TownPiece.Mushroom)
+                list.Add(p);
+        return list;
+    }
+
+    [Fact]
+    public void GardenMushroomsAreEveryKindInSeveralSizesShapesAndTilts()
+    {
+        var all = Mushrooms();
+        Assert.InRange(all.Count, 80, 400);
+        var shapes = new HashSet<CapShape>();
+        for (int k = 0; k < TownMushrooms.KindCount; k++)
+        {
+            var heights = new HashSet<int>();
+            var widths = new HashSet<int>();
+            foreach (var p in all)
+                if (p.Variant == k)
+                {
+                    heights.Add((int)MathF.Round(p.Height * 100f));
+                    widths.Add((int)MathF.Round(p.Width * 100f));
+                }
+            string what = ((MushroomKind)k).ToString();
+            Assert.True(heights.Count >= 3, $"{what}: only {heights.Count} heights");
+            Assert.True(widths.Count >= 3, $"{what}: only {widths.Count} widths");
+            shapes.Add(TownMushrooms.Shapes[k].Cap);
+        }
+        foreach (var cap in new[] { CapShape.Dome, CapShape.Flat, CapShape.Funnel, CapShape.Bell, CapShape.Wavy, CapShape.Conical })
+            Assert.Contains(cap, shapes);
+        // Proportions vary, not only sizes: the height to width ratio of one kind differs.
+        var ratios = new HashSet<int>();
+        foreach (var p in all)
+            if (p.Variant == (int)MushroomKind.FlyAgaric)
+                ratios.Add((int)MathF.Round(p.Height / p.Width * 20f));
+        Assert.True(ratios.Count >= 3, $"{ratios.Count} fly agaric proportions");
+        // Tilts vary, never more than MaxTilt.
+        var tilts = new HashSet<int>();
+        foreach (var p in all)
+        {
+            Assert.True(MathF.Abs(p.Tilt) <= TownMushrooms.MaxTilt + 1e-4f);
+            tilts.Add((int)MathF.Round(p.Tilt * 100f));
+        }
+        Assert.True(tilts.Count >= 10, $"{tilts.Count} tilts");
+        // Glowing ones among them.
+        Assert.Contains(all, p => TownMushrooms.Shapes[p.Variant].Glows);
+        // Nothing else leans.
+        foreach (var p in TownLayout.All)
+            if (p.Piece != TownPiece.Mushroom)
+                Assert.Equal(0f, p.Tilt);
+    }
+
+    [Fact]
+    public void MushroomsGrowSingleInPairsAndInClustersOfDifferentHeights()
+    {
+        var groups = new Dictionary<int, List<TownPlacement>>();
+        foreach (var p in Mushrooms())
+        {
+            Assert.True(p.Group >= 0);
+            if (!groups.TryGetValue(p.Group, out var list))
+                groups[p.Group] = list = new List<TownPlacement>();
+            list.Add(p);
+        }
+        int singles = 0, pairs = 0, clusters = 0;
+        foreach (var (_, group) in groups)
+        {
+            if (group.Count == 1) singles++;
+            else if (group.Count == 2) pairs++;
+            else clusters++;
+            Assert.InRange(group.Count, 1, 5);
+            var first = group[0];
+            for (int i = 0; i < group.Count; i++)
+            {
+                Assert.Equal(first.Variant, group[i].Variant);
+                Assert.True(Vector2.Distance(new Vector2(first.X, first.Z), new Vector2(group[i].X, group[i].Z)) <= TownMushrooms.GroupRadius + 1e-4f);
+                for (int k = 0; k < i; k++)
+                    Assert.True(MathF.Abs(group[i].Height - group[k].Height) >= 0.01f, $"group at ({first.X}, {first.Z}): two of one height");
+                if (i > 0)
+                    Assert.True(group[i].Height < first.Height, "the first of a group is its biggest");
+            }
+        }
+        Assert.True(singles >= 10 && pairs >= 10 && clusters >= 10, $"{singles} singles, {pairs} pairs, {clusters} clusters");
+    }
+
+    [Fact]
+    public void NoTwoNeighborsAreAlike()
+    {
+        var all = Mushrooms();
+        for (int i = 0; i < all.Count; i++)
+            for (int k = 0; k < i; k++)
+            {
+                float d = Vector2.Distance(new Vector2(all[i].X, all[i].Z), new Vector2(all[k].X, all[k].Z));
+                // Neighboring groups are different kinds; within a group each is a different size.
+                if (all[i].Group != all[k].Group && d < TownMushrooms.NeighborDistance)
+                    Assert.NotEqual(all[i].Variant, all[k].Variant);
+                Assert.False(all[i].Variant == all[k].Variant && all[i].Height == all[k].Height && all[i].Tilt == all[k].Tilt && d < 6f,
+                    $"two identical mushrooms at ({all[i].X}, {all[i].Z}) and ({all[k].X}, {all[k].Z})");
+            }
+        // Flower clumps side by side differ in palette, and every palette is used.
+        var palettes = new HashSet<int>();
+        var flowers = new List<TownPlacement>();
+        foreach (var p in TownLayout.All)
+            if (p.Piece == TownPiece.Flowers)
+            {
+                Assert.InRange(p.Variant, 0, TownLayout.FlowerVariants - 1);
+                foreach (var q in flowers)
+                    if (Vector2.Distance(new Vector2(p.X, p.Z), new Vector2(q.X, q.Z)) < 1.6f)
+                        Assert.NotEqual(q.Variant, p.Variant);
+                flowers.Add(p);
+                palettes.Add(p.Variant);
+            }
+        Assert.Equal(TownLayout.FlowerVariants, palettes.Count);
+    }
+
+    [Fact]
+    public void EachSpotsMushroomsComeFromItsFixedSeed()
+    {
+        // The seed is a pure function of the spot, different for spots a few centimeters apart.
+        Assert.Equal(TownMushrooms.Seed(12.5f, 201.25f), TownMushrooms.Seed(12.5f, 201.25f));
+        Assert.NotEqual(TownMushrooms.Seed(12.5f, 201.25f), TownMushrooms.Seed(12.55f, 201.25f));
+        Assert.NotEqual(TownMushrooms.Seed(12.5f, 201.25f), TownMushrooms.Seed(12.5f, 201.3f));
+        Assert.Equal(TownMushrooms.Unit(77u, 3), TownMushrooms.Unit(77u, 3));
+        Assert.InRange(TownMushrooms.Unit(77u, 3), 0f, 1f);
+        // Every group is exactly what its root spot's seed grows: its kind the seed's (or, when a
+        // neighbor already has that kind, the next free one KindStep on), its size, members,
+        // offsets, sizes and tilts from TownMushrooms.Member.
+        var groups = new Dictionary<int, List<TownPlacement>>();
+        foreach (var p in Mushrooms())
+        {
+            if (!groups.TryGetValue(p.Group, out var list))
+                groups[p.Group] = list = new List<TownPlacement>();
+            list.Add(p);
+        }
+        int asSeeded = 0;
+        foreach (var (_, group) in groups)
+        {
+            var root = group[0];
+            uint seed = TownMushrooms.Seed(root.X, root.Z);
+            int kind = (int)(seed % (uint)TownMushrooms.KindCount);
+            if (kind == root.Variant)
+                asSeeded++;
+            bool reachable = false;
+            for (int t = 0; t < TownMushrooms.KindCount; t++)
+                reachable |= (kind + t * TownMushrooms.KindStep) % TownMushrooms.KindCount == root.Variant;
+            Assert.True(reachable);
+            var k = (MushroomKind)root.Variant;
+            Assert.Equal(TownMushrooms.GroupSize(k, seed), group.Count);
+            for (int m = 0; m < group.Count; m++)
+            {
+                var (x, z, yaw, tilt, width, height) = TownMushrooms.Member(k, seed, m, group.Count, root.X, root.Z);
+                Assert.Equal(x, group[m].X, 4);
+                Assert.Equal(z, group[m].Z, 4);
+                Assert.Equal(yaw, group[m].Yaw, 4);
+                Assert.Equal(tilt, group[m].Tilt, 4);
+                Assert.Equal(width, group[m].Width, 4);
+                Assert.Equal(height, group[m].Height, 4);
+            }
+        }
+        Assert.True(asSeeded * 2 > groups.Count, $"{asSeeded} of {groups.Count} groups have their seed's own kind");
+    }
+
+    [Fact]
+    public void TheBuildingsAndPlantersGrowMushroomsToo()
+    {
+        // Shelf fungi on every house's stem, and small garden mushrooms of several kinds on its foundation.
+        foreach (var house in new[] { "PlayerHouse", "MillieHouse", "Clinic", "ClothingShop", "House0", "House1", "House2", "House3" })
+        {
+            var used = ModelMaterials(house);
+            Assert.Contains("CapBracket", used);
+            int kinds = 0;
+            foreach (var cap in new[] { "CapBrown", "CapGold", "CapTan", "CapMorel", "CapAmethyst", "CapScarlet", "CapCoral", "CapJelly", "CapGlowBlue", "CapGlowGreen", "Ink" })
+                if (used.Contains(cap))
+                    kinds++;
+            Assert.True(kinds >= 3, $"{house}: {kinds} kinds of small mushrooms");
+        }
+        var planter = ModelMaterials("Planter");
+        Assert.Contains("Cap", planter);
+        Assert.Contains("CapAmethyst", planter);
     }
 
     [Fact]
@@ -437,24 +756,35 @@ public class TownTests
     }
 
     [Fact]
-    public void OnlySmallFlowerClumpsArePlacedFreely()
+    public void OnlySmallFlowerClumpsAndMushroomsArePlacedFreely()
     {
-        int flowers = 0;
+        int flowers = 0, mushrooms = 0;
         foreach (var p in TownLayout.All)
         {
             if (!p.IsDecoration)
+            {
+                Assert.NotEqual(TownPiece.Mushroom, p.Piece);
+                Assert.NotEqual(TownPiece.Flowers, p.Piece);
                 continue;
-            flowers++;
-            Assert.Equal(TownPiece.Flowers, p.Piece);
-            Assert.True(p.Height <= TownLayout.DecorationMaxHeight);
+            }
+            if (p.Piece == TownPiece.Flowers)
+                flowers++;
+            else
+            {
+                Assert.Equal(TownPiece.Mushroom, p.Piece);
+                mushrooms++;
+            }
+            Assert.True(p.Height <= TownLayout.DecorationMaxHeight, $"{p.Piece} {p.Height} m tall");
             Assert.True(p.Width <= TownLayout.DecorationMaxWidth && p.Depth <= TownLayout.DecorationMaxWidth);
             Assert.True(TownLayout.DecorationMaxHeight <= 0.4f && TownLayout.DecorationMaxWidth <= 0.6f);
         }
         Assert.InRange(flowers, 10, 200);
+        // Cheap to draw: a few hundred small instances of fourteen meshes at most.
+        Assert.InRange(mushrooms, 80, 400);
     }
 
     [Fact]
-    public void FlowerClumpsStayOffObstaclesPathsAndSpots()
+    public void FlowerClumpsAndMushroomsStayOffObstaclesPathsAndSpots()
     {
         var all = TownLayout.All;
         var spots = new[] { Places.HomeDoor, Places.ClinicDoor, Places.MillieSpot, Places.FurnitureShopSpot, Places.AbbySpot, Places.FoodSpot, Places.SignpostTown };
@@ -472,7 +802,8 @@ public class TownTests
             foreach (var spot in spots)
                 Assert.True(Vector2.Distance(new Vector2(p.X, p.Z), new Vector2(spot.Position.X, spot.Position.Z)) >= r + 1f, $"{what} by a spot");
             for (int k = i + 1; k < all.Length; k++)
-                if (all[k].IsDecoration)
+                // Mushrooms of one group nestle together; nothing else overlaps.
+                if (all[k].IsDecoration && (p.Group < 0 || all[k].Group != p.Group))
                     Assert.True(Vector2.Distance(new Vector2(p.X, p.Z), new Vector2(all[k].X, all[k].Z)) >= r + all[k].Radius - 0.02f, $"{what} overlaps another");
         }
     }

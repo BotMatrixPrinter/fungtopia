@@ -8,8 +8,23 @@ namespace Fungtopia.Town;
 /// </summary>
 public static class TownLook
 {
-    /// <summary>The town.glb materials that are mushroom caps (houses, shop and stall roofs, the fountain, lamps, mailbox, bench feet).</summary>
-    public static readonly string[] Caps = { "Cap", "CapPink", "CapWhite", "CapOrange", "CapLilac", "CapBlue", "CapYellow", "CapMint" };
+    /// <summary>The town.glb materials that are mushroom caps (houses, shop and stall roofs, the fountain, lamps, mailbox, bench feet, the garden mushrooms and the bracket fungi on the stems).</summary>
+    public static readonly string[] Caps =
+    {
+        "Cap", "CapPink", "CapWhite", "CapOrange", "CapLilac", "CapBlue", "CapYellow", "CapMint",
+        "CapBrown", "CapGold", "CapTan", "CapMorel", "CapAmethyst", "CapScarlet", "CapCoral", "CapJelly",
+        "CapBracket", "CapGlowBlue", "CapGlowGreen",
+    };
+
+    /// <summary>The town.glb materials that glow at night (<see cref="GlowAt"/>): lamp bulbs and lanterns, and the bioluminescent mushrooms' caps.</summary>
+    public static readonly string[] Glows = { "Glow", "CapGlowBlue", "CapGlowGreen" };
+
+    /// <summary>
+    /// How much richer than its material every surface is drawn (the toon shader's <c>vivid</c>):
+    /// saturation pushed this many times away from grey (whites and greys stay), so the filmic
+    /// tonemapping does not wash the cheerful colors out. Mild, never neon.
+    /// </summary>
+    public const float Vividness = 1.15f;
 
     /// <summary>Strength of a cap's small specular band (the toon shader's <c>gloss</c>; 0 on everything else).</summary>
     public const float CapGloss = 0.5f;
@@ -24,6 +39,9 @@ public static class TownLook
     /// <summary>Window self light by day and at night (unchanged: windows are not mushrooms).</summary>
     public const float WindowDayGlow = 0.084f;
     public const float WindowNightGlow = 1.54f;
+
+    /// <summary>Whether material <paramref name="name"/> of town.glb glows at night.</summary>
+    public static bool Glowing(string name) => System.Array.IndexOf(Glows, name) >= 0;
 
     /// <summary>Whether material <paramref name="name"/> of town.glb is a mushroom cap.</summary>
     public static bool IsCap(string name) => System.Array.IndexOf(Caps, name) >= 0;
