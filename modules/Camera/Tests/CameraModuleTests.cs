@@ -389,9 +389,9 @@ public class CameraModuleTests
     }
 
     /// <summary>
-    /// The whole character (feet to the top of the big head and hat, 1.7 m, and 0.45 m to each
-    /// side across the view) shows in the left half of the screen, top to bottom, the chest near
-    /// the middle of that half.
+    /// The whole character (feet to the top of the big head, <see cref="BowGeometry.HeadUp"/> +
+    /// its radius, 1.30 m, and a tall hat, 0.2 m more; 0.45 m to each side across the view) shows
+    /// in the left half of the screen, top to bottom, the chest near the middle of that half.
     /// </summary>
     private static void AssertFramedInTheLeftHalf(CameraPose pose, Vector3 feet)
     {
@@ -399,7 +399,8 @@ public class CameraModuleTests
         Assert.InRange(chest.X, -0.65f, -0.35f);
         Vector3 across = Vector3.Transform(Vector3.UnitX, pose.Orientation);
         across = Vector3.Normalize(new Vector3(across.X, 0f, across.Z)) * 0.45f;
-        foreach (float h in new[] { 0f, CameraModule.ChestHeight, 1.7f })
+        float hatTop = BowGeometry.HeadUp + BowGeometry.HeadRadius + 0.2f;
+        foreach (float h in new[] { 0f, CameraModule.ChestHeight, hatTop })
         {
             foreach (float side in new[] { -1f, 1f })
             {
@@ -420,6 +421,14 @@ public class CameraModuleTests
     }
 
     private static Vector3 HomeFeet(float x, float z) => new(x, Areas.HomeFloorY, z);
+
+    [Fact]
+    public void TheFrontViewLooksAtTheChestOfTheShorterBodyBelowTheLoweredHead()
+    {
+        // The body is 0.36..0.88 m, the head's center BowGeometry.HeadUp (1.11 m): the chest, below the middle of the character.
+        Assert.InRange(CameraModule.ChestHeight, 0.36f + 0.52f * 0.25f, 0.36f + 0.52f * 0.6f);
+        Assert.InRange(CameraModule.ChestHeight, BowGeometry.HeadUp * 0.45f, BowGeometry.HeadUp * 0.55f);
+    }
 
     [Fact]
     public void FramesThePlayerFullBodyFromTheFrontInTheLeftHalfWhileTheWardrobeIsOpen()

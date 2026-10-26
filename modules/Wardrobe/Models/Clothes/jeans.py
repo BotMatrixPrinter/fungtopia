@@ -21,7 +21,7 @@ for body in bodies():
     body.box(buckle, body_point(0, BAND_TOP - 0.012, BOTTOM_OUT + 0.028)[0], (0.026, 0.019, 0.009),
              rotation=body_frame(0, BAND_TOP - 0.012))
     for a in (-90, 90):
-        on_body(body, seam, [(a, BAND_TOP - 0.035), (a, (BAND_TOP + BODY_BOTTOM) / 2), (a, BODY_BOTTOM + 0.03)], 0.005,
+        on_body(body, seam, [(a, BAND_TOP - 0.035), (a, (BAND_TOP + BODY_BOTTOM) / 2), (a, widest()[1])], 0.005,
                 out=BOTTOM_OUT)
     body.build()
 for leg in legs():

@@ -241,19 +241,25 @@ public class BowModuleTests
     {
         Assert.Equal(new Vector3(BowGeometry.HoldRight, BowGeometry.HoldUp, BowGeometry.HoldForward), BowGeometry.HoldOffset);
         Assert.Equal(0.42f, BowGeometry.HoldRight, 3); // 0.42 m to the right
-        // At chest height of the 1.47 m character (its body from 0.36 to 1.05 m), below the head.
-        Assert.Equal(0.95f, BowGeometry.HoldUp, 3);
+        // At chest height of the 1.30 m character (its body from 0.36 to 0.88 m), below the head:
+        // lowered with the chest from 0.95 m when the body got 25% shorter.
+        Assert.Equal(0.78f, BowGeometry.HoldUp, 3);
         Assert.Equal(0.32f, BowGeometry.HoldForward, 3);
         Assert.InRange(BowGeometry.FullDrawPull, 0.15f, 0.4f);
-        // Clear of the round head (a 0.38 m ball centered 1.28 m above the feet, its top at 1.47 m).
+        // Clear of the round head (a 0.38 m ball centered 1.11 m above the feet, its top at 1.30 m).
         var head = new Vector3(0f, BowGeometry.HeadUp, 0f);
-        Assert.Equal(1.28f, BowGeometry.HeadUp, 2);
-        Assert.Equal(0.45f, BowGeometry.MinHeadClearance, 3);
-        Assert.True(BowGeometry.MinHeadClearance > 0.19f + 0.2f, "clear of the head's 0.19 m radius with room for the bow");
+        Assert.Equal(1.11f, BowGeometry.HeadUp, 2);
+        Assert.Equal(0.19f, BowGeometry.HeadRadius, 3);
+        Assert.InRange(BowGeometry.HeadUp + BowGeometry.HeadRadius, 1.29f, 1.31f);
+        // The clearance from the head's size: its radius and room for the bow.
+        Assert.Equal(BowGeometry.HeadRadius + 0.26f, BowGeometry.MinHeadClearance, 3);
+        Assert.True(BowGeometry.MinHeadClearance > BowGeometry.HeadRadius + 0.2f, "clear of the head's radius with room for the bow");
         Assert.True(Vector3.Distance(BowGeometry.HoldOffset, head) >= BowGeometry.MinHeadClearance);
-        Assert.InRange(BowGeometry.HoldUp, 0.36f + 0.69f * 0.6f, 1.05f - 0.05f);
+        Assert.InRange(BowGeometry.HoldUp, 0.36f + 0.52f * 0.6f, 0.88f - 0.05f);
+        // The hold point keeps its place below the head as before (the head and the chest lowered together).
+        Assert.InRange(BowGeometry.HeadUp - BowGeometry.HoldUp, 0.3f, 0.35f);
         // Seen from straight behind, the hand is outside the head's outline (half width 0.19 m) and below it.
-        Assert.True(MathF.Abs(BowGeometry.HoldRight) > 0.19f && BowGeometry.HoldUp < BowGeometry.HeadUp - 0.19f);
+        Assert.True(MathF.Abs(BowGeometry.HoldRight) > BowGeometry.HeadRadius && BowGeometry.HoldUp < BowGeometry.HeadUp - BowGeometry.HeadRadius);
         // In the world, for any facing, it is right of the facing and ahead of the feet.
         foreach (float facing in new[] { 0f, 1f, MathF.PI / 2, -2.5f })
         {

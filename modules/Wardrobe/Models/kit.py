@@ -3,22 +3,23 @@
 #
 # Meters, feet at the origin, facing Blender +Y (Godot's -Z after the glTF export), sized for the
 # Player module's simple-shapes rig (modules/Player/Models/characters.py): a big round ball of a
-# head (radius 0.19 round z 1.28) floating 4 cm over the body, a body that is a solid of
-# revolution (the Girl's a tall cone, a triangle from the front; the Boy's a tall rounded capsule),
-# big oval hands floating well out beside it, no arms, and two straight tube legs coming out from
-# under it down to rounded feet. Each piece is one object per rig part it covers, named like the
+# head (radius 0.19 round z 1.11) floating 4 cm over the body, a body that is a solid of
+# revolution from 0.36 to 0.88 m, short and round at the base (the Girl's a triangle from the front
+# with a fully rounded bottom; the Boy's a soft egg, widest low down), big oval hands floating well
+# out beside it, no arms, and two straight tube legs coming out from under its base (inside its
+# outline seen from the front) down to rounded feet. Each piece is one object per rig part it covers, named like the
 # part and with its origin at that part's pivot, so the game parents it to the part with no offset
 # (Fungtopia.Wardrobe.Attach):
-#   Head (pivot at the neck, z 1.07: hats, glasses, clips, hair),
+#   Head (pivot at the neck, z 0.90: hats, glasses, clips, hair),
 #   Body (pivot at the hips, z 0.42: tops and dresses over the body, the bottoms' band round its
 #         lower edge, backpacks on its back, the scarf round its top). The two bodies differ, so
 #         an item that fits both characters holds two body objects instead: BodyGirl (over the
-#         cone) and BodyBoy (over the capsule), both at the Body pivot (see bodies()); a Girl-only
-#         item has one Body, over the cone.
-#   LegL / LegR (pivots at the hips, x -0.08 / +0.08, z 0.42; the tube legs and the rounded feet
+#         rounded triangle) and BodyBoy (over the egg), both at the Body pivot (see bodies()); a
+#         Girl-only item has one Body, over the triangle.
+#   LegL / LegR (pivots at the hips, x -0.11 / +0.11, z 0.42; the tube legs and the rounded feet
 #         hanging from them: trouser legs round the tubes, the shoes over the feet).
 # Clothes on the body follow its outline (body_profile) a little out from it, so nothing pokes
-# through it; there are no sleeves (no arms). Materials carry plain colors only; the game draws
+# through it; cloth round the base wraps under it with holes round the legs (cloth()); there are no sleeves (no arms). Materials carry plain colors only; the game draws
 # them toon-shaded with ink outlines. A hair style's main material is named "Hair" so the game can
 # tint it with the chosen hair color. No eyes or faces on clothes: only creatures have eyes.
 import math
@@ -31,8 +32,8 @@ from mathutils import Matrix, Vector
 
 # The rig, from characters.py.
 HIP_Z = 0.42
-NECK_Z = 1.07
-LEG_X, LEG_R = 0.08, 0.06
+NECK_Z = 0.90
+LEG_X, LEG_R = 0.11, 0.06
 PIVOTS = {
     "Head": (0, 0, NECK_Z),
     "Body": (0, 0, HIP_Z),
@@ -45,21 +46,26 @@ PIVOTS = {
 # (HEAD_R round HEAD_C, the rig's old head) and Part("Head") scales them uniformly onto the rig's,
 # so every hat, clip, pair of glasses and hair style keeps its shape. The eyes (big dark ovals, low
 # on the face and wide apart) look out along EYE_DIRS from the head's center.
-RIG_HEAD_R, RIG_HEAD_C = 0.19, Vector((0, 0, 1.28))
+RIG_HEAD_R, RIG_HEAD_C = 0.19, Vector((0, 0, 1.11))
 HEAD_R, HEAD_C = 0.4, Vector((0, 0, 1.088))
 HEAD_SCALE = RIG_HEAD_R / HEAD_R
 EYE_DIRS = [Vector((side * 0.42, 0.89, -0.17)).normalized() for side in (-1, 1)]
-# The body: a solid of revolution from BODY_BOTTOM (radius R0) to BODY_TOP (radius R1), its
-# bottom rim and its top rounded off by ROUND (bottom, top), per character. bodies() (or
-# use_body()) picks the one the shapes below follow.
-BODY_BOTTOM, BODY_TOP = 0.36, 1.05
+# The body: a solid of revolution from BODY_BOTTOM to BODY_TOP, its outline (radius, z) points
+# from the axis under the bottom round to the axis over the top, smoothed through them, per
+# character (the same as characters.py's). bodies() (or use_body()) picks the one the shapes below
+# follow.
+BODY_BOTTOM, BODY_TOP = 0.36, 0.88
 BODY_H = BODY_TOP - BODY_BOTTOM
 BODIES = {
-    "girl": {"R0": 0.21, "R1": 0.035, "ROUND": (0.05, 0.09)},
-    "boy": {"R0": 0.16, "R1": 0.16, "ROUND": (0.08, 0.14)},
+    "girl": [(0, 0.36), (0.07, 0.362), (0.125, 0.37), (0.168, 0.386), (0.197, 0.41), (0.21, 0.44),
+             (0.2, 0.48), (0.165, 0.57), (0.128, 0.665), (0.092, 0.76), (0.064, 0.828), (0.042, 0.862),
+             (0.02, 0.877), (0, 0.88)],
+    "boy": [(0, 0.36), (0.07, 0.363), (0.125, 0.376), (0.163, 0.4), (0.184, 0.433), (0.19, 0.465),
+            (0.185, 0.51), (0.172, 0.575), (0.157, 0.645), (0.143, 0.72), (0.131, 0.785), (0.108, 0.835),
+            (0.072, 0.866), (0.035, 0.878), (0, 0.88)],
 }
 BODY = BODIES["girl"]
-# The head's bottom is at 1.09 m: clothes on the body stay below HEAD_GAP.
+# The head's bottom is at 0.92 m: clothes on the body stay below HEAD_GAP.
 HEAD_GAP = RIG_HEAD_C.z - RIG_HEAD_R - 0.03
 
 
@@ -77,15 +83,15 @@ TOP_HEM = BAND_TOP - 0.04
 TOP_OUT = 0.004
 TOP_OVER = TOP_OUT + 0.004
 BOTTOM_OUT = 0.018
-# Cloth wrapping under the body's bottom rim stops this far from the axis, clear of the legs.
-WRAP_R = LEG_X + LEG_R + 0.012
+# Cloth wrapping under the body's rounded base leaves a hole this wide round each leg.
+LEG_HOLE = LEG_R + 0.012
 # Trouser legs: round the leg tubes, LEG_OUT out from them, from just under the body down.
 LEG_OUT = 0.012
 LEG_TOP = BODY_BOTTOM - 0.004
 # The rounded feet (each under its leg's pivot): center y, z and radii, from characters.py.
 FOOT_C = (0.025, 0.056)
 FOOT_R = (0.075, 0.1, 0.056)
-# The hands float beside the body, about (+-0.331, 0.03, 0.69) with radii (0.07, 0.055, 0.09):
+# The hands float beside the body, about (+-0.40, 0.03, 0.58) with radii (0.07, 0.055, 0.09):
 # clothes keep clear of them (straps pass well inside them).
 
 # Vivid mushrooms (the game's rule; the same values as Core/MushroomLook.cs): a saturated cherry-red
@@ -216,11 +222,12 @@ class Part:
         m = Matrix.Translation(Vector(center) - self.pivot) @ rotation
         self._add(make, mat, m)
 
-    def lathe(self, mat, profile, cuts=(), segments=48, axis=(0.0, 0.0)):
+    def lathe(self, mat, profile, cuts=(), segments=48, axis=(0.0, 0.0), holes=()):
         """A solid of revolution about the vertical axis through (x, y) = axis (the world Z axis by
         default): profile is its outline as (radius, z) points; where it starts or ends on the axis
         it is closed, elsewhere left open. cuts = (point, normal) planes, each removing the part on
-        its normal's side (world coordinates)."""
+        its normal's side (world coordinates); holes = ((x, y), radius, below) vertical round holes
+        through it, below height below (world)."""
         def make(g):
             rings = []
             for r, z in profile:
@@ -243,6 +250,10 @@ class Part:
             for point, normal in cuts:
                 bmesh.ops.bisect_plane(g, geom=g.verts[:] + g.edges[:] + g.faces[:],
                                        plane_co=Vector(point), plane_no=Vector(normal), clear_outer=True)
+            if holes:
+                inside = [v for v in g.verts if any(v.co.z < below and math.hypot(v.co.x - c[0], v.co.y - c[1]) < r
+                                                    for c, r, below in holes)]
+                bmesh.ops.delete(g, geom=inside, context="VERTS")
         self._add(make, mat, Matrix.Translation(-self.pivot))
 
     def loft(self, mat, sections, segments=32):
@@ -305,24 +316,6 @@ class Part:
 
 # The body and shapes that sit on it.
 
-def rounded(corners, radii, steps=6):
-    """The polyline through corners, each corner cut round (a quadratic curve) radii[i] along its edges."""
-    points = [corners[0]]
-    for i in range(1, len(corners) - 1):
-        c, d = Vector(corners[i]), radii[i]
-        if d <= 0:
-            points.append(corners[i])
-            continue
-        a = c + (Vector(corners[i - 1]) - c).normalized() * d
-        b = c + (Vector(corners[i + 1]) - c).normalized() * d
-        for k in range(steps + 1):
-            t = k / steps
-            p = a * (1 - t) ** 2 + c * 2 * t * (1 - t) + b * t * t
-            points.append((p.x, p.y))
-    points.append(corners[-1])
-    return points
-
-
 def use_body(kind):
     """Makes the shapes below follow that character's body ("girl" or "boy")."""
     global BODY
@@ -331,8 +324,8 @@ def use_body(kind):
 
 def bodies(both=True):
     """The body objects of an item, each a Part to fill in and build, with the shapes following its
-    body while it is filled in: BodyGirl (the cone) then BodyBoy (the capsule) for an item that fits
-    both characters, a single Body (the cone) for a Girl-only one. Use as
+    body while it is filled in: BodyGirl (the triangle) then BodyBoy (the egg) for an item that fits
+    both characters, a single Body (the triangle) for a Girl-only one. Use as
         for body in bodies(): ...; body.build()"""
     for name, kind in (("BodyGirl", "girl"), ("BodyBoy", "boy")) if both else (("Body", "girl"),):
         use_body(kind)
@@ -340,56 +333,60 @@ def bodies(both=True):
     use_body("girl")
 
 
-def body_radius(z):
-    """The body's radius at height z (its straight side, before the rounding)."""
-    return BODY["R0"] + (BODY["R1"] - BODY["R0"]) * (z - BODY_BOTTOM) / (BODY_TOP - BODY_BOTTOM)
-
-
 def _outline(offset):
-    """The body's whole outline as characters.py draws it, offset out by offset, as dense (radius,
-    z) points from the axis under its bottom, round the bottom rim, up the side and over the top
-    back to the axis."""
-    z0, z1 = BODY_BOTTOM - offset, BODY_TOP + offset
-    corners = [(0, z0), (body_radius(z0) + offset, z0), (body_radius(z1) + offset, z1), (0, z1)]
-    points = rounded(corners, [0, BODY["ROUND"][0], BODY["ROUND"][1], 0], steps=8)
-    # Rings every few cm, for smooth shading (and the toon outline).
-    dense = [points[0]]
-    for p, q in zip(points, points[1:]):
-        n = max(1, int(math.dist(p, q) / 0.02))
-        dense += [(p[0] + (q[0] - p[0]) * k / n, p[1] + (q[1] - p[1]) * k / n) for k in range(1, n + 1)]
-    return dense
+    """The body's whole outline as characters.py draws it (BODY, smoothed through its points: a
+    Catmull-Rom curve, mirrored across the axis at both ends so it meets it level), offset out
+    along its normal by offset, as dense (radius, z) points from the axis under its bottom up round
+    its side to the axis over its top. z only grows along it."""
+    pts = [(-BODY[1][0], BODY[1][1])] + BODY + [(-BODY[-2][0], BODY[-2][1])]
+    curve = []
+    for i in range(1, len(pts) - 2):
+        p0, p1, p2, p3 = pts[i - 1:i + 3]
+        n = max(2, int(math.dist(p1, p2) / 0.008))
+        for k in range(n + (1 if i == len(pts) - 3 else 0)):
+            t = k / n
+            curve.append(tuple(0.5 * (2 * p1[c] + (-p0[c] + p2[c]) * t + (2 * p0[c] - 5 * p1[c] + 4 * p2[c] - p3[c]) * t * t +
+                                      (-p0[c] + 3 * p1[c] - 3 * p2[c] + p3[c]) * t ** 3) for c in (0, 1)))
+    out = []
+    for i, (r, z) in enumerate(curve):
+        a, b = curve[max(i - 1, 0)], curve[min(i + 1, len(curve) - 1)]
+        d = Vector((b[0] - a[0], b[1] - a[1])).normalized()
+        out.append((0.0 if r < 1e-6 else r + d.y * offset, z - d.x * offset))
+    return out
 
 
-def _cross(p, q, value, index):
-    """The point between p and q where coordinate index reaches value."""
-    t = (value - p[index]) / (q[index] - p[index])
-    return (p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t)
+def _cross(p, q, z):
+    """The point between p and q at height z."""
+    t = (z - p[1]) / (q[1] - p[1])
+    return (p[0] + (q[0] - p[0]) * t, z)
 
 
 def body_profile(offset=0.0, z0=BODY_BOTTOM, z1=BODY_TOP):
     """The outline of the body offset out by offset, from z0 to z1: at the true bottom it wraps
-    under the rim and ends open WRAP_R from the axis, clear of the legs; at the true top it closes
-    on the axis; cut off at z0 or z1 it ends there, open."""
+    round under the base to the axis (cloth() leaves holes round the legs), at the true top it
+    closes on the axis; cut off at z0 or z1 it ends there, open."""
     pts = _outline(offset)
-    if z0 <= BODY_BOTTOM:
-        i = next(i for i in range(1, len(pts)) if pts[i][0] >= WRAP_R)
-        pts = [_cross(pts[i - 1], pts[i], WRAP_R, 0)] + pts[i:]
-    else:
+    if z0 > BODY_BOTTOM:
         i = next(i for i in range(1, len(pts)) if pts[i][1] >= z0)
-        pts = [_cross(pts[i - 1], pts[i], z0, 1)] + pts[i:]
+        pts = [_cross(pts[i - 1], pts[i], z0)] + pts[i:]
     if z1 < BODY_TOP:
         i = next(i for i in range(1, len(pts)) if pts[i][1] > z1)
-        pts = pts[:i] + [_cross(pts[i - 1], pts[i], z1, 1)]
+        pts = pts[:i] + [_cross(pts[i - 1], pts[i], z1)]
     return pts
 
 
 def surface_r(z):
-    """The body's radius at height z, rounding included."""
+    """The body's radius at height z."""
     pts = _outline(0.0)
     for (r0, z0), (r1, z1) in zip(pts, pts[1:]):
         if z1 > z0 and z0 <= z <= z1:
             return r0 + (r1 - r0) * (z - z0) / (z1 - z0)
     return 0.0
+
+
+def widest():
+    """The body's widest radius and the height of it (low down: the rim of its rounded base)."""
+    return max((r, z) for r, z in _outline(0.0))
 
 
 def body_point(angle_deg, z, out=0.0):
@@ -412,8 +409,13 @@ def body_frame(angle_deg, z):
 
 
 def cloth(part, mat, z0=BODY_BOTTOM, z1=BODY_TOP, out=TOP_OUT, cuts=()):
-    """Cloth over the body from z0 to z1, out from it by out."""
-    part.lathe(mat, body_profile(out, z0, z1), cuts=cuts)
+    """Cloth over the body from z0 to z1, out from it by out; from the true bottom it wraps round
+    under the base, with a hole round each leg (LEG_HOLE) where the legs come out."""
+    if z0 > BODY_BOTTOM:
+        part.lathe(mat, body_profile(out, z0, z1), cuts=cuts)
+        return
+    holes = [((x, 0.0), LEG_HOLE, widest()[1]) for x in (-LEG_X, LEG_X)]
+    part.lathe(mat, body_profile(out, z0, z1), cuts=cuts, segments=96, holes=holes)
 
 
 def on_body(part, mat, path, radius, out=TOP_OUT, closed=False, steps=6):

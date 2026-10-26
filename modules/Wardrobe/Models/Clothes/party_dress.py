@@ -18,7 +18,7 @@ bow = material("Bow", (0.7, 0.45, 0.92))
 for body in bodies():
     OUT = TOP_OUT + 0.002
     cloth(body, pink, out=OUT)
-    z = BODY_BOTTOM + 0.03
+    z = widest()[1] - 0.012
     for k in range(18):
         a = k / 18 * 360
         p, n = body_point(a, z, OUT + 0.022)

@@ -1,4 +1,4 @@
-# Skirt (Bottom, girl, shop): a pleated pink skirt flaring round the cone's lower band down past its bottom edge, with a cream waistband (no legs: they come out under it).
+# Skirt (Bottom, girl, shop): a pleated pink skirt flaring round the body's lower band out past the rim of its rounded base, lined round under the base, with a cream waistband (no legs: they come out under it).
 # Run from the repository root (writes skirt.glb next to this script):
 #   blender -b --factory-startup --python modules/Wardrobe/Models/Clothes/skirt.py
 # Shapes and rig sizes: ../kit.py.
@@ -15,8 +15,10 @@ pink = material("Cloth", (1.0, 0.62, 0.7))
 pleat = material("Pleat", (0.92, 0.5, 0.6))
 band = material("Band", (1.0, 0.94, 0.85))
 for body in bodies(both=False):
-    top, bottom = BAND_TOP, BODY_BOTTOM - 0.005
-    r_top, r_bottom = surface_r(top) + BOTTOM_OUT, body_radius(BODY_BOTTOM) + 0.045
+    top, bottom = BAND_TOP, widest()[1] - 0.03
+    r_top, r_bottom = surface_r(top) + BOTTOM_OUT, widest()[0] + 0.045
+    # The lining round under the rounded base (the legs come out through it).
+    cloth(body, pink, BODY_BOTTOM, top, out=BOTTOM_OUT)
     body.lathe(pink, [(r_top + (r_bottom - r_top) * k / 8, top + (bottom - top) * k / 8) for k in range(9)][::-1])
     for k in range(16):
         t = k / 16 * 2 * math.pi

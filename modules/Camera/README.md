@@ -25,8 +25,8 @@ and publishes one `CameraPose` per fixed tick.
     second) once the view clears.
   - **Aim camera.** While `BowState.Draw` > 0, and for `AimHoldSeconds` (0.4 s) after the shot,
     the camera eases (`AimTransitionSeconds`, 0.25 s, `Aiming` 0..1) to an orbit point
-    (`AimPivot`) `AimSide` (0.9 m) to the side of the head's center (`BowGeometry.HeadUp`, 1.28 m:
-    the round head of the 1.47 m character) and
+    (`AimPivot`) `AimSide` (0.9 m) to the side of the head's center (`BowGeometry.HeadUp`, 1.11 m:
+    the round head of the 1.30 m character) and
     `AimRaise` (0.25 m) above it, `AimDistance` (2.75 m) behind it (`AimView`). The side is the
     hold point's (`AimSideSign`, from the sign of `BowGeometry.HoldRight`): the right, so the view
     is over the right shoulder and the bow held on the right shows beside the round head instead
@@ -42,7 +42,8 @@ and publishes one `CameraPose` per fixed tick.
   - **Front view.** While `Fungtopia.Wardrobe.WardrobeState.Open` (the wardrobe or Abby's shop)
     or `Fungtopia.StartScreen.StartScreenState.Open`, the camera swings round to the player's
     front (`FrontView`), like the character creation screen: `FrontDistance` (2.75 m) from the
-    chest, level at `ChestHeight` (0.6 m above the feet), turned right by `FrameAngle` so the
+    chest, level at `ChestHeight` (0.55 m above the feet, the chest of the 0.36..0.88 m body, about half
+    `BowGeometry.HeadUp`), turned right by `FrameAngle` so the
     whole player (head to feet) stands in the middle of the screen's left half (`FrameScreenX`
     -0.5 at the 70 degree `FieldOfView`, 16:9), clear of a panel on the right. The side it looks
     from (`FrontYaw`, the arm's yaw) is fixed when the view begins (again after a teleport),
@@ -61,8 +62,8 @@ and publishes one `CameraPose` per fixed tick.
   loads, so the Input module aims through it; its FOV is the pose's `FieldOfView`. Each frame it is placed between the last two
   poses (a jump of more than 3 m is a cut).
 - `Tests/`: xUnit tests of `CameraModule` with a fake `IMessageBus`: orbit limits, smooth
-  following, ground, trunk and wall pull-in, the front view's framing (left half, inside the home
-  room), holding still and transitions, the aim camera (right of and above the head, on the hold point's side, the head not
+  following, ground, trunk and wall pull-in, the front view's framing (the whole 1.30 m character and a hat in the left half, the chest height,
+  inside the home room), holding still and transitions, the aim camera (right of and above the head, on the hold point's side, the head not
   hiding the hold point at level and ±20 degree aims, the same view direction, smooth easing in and out,
   pull-in), determinism.
 

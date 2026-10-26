@@ -4,18 +4,21 @@
 #   blender -b --factory-startup --python modules/Player/Models/characters.py
 #
 # Simple clean shapes, from Saria's drawing "you choose between these" (girl and boy; Tony,
-# 2026-10-26: follow it closely, keep the height, no mouth, no hair): about 1.47 m tall, the head a
-# quarter of it, the body half, the legs a quarter. A big plain round ball of a head (0.38 m across,
-# its top at 1.47 m) floating 4 cm above the body (no neck) with only two big dark oval eyes with
-# white sparkles, set low on the face and wide apart, and small soft rosy cheeks: no mouth, no nose,
-# no hair. The Girl's body is a tall cone (a triangle from the front: her pink spotted dress, 0.4 m
-# wide at the bottom, narrow and round at the top), the Boy's a tall rounded capsule 0.32 m wide (his
-# blue shirt) with a big red bow tie at its top, two buttons and a band of trousers round its
-# bottom. Big oval hands (0.14 x 0.18 m) with three finger lines float well out beside the body at
-# about its middle (no arms); two plain straight tube legs come out from under the body down to
-# rounded feet (the shoes). A bow is carried on the back (its tips little mushroom-red caps). Both
-# share one modular rig (skin body parts) with the outfit as separate child objects, so the game can
-# swap them for the Wardrobe's clothes (see build()); hair styles are the Wardrobe's.
+# 2026-10-26: follow it closely, no mouth, no hair; then "too elongated, the torso should be somewhat
+# shorter and more rounded at the base, and the legs should be further apart but still within the
+# base of the torso"): about 1.30 m tall. A big plain round ball of a head (0.38 m across, its top
+# at 1.30 m) floating 4 cm above the body (no neck) with only two big dark oval eyes with white
+# sparkles, set low on the face and wide apart, and small soft rosy cheeks: no mouth, no nose, no
+# hair. The body is short (0.36 to 0.88 m) and round at the base: the Girl's a triangle from the
+# front (her pink spotted dress, 0.42 m wide low down, narrow and round at the top) with a fully
+# rounded, softly curved bottom, the Boy's a soft egg (his blue shirt; 0.28 m wide near the top,
+# widest, 0.38 m, low down, curving round underneath) with a big red bow tie at its top, two buttons
+# and a band of trousers round and under its base. Big oval hands (0.14 x 0.18 m) with three finger
+# lines float well out beside the body at about its middle (no arms); two plain straight tube legs,
+# wide apart, come out from under the base (inside its outline seen from the front) down to rounded
+# feet (the shoes). A bow, sized to the body, is carried on the back (its tips little mushroom-red
+# caps). Both share one modular rig (skin body parts) with the outfit as separate child objects, so
+# the game can swap them for the Wardrobe's clothes (see build()); hair styles are the Wardrobe's.
 #
 # Meters, feet at the origin, facing Blender +Y (Godot's -Z, forward, after the glTF export).
 # Separate objects, each with its pivot where it moves, so the game can animate them:
@@ -63,29 +66,36 @@ ARM_LENGTH = 0.46
 HAND_BOW_SCALE = 1.3
 
 # Heights (meters): the hips (the body's and the legs' pivots), the neck (the head's pivot), the
-# head (a ball of HEAD_R round HEAD_Z: its top at 1.47 m, its bottom 4 cm above the body's top).
+# head (a ball of HEAD_R round HEAD_Z: its top at 1.30 m, its bottom 4 cm above the body's top).
 HIP_Z = 0.42
-NECK_Z = 1.07
-HEAD_R, HEAD_Z = 0.19, 1.28
-# The body, a solid of revolution from BODY_BOTTOM (radius R0) to BODY_TOP (radius R1), its bottom
-# rim and its top rounded off by ROUND (bottom, top): the Girl's a cone (a triangle from the front),
-# the Boy's a capsule.
-BODY_BOTTOM, BODY_TOP = 0.36, 1.05
+NECK_Z = 0.90
+HEAD_R, HEAD_Z = 0.19, 1.11
+# The body, a smooth solid of revolution from BODY_BOTTOM to BODY_TOP (Tony, 2026-10-26: shorter
+# and rounder at the base): its outline as (radius, z) points from the axis under its bottom round
+# to the axis over its top, smoothed through them. The Girl's a triangle from the front (narrow and
+# round at the top, 0.42 m wide low down) with a fully rounded, softly curved bottom; the Boy's a
+# soft egg (0.28 m wide near the top, widest, 0.38 m, low down, curving round underneath).
+BODY_BOTTOM, BODY_TOP = 0.36, 0.88
 BODIES = {
-    "girl": {"R0": 0.21, "R1": 0.035, "ROUND": (0.05, 0.09)},
-    "boy": {"R0": 0.16, "R1": 0.16, "ROUND": (0.08, 0.14)},
+    "girl": [(0, 0.36), (0.07, 0.362), (0.125, 0.37), (0.168, 0.386), (0.197, 0.41), (0.21, 0.44),
+             (0.2, 0.48), (0.165, 0.57), (0.128, 0.665), (0.092, 0.76), (0.064, 0.828), (0.042, 0.862),
+             (0.02, 0.877), (0, 0.88)],
+    "boy": [(0, 0.36), (0.07, 0.363), (0.125, 0.376), (0.163, 0.4), (0.184, 0.433), (0.19, 0.465),
+            (0.185, 0.51), (0.172, 0.575), (0.157, 0.645), (0.143, 0.72), (0.131, 0.785), (0.108, 0.835),
+            (0.072, 0.866), (0.035, 0.878), (0, 0.88)],
 }
 BODY = BODIES["girl"]
-# The legs: straight tubes (radius LEG_R) from the hips (LEG_X out) down into the rounded feet.
-LEG_X, LEG_R = 0.08, 0.06
+# The legs: straight tubes (radius LEG_R) from the hips (LEG_X out, inside the base's outline seen
+# from the front) down into the rounded feet.
+LEG_X, LEG_R = 0.11, 0.06
 FOOT_C = (0.025, 0.056)          # the foot's center, forward (Blender y) and up, under its leg
 FOOT_SIZE = (0.075, 0.1, 0.056)  # its radii: a little wider than the leg
 # The hands: ovals (radii) at the ends of the invisible arms from the shoulders.
 HAND_SIZE = (0.07, 0.055, 0.09)
 SHOULDER = (0.06, NECK_Z - 0.01)
-HAND_REACH = (0.273, 0.03, -0.373)  # shoulder to hand, outward (x), forward, up; ARM_LENGTH long
+HAND_REACH = (0.34, 0.03, -0.31)  # shoulder to hand, outward (x), forward, up; ARM_LENGTH long
 # The Boy's trousers: a band round the bottom of the body, up to here.
-TROUSERS_TOP = 0.52
+TROUSERS_TOP = 0.49
 
 # The nocked arrow, nock to tip; the game keeps CharacterModel.cs and ArcheryPose.cs in step.
 NOCK_ARROW_LENGTH = 0.78
@@ -278,57 +288,80 @@ def empty(name, pivot):
     return obj
 
 
-def rounded(corners, radii, steps=6):
-    """The polyline through corners, each corner cut round (a quadratic curve) radii[i] along its edges."""
-    points = [corners[0]]
-    for i in range(1, len(corners) - 1):
-        c, d = Vector(corners[i]), radii[i]
-        if d <= 0:
-            points.append(corners[i])
-            continue
-        a = c + (Vector(corners[i - 1]) - c).normalized() * d
-        b = c + (Vector(corners[i + 1]) - c).normalized() * d
-        for k in range(steps + 1):
-            t = k / steps
-            p = a * (1 - t) ** 2 + c * 2 * t * (1 - t) + b * t * t
-            points.append((p.x, p.y))
-    points.append(corners[-1])
-    return points
+def outline(offset=0.0):
+    """The body's whole outline (BODY, smoothed through its points: a Catmull-Rom curve, mirrored
+    across the axis at both ends so it meets it level), offset out along its normal by offset, as
+    dense (radius, z) points from the axis under its bottom up round its side to the axis over its
+    top. z only grows along it."""
+    pts = [(-BODY[1][0], BODY[1][1])] + BODY + [(-BODY[-2][0], BODY[-2][1])]
+    curve = []
+    for i in range(1, len(pts) - 2):
+        p0, p1, p2, p3 = pts[i - 1:i + 3]
+        n = max(2, int(math.dist(p1, p2) / 0.008))
+        for k in range(n + (1 if i == len(pts) - 3 else 0)):
+            t = k / n
+            curve.append(tuple(0.5 * (2 * p1[c] + (-p0[c] + p2[c]) * t + (2 * p0[c] - 5 * p1[c] + 4 * p2[c] - p3[c]) * t * t +
+                                      (-p0[c] + 3 * p1[c] - 3 * p2[c] + p3[c]) * t ** 3) for c in (0, 1)))
+    out = []
+    for i, (r, z) in enumerate(curve):
+        a, b = curve[max(i - 1, 0)], curve[min(i + 1, len(curve) - 1)]
+        d = Vector((b[0] - a[0], b[1] - a[1])).normalized()
+        out.append((0.0 if r < 1e-6 else r + d.y * offset, z - d.x * offset))
+    return out
 
 
-def body_radius(z):
-    """The body's radius at height z (its straight side, before the rounding)."""
-    return BODY["R0"] + (BODY["R1"] - BODY["R0"]) * (z - BODY_BOTTOM) / (BODY_TOP - BODY_BOTTOM)
+def _cross(p, q, z):
+    """The point between p and q at height z."""
+    t = (z - p[1]) / (q[1] - p[1])
+    return (p[0] + (q[0] - p[0]) * t, z)
 
 
 def body_profile(offset=0.0, z0=BODY_BOTTOM, z1=BODY_TOP):
-    """The outline of the body (offset out by offset, for the clothes over it) from z0 to z1;
-    rounded at its true bottom rim and top, flat where it is cut off."""
-    bottom, top = z0 <= BODY_BOTTOM, z1 >= BODY_TOP
-    z0, z1 = (z0 - offset if bottom else z0), (z1 + offset if top else z1)
-    corners = [(0, z0), (body_radius(z0) + offset, z0), (body_radius(z1) + offset, z1), (0, z1)]
-    points = rounded(corners, [0, BODY["ROUND"][0] if bottom else 0, BODY["ROUND"][1] if top else 0, 0], steps=8)
-    # Rings every few cm up the straight side, for smooth shading (and the toon outline).
-    dense = [points[0]]
-    for p, q in zip(points, points[1:]):
-        n = max(1, int(math.dist(p, q) / 0.03))
-        dense += [(p[0] + (q[0] - p[0]) * k / n, p[1] + (q[1] - p[1]) * k / n) for k in range(1, n + 1)]
-    return dense
+    """The outline of the body (offset out by offset, for the clothes over it) from z0 to z1: round
+    under its bottom and over its top to the axis where it reaches them, open where it is cut off."""
+    pts = outline(offset)
+    if z0 > BODY_BOTTOM:
+        i = next(i for i in range(1, len(pts)) if pts[i][1] >= z0)
+        pts = [_cross(pts[i - 1], pts[i], z0)] + pts[i:]
+    if z1 < BODY_TOP:
+        i = next(i for i in range(1, len(pts)) if pts[i][1] > z1)
+        pts = pts[:i] + [_cross(pts[i - 1], pts[i], z1)]
+    return pts
+
+
+def surface_r(z):
+    """The body's radius at height z."""
+    pts = outline()
+    for (r0, z0), (r1, z1) in zip(pts, pts[1:]):
+        if z1 > z0 and z0 <= z <= z1:
+            return r0 + (r1 - r0) * (z - z0) / (z1 - z0)
+    return 0.0
+
+
+def body_point(angle, z, out=0.0):
+    """A point out from the body's surface (along its normal) angle degrees round from the front
+    (positive toward -x), at height z, and that normal."""
+    dz = 0.004
+    slope = (surface_r(z + dz) - surface_r(z - dz)) / (2 * dz)
+    t = math.radians(angle + 90)
+    radial = Vector((math.cos(t), math.sin(t), 0))
+    normal = (radial - Vector((0, 0, slope))).normalized()
+    return radial * surface_r(z) + Vector((0, 0, z)) + normal * out, normal
+
+
+STRAP_Z = 0.65
 
 
 def strap_cuts(half_width):
     """The two planes that leave a slanted band (the bow's strap) round the body."""
     n = Vector((math.sin(math.radians(35)), 0, math.cos(math.radians(35))))
-    c = Vector((0, 0, 0.74))
+    c = Vector((0, 0, STRAP_Z))
     return ((c + n * half_width, n), (c - n * half_width, -n))
 
 
 def spot_on_body(part, mat, angle, z, size):
     """A flat round spot on the body's cloth, angle degrees round from the front, at height z."""
-    t = math.radians(angle + 90)
-    normal = Vector((math.cos(t), math.sin(t), (BODY["R0"] - BODY["R1"]) / (BODY_TOP - BODY_BOTTOM))).normalized()
-    r = body_radius(z) + 0.008
-    center = Vector((math.cos(t) * r, math.sin(t) * r, z)) + normal * 0.003
+    center, normal = body_point(angle, z, 0.011)
     part.sphere(mat, center, (size, size, size * 0.3), rotation=normal.to_track_quat("Z", "Y").to_matrix().to_4x4(),
                 segments=16, rings=8)
 
@@ -388,7 +421,7 @@ def build(kind):
         ribbon_bow(ribbon, mats["Ribbon"], head_c + Vector((0.05, 0.02, HEAD_R * 0.97)), 0.065)
         ribbon.build(head_obj)
 
-    # Body: a smooth skin shape (the Girl's cone, the Boy's capsule) under the head, the legs coming
+    # Body: a smooth skin shape (the Girl's rounded triangle, the Boy's egg) under the head, the legs coming
     # out from under it, with the bow's strap across it. The outfit colors it (a slightly bigger
     # shape over it).
     body = Part("Body", (0, 0, hip_z))
@@ -399,19 +432,19 @@ def build(kind):
     if girl:
         # The dress colors the whole triangle, with white spots like a mushroom cap.
         top.lathe(mats["Cloth"], body_profile(0.008))
-        for a, z in ((20, 0.44), (-40, 0.42), (75, 0.47), (-95, 0.44), (140, 0.45), (-150, 0.46), (180, 0.41),
-                     (5, 0.6), (-70, 0.58), (110, 0.6), (-130, 0.62), (40, 0.75), (-15, 0.78), (160, 0.74), (-100, 0.73)):
-            spot_on_body(top, mats["Spots"], a, z, 0.035)
+        for a, z in ((20, 0.415), (-40, 0.4), (75, 0.43), (-95, 0.415), (140, 0.42), (-150, 0.425), (180, 0.4),
+                     (5, 0.53), (-70, 0.52), (110, 0.53), (-130, 0.545), (40, 0.64), (-15, 0.665), (160, 0.635), (-100, 0.63)):
+            spot_on_body(top, mats["Spots"], a, z, 0.032)
     else:
-        # The shirt colors the capsule above the trousers, with a big bow tie at the top (about as
+        # The shirt colors the egg above the trousers, with a big bow tie at the top (about as
         # wide as the body) and two buttons.
         top.lathe(mats["Cloth"], body_profile(0.008, TROUSERS_TOP - 0.03, BODY_TOP + 0.008))
-        ribbon_bow(top, mats["Ribbon"], (0, BODY["R0"] + 0.025, 0.93), 0.095)
-        for z in (0.8, 0.68):
+        ribbon_bow(top, mats["Ribbon"], (0, surface_r(0.79) + 0.025, 0.79), 0.08)
+        for z in (0.69, 0.6):
             spot_on_body(top, mats["Spots"], 0, z, 0.022)
     top.build(body_obj)
     if not girl:
-        # The trousers: a band round the bottom of the capsule.
+        # The trousers: a band round and under the rounded base of the egg.
         trousers = piece("DefaultBottom", body)
         trousers.lathe(mats["Legs"], body_profile(0.016, BODY_BOTTOM - 0.008, TROUSERS_TOP))
         trousers.build(body_obj)
@@ -444,8 +477,8 @@ def build(kind):
     # against the back, its tips and string stick out behind.
     # HandBow is the same bow without the string (the game draws it, bent by the draw), with the
     # sling as its rotation: its own frame is the arc frame below, Godot's held-bow frame.
-    grip = (0, -(body_radius(0.74) + 0.035), 0.74)
-    major, half_arc = 0.42, 0.34 * math.pi
+    grip = (0, -(surface_r(STRAP_Z) + 0.035), STRAP_Z)
+    major, half_arc = 0.34, 0.34 * math.pi
     # Arc frame: local x is depth (the arc's middle at x = 0, tips toward -x), local y the span.
     frame = Matrix(((0, 0, 1, 0), (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 0, 1)))  # x->+Y, y->+Z, z->+X
     slant = Matrix.Rotation(math.radians(38), 4, "Y")

@@ -5,8 +5,8 @@ namespace Fungtopia.Wardrobe.View;
 
 /// <summary>
 /// For previews only: the Player module's simple-shapes rig (its boy.glb or girl.glb by
-/// <see cref="Character"/>, read as a file: a round bald head floating over the Boy's capsule or the
-/// Girl's cone body, floating oval hands, tube legs into rounded feet) dressed from an
+/// <see cref="Character"/>, read as a file: a round bald head floating over the Boy's egg or the
+/// Girl's rounded triangle body, floating oval hands, tube legs into rounded feet) dressed from an
 /// <see cref="AppearanceState"/>: skin and eye colors, the hair style in its color ("No hair": none),
 /// and each worn item's objects parented to the rig part they go on with no offset
 /// (<see cref="Attach.PartFor"/>: a BodyGirl or BodyBoy object only on that character's body). The

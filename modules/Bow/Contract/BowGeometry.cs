@@ -11,7 +11,7 @@ namespace Fungtopia.Bow;
 /// <c>Fungtopia.Player.PlayerState.Facing</c> and Right is (cos Facing, 0, -sin Facing).
 /// The bow is held on the character's right side by the left hand (reaching forward and across
 /// the chest) at chest height, right of and below the big round head (a 0.38 m ball, its center
-/// <see cref="HeadUp"/> above the feet, its top at about 1.47 m), more than
+/// <see cref="HeadUp"/> above the feet, its top at about 1.30 m), more than
 /// <see cref="MinHeadClearance"/> from the head's center, so the over-the-right-shoulder aim camera
 /// sees it; the right hand draws the string back toward the right of the head (the short invisible
 /// arms reach about chest height, below the chin).
@@ -21,20 +21,23 @@ public static class BowGeometry
     /// <summary>The bow hand is this far to the character's right of its feet, meters (positive: on the right).</summary>
     public const float HoldRight = 0.42f;
 
-    /// <summary>The bow hand is this high above the feet (chest height of the body, 0.36..1.05 m; below the head), meters.</summary>
-    public const float HoldUp = 0.95f;
+    /// <summary>The bow hand is this high above the feet (chest height of the body, 0.36..0.88 m; below the head), meters.</summary>
+    public const float HoldUp = 0.78f;
 
     /// <summary>The bow hand is this far ahead of the feet along the facing, meters.</summary>
     public const float HoldForward = 0.32f;
 
     /// <summary>The round head's center is this high above the feet (over them), meters.</summary>
-    public const float HeadUp = 1.28f;
+    public const float HeadUp = 1.11f;
+
+    /// <summary>The round head's radius (a 0.38 m ball round <see cref="HeadUp"/>), meters.</summary>
+    public const float HeadRadius = 0.19f;
 
     /// <summary>
-    /// The hold point is at least this far from the head's center (the head's 0.19 m radius and
-    /// the bow's grip with room to spare; it is about 0.72 m), meters.
+    /// The hold point is at least this far from the head's center: the head's radius
+    /// (<see cref="HeadRadius"/>) and the bow's grip with room to spare (it is about 0.61 m), meters.
     /// </summary>
-    public const float MinHeadClearance = 0.45f;
+    public const float MinHeadClearance = HeadRadius + 0.26f;
 
     /// <summary>
     /// How far the string (and the nocked arrow's back) comes back from the bow toward the

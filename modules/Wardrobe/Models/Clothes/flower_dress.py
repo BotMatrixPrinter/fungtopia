@@ -19,7 +19,7 @@ sash = material("Sash", (0.45, 0.78, 0.45))
 for body in bodies(both=False):
     OUT = TOP_OUT + 0.002
     cloth(body, yellow, out=OUT)
-    ring(body, white, BODY_BOTTOM + 0.03, 0.016, out=OUT)
+    ring(body, white, widest()[1] - 0.012, 0.016, out=OUT)
     z = at(0.65)
     ring(body, sash, z, 0.016, out=OUT)
     for side in (-1, 1):

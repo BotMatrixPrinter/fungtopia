@@ -66,12 +66,12 @@ public static class ArcheryPose
 
     /// <summary>
     /// The held bow's string at rest is this far behind the grip, and its tips this far above and
-    /// below it, meters (the HandBow in characters.py, 1.3 times the slung bow: arc radius 0.546 over ±0.34π).
+    /// below it, meters (the HandBow in characters.py, 1.3 times the slung bow: arc radius 0.442 over ±0.34π: the bow sized to the shorter body).
     /// </summary>
-    public const float StringRest = 0.283f;
+    public const float StringRest = 0.229f;
 
     /// <inheritdoc cref="StringRest"/>
-    public const float TipHalfSpan = 0.478f;
+    public const float TipHalfSpan = 0.387f;
 
     /// <summary>The nocked arrow from nock to tip, meters (NockArrow in characters.py).</summary>
     public const float ArrowLength = 0.78f;
@@ -207,16 +207,16 @@ public static class ArcheryPose
     public static readonly Vector3 BodyPivot = new(0f, 0.42f, 0f);
 
     /// <summary>The head's pivot (the neck) at rest; it rides on the body.</summary>
-    public static readonly Vector3 NeckRest = new(0f, 1.07f, 0f);
+    public static readonly Vector3 NeckRest = new(0f, 0.90f, 0f);
 
     /// <summary>The head's middle above the neck (the 0.38 m ball floating over the body).</summary>
     public const float HeadAboveNeck = 0.21f;
 
     /// <summary>The head's radius.</summary>
-    public const float HeadRadius = 0.19f;
+    public const float HeadRadius = BowGeometry.HeadRadius;
 
     /// <summary>The left shoulder (ArmL's pivot) at rest; the right one is its mirror.</summary>
-    public static readonly Vector3 ShoulderLRest = new(-0.06f, 1.06f, 0f);
+    public static readonly Vector3 ShoulderLRest = new(-0.06f, 0.89f, 0f);
 
     /// <summary>
     /// The arms' length, shoulder to hand center (ArmL / ArmR in characters.py: hanging, the
@@ -225,7 +225,7 @@ public static class ArcheryPose
     public const float ArmLength = 0.46f;
 
     /// <summary>The left arm's direction at rest, shoulder to hand (down and a little out); the right one is its mirror.</summary>
-    public static readonly Vector3 ArmLRestDirection = Vector3.Normalize(new Vector3(-0.273f, -0.373f, -0.03f));
+    public static readonly Vector3 ArmLRestDirection = Vector3.Normalize(new Vector3(-0.34f, -0.31f, -0.03f));
 
     /// <summary>
     /// How far the body turns to the right of the aim in the full pose (the left shoulder coming
@@ -246,7 +246,7 @@ public static class ArcheryPose
     /// </summary>
     public const float MaxHipShift = 0.2f;
 
-    /// <summary>The torso's back is this far behind its middle (the body's axis), meters: its back plane (the capsule's 0.16 m radius and the slung bow's strap).</summary>
+    /// <summary>The torso's back is this far behind its middle (the body's axis), meters: its back plane (the bodies' 0.14..0.17 m radius at the chest and the slung bow's strap).</summary>
     public const float TorsoBack = 0.17f;
 
     /// <summary>The held bow's top tilts this far away from the head (radians about its forward), like a cute archer's.</summary>

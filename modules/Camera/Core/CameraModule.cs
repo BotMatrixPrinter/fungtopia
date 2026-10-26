@@ -48,8 +48,11 @@ public sealed class CameraModule : IModule, IMessageHandler<PlayerState>, IMessa
 
     /// <summary>Front view: distance from the player's chest to the camera, meters.</summary>
     public const float FrontDistance = 2.75f;
-    /// <summary>Front view: height of the camera (and the point it looks at) above the feet, meters.</summary>
-    public const float ChestHeight = 0.6f;
+    /// <summary>
+    /// Front view: height of the camera (and the point it looks at) above the feet, meters: the
+    /// chest, about half the head's height (<see cref="BowGeometry.HeadUp"/>; the body is 0.36..0.88 m).
+    /// </summary>
+    public const float ChestHeight = 0.55f;
     /// <summary>The camera's vertical field of view (the view's <c>Camera3D.Fov</c>), radians: 70 degrees.</summary>
     public const float FieldOfView = CameraPose.DefaultFieldOfView;
     /// <summary>The screen's width over its height the front view is framed for (1920 x 1080).</summary>

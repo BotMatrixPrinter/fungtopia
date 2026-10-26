@@ -330,17 +330,25 @@ public class ModelFitTests
     }
 
     [Fact]
-    public void TheRigsHaveTheConeAndCapsuleBodiesThePartsAndThePivotsAttachNames()
+    public void TheRigsHaveTheShortRoundBasedBodiesThePartsAndThePivotsAttachNames()
     {
         foreach (var rig in s_rigs)
         {
-            Assert.InRange(rig.Bottom, 0.34f, 0.38f);
-            Assert.InRange(rig.Top, 1.03f, 1.07f);
+            // The shorter body (0.36 to 0.88 m), the head lowered with it, 4 cm above it.
+            Assert.InRange(rig.Bottom, 0.35f, 0.37f);
+            Assert.InRange(rig.Top, 0.87f, 0.89f);
             Assert.InRange(rig.HeadBottom - rig.Top, 0.02f, 0.06f);
             Assert.InRange(rig.HeadRadius, 0.18f, 0.2f);
-            Assert.InRange(rig.HeadCenter.Y, 1.26f, 1.3f);
+            Assert.InRange(rig.HeadCenter.Y, 1.09f, 1.13f);
             Assert.InRange(rig.LegRadius, 0.055f, 0.065f);
             Assert.True(rig.LegLow < 0.12f && rig.LegHigh > rig.Bottom, $"{rig.File}: the legs come out from under the body down to the feet");
+            // The legs wider apart (hips at x -/+0.11), still inside the base's outline seen from the front.
+            Assert.Equal(0.11f, Attach.LegRPivot.X, 3);
+            Assert.True(Attach.LegRPivot.X + rig.LegRadius < rig.MaxR, $"{rig.File}: the legs are not inside the base");
+            // Rounded underneath: the widest low down, the outline curving in under it.
+            float widestY = rig.Rings.First(r => r.R == rig.MaxR).Y;
+            Assert.InRange(widestY, rig.Bottom + 0.05f, rig.Bottom + 0.15f);
+            Assert.True(rig.R(rig.Bottom + 0.01f) < 0.75f * rig.MaxR, $"{rig.File}: the base is not rounded underneath");
             foreach (var (eye, _) in rig.Eyes)
                 Assert.True(eye.Z < -0.1f && eye.Y < rig.HeadCenter.Y && MathF.Abs(eye.X) > 0.04f, $"{rig.File}: an eye at {eye}");
             foreach (var (hand, radius) in rig.Hands)
@@ -351,10 +359,12 @@ public class ModelFitTests
             Assert.True(Vector3.Distance(Attach.LegRPivot, rig.Glb.Origin(Attach.LegR)) < 0.001f, rig.File);
         }
         var (girl, boy) = (s_rigs[0], s_rigs[1]);
-        Assert.True(girl.R(girl.Bottom + 0.06f) > 2.5f * girl.R(girl.Top - 0.12f), "the Girl's body is a cone, wide at the bottom");
+        Assert.Equal(0.21f, girl.MaxR, 2);
+        Assert.True(girl.MaxR > 2.5f * girl.R(girl.Top - 0.08f), "the Girl's body is a triangle, wide low down");
         float h = boy.Top - boy.Bottom;
-        Assert.True(MathF.Abs(boy.R(boy.Bottom + h * 0.3f) - boy.R(boy.Bottom + h * 0.7f)) < 0.003f, "the Boy's body is a capsule, straight up the side");
-        Assert.InRange(boy.R(boy.Bottom + h / 2), 0.14f, 0.18f);
+        Assert.Equal(0.19f, boy.MaxR, 2);
+        Assert.InRange(boy.R(boy.Bottom + h * 0.8f), 0.12f, 0.15f);
+        Assert.True(boy.R(boy.Bottom + h * 0.3f) > boy.R(boy.Bottom + h * 0.6f) + 0.01f, "the Boy's body is an egg, wider low down");
     }
 
     [Fact]
@@ -478,9 +488,10 @@ public class ModelFitTests
             var glb = Model(item.ModelPath);
             if (item.Id == "skirt")
             {
-                // The skirt flares out round the cone past its bottom edge; the legs come out under it.
+                // The skirt flares out round the body past the rim of its rounded base; the legs come out under it.
                 var (_, rig, v) = Bodies(item, glb).Single();
-                Assert.True(v.Where(p => p.Y < rig.Bottom + 0.01f).Max(Radius) > rig.R(rig.Bottom) + 0.03f, "the skirt flares");
+                float rim = rig.Rings.First(r => r.R == rig.MaxR).Y;
+                Assert.True(v.Where(p => p.Y < rim).Max(Radius) > rig.MaxR + 0.03f, "the skirt flares");
                 Assert.False(glb.Has(Attach.LegL) || glb.Has(Attach.LegR), "the skirt has no legs");
                 continue;
             }

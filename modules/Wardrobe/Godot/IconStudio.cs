@@ -79,7 +79,7 @@ public partial class IconStudio : Node
         root.AddChild(new MeshInstance3D
         {
             Mesh = new SphereMesh { Radius = 0.19f, Height = 0.38f },
-            Position = new Vector3(0f, 1.28f, 0f),
+            Position = new Vector3(0f, 1.11f, 0f),
             MaterialOverride = ToonGlb.Material(WardrobeStyle.ToColor(Looks.SkinTones[1])),
         });
         return root;

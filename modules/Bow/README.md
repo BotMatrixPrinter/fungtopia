@@ -30,14 +30,15 @@ Test it with `./test.sh Bow` from the repository root.
 `BowGeometry` (a static class, not a message) is where the character holds the bow, for the Player
 module to put the bow hand there and for the Bow module to shoot from:
 
-- `HoldRight` 0.42 (0.42 m to the right), `HoldUp` 0.95, `HoldForward` 0.32 (`HoldOffset` as a
+- `HoldRight` 0.42 (0.42 m to the right), `HoldUp` 0.78, `HoldForward` 0.32 (`HoldOffset` as a
   `Vector3`, X Right, Y Up, Z Forward): the hold point, an offset in meters from the player's feet
-  in the player's facing frame: the bow held at chest height (the body is 0.36 to 1.05 m) on the
+  in the player's facing frame: the bow held at chest height (the body is 0.36 to 0.88 m; lowered with the chest when the body got shorter) on the
   player's right side by the left hand (reaching across the chest), while the right hand draws the
   string back to the right of the head, at chest height below the chin.
   Forward is the facing (-sin Facing, 0, -cos Facing), Right is (cos Facing, 0, -sin Facing).
-- `HeadUp` 1.28: the round head's center (a 0.38 m ball, its top at 1.47 m) above the feet. The
-  hold point is about 0.62 m from it, at least `MinHeadClearance` 0.45 m, right of and below the
+- `HeadUp` 1.11: the round head's center (a ball of `HeadRadius` 0.19 m, its top at 1.30 m) above
+  the feet. The hold point is about 0.62 m from it, at least `MinHeadClearance` 0.45 m (the head's
+  radius and 0.26 m of room for the bow), right of and below the
   head's outline seen from behind, so the over-the-right-shoulder aim camera (right of the head)
   sees the bow.
 - `HoldPoint(feet, facing)`: that point in the world.

@@ -22,8 +22,9 @@ after defeat until it is teleported (to the clinic the next morning).
   also the save part's round trip and bad saved Json),
   `ArcheryPose` and `CharacterLook` (also standing idle and turning while the wardrobe is open),
   and of `girl.glb` and `boy.glb` read back (the rig's parts and pivots; the big bald round head
-  with only two big dark eyes floating over the Girl's cone or the Boy's capsule with its big bow
-  tie; the big floating oval hands with finger lines, the tube legs and rounded feet, no arm
+  with only two big dark eyes floating over the Girl's rounded triangle or the Boy's egg with its big bow
+  tie, both bodies shorter (0.36 to 0.88 m) and round at the base with no sharp rim; the big floating
+  oval hands with finger lines, the tube legs set wide apart inside the base and rounded feet, the bow sized to the body, no arm
   meshes, no hair or mouth; the vivid mushroom colors and materials, the other colors unchanged).
 
 Test it with `./test.sh Player` from the repository root.
@@ -200,11 +201,11 @@ facing) says what `CharacterModel` draws; `ArcheryPose.Solve` gives the whole po
   about the grip by up to `MaxLimbFlex` (0.1 rad) with the visible pull (`Frame.Pull`).
 - The arms are invisible limits now (no arm meshes; only the floating hands at their ends show),
   but the pose keeps them: they are never scaled or stretched: they keep `ArmLength` (0.46 m, from
-  shoulders at `ShoulderLRest` (∓0.06, 1.06 m), just under the floating head) and only turn at the
+  shoulders at `ShoulderLRest` (∓0.06, 0.89 m), just under the floating head) and only turn at the
   shoulders (`ReachArm`), the hands at their ends. The left arm reaches forward and across, in
   front of the chest, to the grip on the right. For that the body turns to the right of the aim
   (near `SideOn`, less at the start of a draw, never more than `MaxTurn`, 1.5 rad: the chest
-  always faces the target's side), leans a little about the hips (`BodyTurn`; the tall body leans
+  always faces the target's side), leans a little about the hips (`BodyTurn`; the body leans
   reluctantly, sideways slides cost less than forward ones) and slides its hips up to
   `MaxHipShift` (0.2 m; `Frame.Hips`) just enough that the shoulders put both hands where they
   belong: a small damped least-squares solve (bow hand first; within 2 cm of the grip, 3 cm of the
@@ -229,33 +230,38 @@ facing) says what `CharacterModel` draws; `ArcheryPose.Solve` gives the whole po
 `blender -b --factory-startup --python modules/Player/Models/characters.py` (from the
 repository root) writes `girl.glb` and `boy.glb`; commit both with the script. Simple clean
 shapes, following Saria's drawing "you choose between these" (Tony, 2026-10-26: closer to the
-drawing, the same height, no mouth, no hair): about 1.47 m tall, the head a quarter of it, the
-body half, the legs a quarter.
+drawing, no mouth, no hair; then, the same day, from a screenshot of the player: "too elongated,
+the torso should be somewhat shorter and more rounded at the base, and the legs should be further
+apart but still within the base of the torso"): about 1.30 m tall, the body 25% shorter than
+before and everything above it lowered with it.
 
 - **Head**: a big plain round ball (0.38 m across, `HeadRadius` 0.19; its center at
-  `BowGeometry.HeadUp`, 1.28 m, its top at 1.47 m; the `Head` pivot, the neck, at 1.07 m)
+  `BowGeometry.HeadUp`, 1.11 m, its top at 1.30 m; the `Head` pivot, the neck, at 0.90 m)
   floating 4 cm above the body (no neck), with only two big dark oval eyes (`Eye`, each with a
   white sparkle, `EyeShine`), set low-middle on the face and wide apart, and small soft rosy
   cheeks (`Blush`). No mouth, no nose, no hair.
 - **Body** (the `Body` pivot at the hips, 0.42 m): a smooth solid of revolution from 0.36 to
-  1.05 m. The Girl's is a clean tall cone, a triangle from the front (0.4 m wide at its rounded
-  bottom rim, narrow and round at the top), colored by her pink dress with white spots
-  (`DefaultTop`) and her ribbon bow on the round head (`DefaultHead`). The Boy's is a tall
-  rounded capsule 0.32 m wide, colored by his blue shirt with a big red bow tie at its top (about
-  as wide as the body) and two buttons (`DefaultTop`), and trousers as a band round its bottom
-  (`DefaultBottom`).
+  0.88 m, its outline (`BODIES`) smoothed through a few points, round at the base. The Girl's is a
+  triangle from the front (0.42 m wide low down, narrow and round at the top) with a fully
+  rounded, softly curved bottom (no sharp rim), colored by her pink dress with white spots
+  (`DefaultTop`) and her ribbon bow on the round head (`DefaultHead`). The Boy's is a soft egg
+  (about 0.28 m wide near the top, widest, 0.38 m, low down, curving round underneath), colored by
+  his blue shirt with a big red bow tie at its top (about as wide as the body there) and two
+  buttons (`DefaultTop`), and trousers as a band round and under its base (`DefaultBottom`).
 - **Hands** (`HandL` / `HandR`): big ovals (0.14 m wide, 0.18 m tall) with three short dark
   finger lines (`Finger`) down their fronts, floating well out beside the body at about its
-  middle height (0.69 m), at the ends of the invisible arms (`ArmL` / `ArmR`, empty pivots at the
+  middle height (0.58 m), at the ends of the invisible arms (`ArmL` / `ArmR`, empty pivots at the
   shoulders). No arms.
-- **Legs** (`LegL` / `LegR`, pivots at the hips, x ∓0.08 m): two plain straight skin tubes
-  (0.06 m radius) from inside the body down to rounded feet a little wider than them, the
+- **Legs** (`LegL` / `LegR`, pivots at the hips, x ∓0.11 m: wide apart, the legs and feet still
+  inside the base's outline seen from the front): two plain straight skin tubes (0.06 m radius)
+  from inside the body down to rounded feet a little wider than them, the
   built-in shoes (`DefaultShoesLegL` / `R`, children of the legs), so they swing with the legs.
 
 Both are the same modular rig: skin parts (material `Skin`: body, head, hands, legs) with dark
 eyes (`Eye`), and the outfit as separate child objects of their part, at its pivot, for the game
 to hide. The Wardrobe's clothes and hair styles are fitted to both bodies (its `kit.py`). A wooden
-bow slung on the back (its strap a band across the body) with mushroom-red tips (material
+bow (sized to the shorter body: an arc of radius 0.34 m, 0.6 m tip to tip) slung on the back at
+0.65 m (its strap a band across the body) with mushroom-red tips (material
 `MushroomRed`, its own, not the ribbon's), and for shooting the same bow 1.3 times bigger, without
 its string (the game draws the string), its two limbs separate children for bending, and a nocked
 poison mushroom-tipped arrow (0.78 m). The mushrooms are "vivid" (Tony, 2026-10-25, the rule for
