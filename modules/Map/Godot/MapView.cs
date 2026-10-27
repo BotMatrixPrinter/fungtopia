@@ -54,7 +54,7 @@ public partial class MapView : Node3D, IModuleView
         }
     }
 
-    /// <summary>For screenshots: MAP_PREVIEW=road or cliffs makes a preview camera current.</summary>
+    /// <summary>For screenshots: MAP_PREVIEW=road, cliffs, home or homewindow makes a preview camera current.</summary>
     private void BuildPreviewCamera()
     {
         Vector3 from, target;
@@ -69,6 +69,16 @@ public partial class MapView : Node3D, IModuleView
                 // From the south road, west up at the giant mushrooms on the cliffs beside it.
                 from = OnGround(2f, 124f) + Vector3.Up * 1.8f;
                 target = OnGround(-30f, 128f) + Vector3.Up * 9f;
+                break;
+            case "home":
+                // Inside the home room, from by the door toward its north-west corner and windows.
+                from = new Vector3(603.5f, Areas.HomeFloorY + 1.7f, 604f);
+                target = new Vector3(597f, Areas.HomeFloorY + 1.9f, 596f);
+                break;
+            case "homewindow":
+                // Close to the north wall, along it at a grazing angle onto a round window.
+                from = new Vector3(600.5f, Areas.HomeFloorY + 2.3f, 596.2f);
+                target = new Vector3(597f, Areas.HomeFloorY + 2.1f, 595f);
                 break;
             default:
                 return;
@@ -478,21 +488,23 @@ public partial class MapView : Node3D, IModuleView
         });
     }
 
-    private void Window(Node3D parent, Vector3 center, Vector3 inward, Material glass, Material frame)
+    private void Window(Node3D parent, HomeWindow window, Material glass, Material frame)
     {
-        // A round window: a glowing pane in a chunky ring, set into the wall facing inward.
+        // A round window: a glowing pane in a chunky ring, standing out from the wall facing inward
+        // (glass, then frame, each clear of what is behind it so nothing z-fights; HomeLayout).
+        var inward = ToGodot(window.Inward);
         var basis = new Basis(new Quaternion(Vector3.Up, inward));
         parent.AddChild(new MeshInstance3D
         {
-            Mesh = new CylinderMesh { TopRadius = 0.62f, BottomRadius = 0.62f, Height = 0.04f, RadialSegments = 24 },
+            Mesh = new CylinderMesh { TopRadius = HomeLayout.GlassRadius, BottomRadius = HomeLayout.GlassRadius, Height = HomeLayout.GlassThickness, RadialSegments = 24 },
             MaterialOverride = glass,
-            Transform = new Transform3D(basis, center),
+            Transform = new Transform3D(basis, ToGodot(window.At(window.GlassCenter))),
         });
         parent.AddChild(new MeshInstance3D
         {
-            Mesh = new TorusMesh { InnerRadius = 0.6f, OuterRadius = 0.78f, Rings = 24, RingSegments = 8 },
+            Mesh = new TorusMesh { InnerRadius = HomeLayout.FrameInnerRadius, OuterRadius = HomeLayout.FrameOuterRadius, Rings = 24, RingSegments = 8 },
             MaterialOverride = frame,
-            Transform = new Transform3D(basis, center + inward * 0.02f),
+            Transform = new Transform3D(basis * Basis.FromScale(new Vector3(1f, HomeLayout.FrameDepthScale, 1f)), ToGodot(window.At(window.FrameCenter))),
         });
     }
 
@@ -501,45 +513,37 @@ public partial class MapView : Node3D, IModuleView
         var room = Areas.Home;
         float y = Areas.HomeFloorY, cx = room.Center.X, cz = room.Center.Y;
         float w = room.MaxX - room.MinX, d = room.MaxZ - room.MinZ;
-        const float wall = 0.3f, height = 4f, doorWidth = 1.6f, doorHeight = 2.4f;
+        const float wall = HomeLayout.Wall, height = HomeLayout.Height;
         var home = new Node3D { Name = "HomeInterior" };
         AddChild(home);
 
-        var floor = Material("wood_floor.gdshader");
-        Box(home, "Floor", new Vector3(cx, y - 0.1f, cz), new Vector3(w + 2f * wall, 0.2f, d + 2f * wall), floor);
-
+        // Floor, walls (the south one with the door in its middle, at Places.HomeExit), door and
+        // wooden skirting all around, laid out by HomeLayout so no two faces are within 2 cm.
         var walls = Flat(new Color(0.98f, 0.9f, 0.78f));
         var trim = Flat(new Color(0.62f, 0.4f, 0.26f));
-        float wy = y + height * 0.5f;
-        Box(home, "WallNorth", new Vector3(cx, wy, room.MinZ - wall * 0.5f), new Vector3(w + 2f * wall, height, wall), walls);
-        Box(home, "WallWest", new Vector3(room.MinX - wall * 0.5f, wy, cz), new Vector3(wall, height, d), walls);
-        Box(home, "WallEast", new Vector3(room.MaxX + wall * 0.5f, wy, cz), new Vector3(wall, height, d), walls);
-        // The south wall has the door in its middle, at Places.HomeExit.
-        float doorX = Places.HomeExit.Position.X, side = (w - doorWidth) * 0.5f;
-        float sz = room.MaxZ + wall * 0.5f;
-        Box(home, "WallSouthWest", new Vector3(room.MinX + side * 0.5f - wall * 0.5f, wy, sz), new Vector3(side + wall, height, wall), walls);
-        Box(home, "WallSouthEast", new Vector3(room.MaxX - side * 0.5f + wall * 0.5f, wy, sz), new Vector3(side + wall, height, wall), walls);
-        Box(home, "WallSouthLintel", new Vector3(doorX, y + (height + doorHeight) * 0.5f, sz), new Vector3(doorWidth, height - doorHeight, wall), walls);
-        Box(home, "Door", new Vector3(doorX, y + doorHeight * 0.5f, sz), new Vector3(doorWidth - 0.1f, doorHeight - 0.05f, 0.12f), Flat(new Color(0.7f, 0.42f, 0.26f), outline: true));
+        foreach (var box in HomeLayout.Boxes)
+        {
+            Material material = box.Name switch
+            {
+                "Floor" => Material("wood_floor.gdshader"),
+                "Door" => Flat(new Color(0.7f, 0.42f, 0.26f), outline: true),
+                _ when box.Name.StartsWith("Skirting", StringComparison.Ordinal) => trim,
+                _ => walls,
+            };
+            Box(home, box.Name, ToGodot(box.Center), ToGodot(box.Size), material);
+        }
         home.AddChild(new MeshInstance3D
         {
             Name = "DoorKnob",
-            Mesh = new SphereMesh { Radius = 0.08f, Height = 0.16f },
+            Mesh = new SphereMesh { Radius = HomeLayout.KnobRadius, Height = 2f * HomeLayout.KnobRadius },
             MaterialOverride = Flat(new Color(1f, 0.82f, 0.36f), 0.3f),
-            Position = new Vector3(doorX + 0.5f, y + 1.1f, sz - 0.1f),
+            Position = ToGodot(HomeLayout.KnobCenter),
         });
-        // Wooden skirting all around.
-        Box(home, "SkirtingNorth", new Vector3(cx, y + 0.1f, room.MinZ + 0.03f), new Vector3(w, 0.2f, 0.06f), trim);
-        Box(home, "SkirtingWest", new Vector3(room.MinX + 0.03f, y + 0.1f, cz), new Vector3(0.06f, 0.2f, d), trim);
-        Box(home, "SkirtingEast", new Vector3(room.MaxX - 0.03f, y + 0.1f, cz), new Vector3(0.06f, 0.2f, d), trim);
 
         var glass = Flat(new Color(0.66f, 0.86f, 1f), 0.6f);
         var frame = Flat(new Color(0.62f, 0.4f, 0.26f), outline: true);
-        float windowY = y + 2.1f;
-        Window(home, new Vector3(cx - 3f, windowY, room.MinZ - 0.02f), Vector3.Back, glass, frame);
-        Window(home, new Vector3(cx + 3f, windowY, room.MinZ - 0.02f), Vector3.Back, glass, frame);
-        Window(home, new Vector3(room.MinX - 0.02f, windowY, cz), Vector3.Right, glass, frame);
-        Window(home, new Vector3(room.MaxX + 0.02f, windowY, cz), Vector3.Left, glass, frame);
+        foreach (var window in HomeLayout.Windows)
+            Window(home, window, glass, frame);
 
         // A ceiling seen only from inside (one-sided, facing down), casting no shadow.
         home.AddChild(new MeshInstance3D

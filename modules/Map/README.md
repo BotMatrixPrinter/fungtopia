@@ -10,9 +10,9 @@ mushrooms close off everything else, and solid props (medium mushrooms, lamps, b
 nothing per tick.
 
 - `Contract/` — `Fungtopia.Map.Contract` (namespace `Fungtopia.Map`), see below.
-- `Core/` — `Fungtopia.Map.Core`: `MapModule`, the module's one `IModule` (no work per tick); `Fungi`, which picks the kind, shape, size, proportions, tilt and colors of every mushroom the view draws from a fixed seed per spot; `MushroomPalette`, the mushrooms' colors (per kind) and glow; and `WorldPalette`, the ground's colors.
+- `Core/` — `Fungtopia.Map.Core`: `MapModule`, the module's one `IModule` (no work per tick); `Fungi`, which picks the kind, shape, size, proportions, tilt and colors of every mushroom the view draws from a fixed seed per spot; `MushroomPalette`, the mushrooms' colors (per kind) and glow; `WorldPalette`, the ground's colors; and `HomeLayout`, the home interior's pieces (see **View**).
 - `Godot/` — `Main.tscn` with `MapView`, which draws the ground from the Contract.
-- `Tests/` — `MapTests.cs`: xUnit tests of the Contract (including `Props`), of `Fungi` and the palettes, and of `MapModule` with a fake `IMessageBus`.
+- `Tests/` — `MapTests.cs`: xUnit tests of the Contract (including `Props`), of `Fungi`, the palettes and `HomeLayout`, and of `MapModule` with a fake `IMessageBus`.
 
 Test it with `./test.sh Map` from the repository root.
 
@@ -163,13 +163,23 @@ headless), using its own copies of the forest's toon shaders (`Godot/Shaders/`):
   a cap is (fly agarics fully, parasols and ink caps lightly scaled, most kinds plain) and the
   morels' honeycomb pits. The glowing kind glows at 2.2, the lamps at 2.8;
 - the home interior: wood plank floor, cream walls with wooden skirting, four round windows, a
-  door with a knob in the south wall, a ceiling seen only from inside, and a warm light.
+  door with a knob in the south wall, a ceiling seen only from inside, and a warm light. Its
+  pieces come from `HomeLayout` (Core), pure data the tests check so nothing z-fights: the walls'
+  inner faces exactly on `Areas.Home`'s edges; its boxes (`Boxes`: floor, walls, lintel, door,
+  skirting) never have two faces facing the same way within `MinGap` (2 cm) of each other (the
+  side skirting boards stop at the north one, the door stands 2.5..9 cm clear of its opening);
+  the knob (`KnobCenter`) sinks into the door with its center 4 cm out. Each of the `Windows`
+  (`HomeWindow`: center on the wall's inner face, inward normal, depths from that face) is a thin
+  glass disc 3..4 cm in front of the wall, then the frame ring (a torus squashed to half depth
+  along its axis) from 6.5 cm, clear of the glass and wall.
 
 Buildings, signposts, NPCs, sky and sun are other modules' (Town, PetCity, Forest, ...).
 
 ## Screenshots
 
 `MAP_PREVIEW=road` (on the south road, looking along its lamps toward Mushroom Town) or
-`MAP_PREVIEW=cliffs` (from the south road, west up at the giant mushrooms on the cliffs) makes a
+`MAP_PREVIEW=cliffs` (from the south road, west up at the giant mushrooms on the cliffs), `MAP_PREVIEW=home`
+(inside the home room toward its north-west corner and windows) or `MAP_PREVIEW=homewindow` (close to
+the north wall, at a grazing angle onto the west window) makes a
 preview camera current and hides the screens drawn over the world; with `DAYNIGHT_HOUR` for day or
 night, for example `MAP_PREVIEW=road DAYNIGHT_HOUR=22 ./screenshot.sh "" map_road_night.png`.

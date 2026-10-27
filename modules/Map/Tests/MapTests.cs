@@ -1424,6 +1424,130 @@ public class MapTests
         Assert.DoesNotContain("specular_disabled", cap);
     }
 
+    // Home interior
+
+    /// <summary>A point on the inner face of the wall a window faces in from, computed from the room alone.</summary>
+    private static Vector3 WallFacePoint(Vector3 inward)
+    {
+        var room = Areas.Home;
+        if (inward == Vector3.UnitZ)
+            return new Vector3(0f, 0f, room.MinZ);
+        if (inward == Vector3.UnitX)
+            return new Vector3(room.MinX, 0f, 0f);
+        if (inward == -Vector3.UnitX)
+            return new Vector3(room.MaxX, 0f, 0f);
+        throw new InvalidOperationException($"no window wall faces {inward}");
+    }
+
+    [Fact]
+    public void HomeWindowsStandClearOfTheirWallsGlassThenFrame()
+    {
+        var windows = HomeLayout.Windows;
+        Assert.Equal(4, windows.Length);
+        var room = Areas.Home;
+        float cx = room.Center.X, cz = room.Center.Y, y = Areas.HomeFloorY + 2.1f;
+        // Same places as before: two in the north wall 3 m either side of the middle, one in
+        // the middle of the west and east walls, 2.1 m up, each facing into the room.
+        var expected = new[]
+        {
+            (new Vector3(cx - 3f, y, room.MinZ), Vector3.UnitZ),
+            (new Vector3(cx + 3f, y, room.MinZ), Vector3.UnitZ),
+            (new Vector3(room.MinX, y, cz), Vector3.UnitX),
+            (new Vector3(room.MaxX, y, cz), -Vector3.UnitX),
+        };
+        for (int i = 0; i < windows.Length; i++)
+        {
+            var w = windows[i];
+            Assert.Equal(expected[i].Item1, w.OnWall);
+            Assert.Equal(expected[i].Item2, w.Inward);
+            // Depths measured in world space from the wall's inner face along its inward normal.
+            var face = WallFacePoint(w.Inward);
+            float Depth(float d) => Vector3.Dot(w.At(d) - face, w.Inward);
+            Assert.Equal(0f, Depth(0f), 4);
+            float glassBack = Depth(w.GlassBack), glassFront = Depth(w.GlassFront);
+            float frameBack = Depth(w.FrameBack), frameFront = Depth(w.FrameFront);
+            Assert.True(glassBack >= 0.02f, $"window {i}: glass back {glassBack} m in front of the wall");
+            Assert.True(glassFront > glassBack, $"window {i}: glass has no thickness");
+            Assert.True(glassFront - glassBack <= 0.02f, $"window {i}: glass is not a thin disc");
+            Assert.True(frameBack - glassFront >= 0.02f, $"window {i}: frame back {frameBack - glassFront} m in front of the glass");
+            Assert.True(frameFront > frameBack);
+            Assert.Equal((w.FrameBack + w.FrameFront) * 0.5f, w.FrameCenter, 5);
+            Assert.Equal((w.GlassBack + w.GlassFront) * 0.5f, w.GlassCenter, 5);
+        }
+        // The frame's half depth is its torus tube radius squashed along the axis; its sizes stay.
+        Assert.Equal((HomeLayout.FrameOuterRadius - HomeLayout.FrameInnerRadius) * 0.5f * HomeLayout.FrameDepthScale, HomeLayout.FrameHalfDepth, 5);
+        Assert.Equal(0.62f, HomeLayout.GlassRadius);
+        Assert.Equal(0.6f, HomeLayout.FrameInnerRadius);
+        Assert.Equal(0.78f, HomeLayout.FrameOuterRadius);
+    }
+
+    [Fact]
+    public void HomeBoxesHaveNoFacesWithinTwoCentimetersOfEachOther()
+    {
+        // Two faces z-fight when they face the same way, overlap seen along their normal, and
+        // lie within 2 cm of each other. Pieces may only meet face to face (opposite facings).
+        var boxes = HomeLayout.Boxes.ToArray();
+        static float Get(Vector3 v, int axis) => axis == 0 ? v.X : axis == 1 ? v.Y : v.Z;
+        static bool Overlap(HomeBox a, HomeBox b, int axis) =>
+            MathF.Min(Get(a.Max, axis), Get(b.Max, axis)) - MathF.Max(Get(a.Min, axis), Get(b.Min, axis)) > 1e-4f;
+        for (int i = 0; i < boxes.Length; i++)
+        for (int j = i + 1; j < boxes.Length; j++)
+        {
+            var a = boxes[i];
+            var b = boxes[j];
+            for (int axis = 0; axis < 3; axis++)
+            {
+                int u = (axis + 1) % 3, v = (axis + 2) % 3;
+                if (!Overlap(a, b, u) || !Overlap(a, b, v))
+                    continue;
+                float minGap = MathF.Abs(Get(a.Min, axis) - Get(b.Min, axis));
+                float maxGap = MathF.Abs(Get(a.Max, axis) - Get(b.Max, axis));
+                Assert.True(minGap >= HomeLayout.MinGap - 1e-4f, $"{a.Name} and {b.Name}: faces {minGap} m apart on axis {axis}");
+                Assert.True(maxGap >= HomeLayout.MinGap - 1e-4f, $"{a.Name} and {b.Name}: faces {maxGap} m apart on axis {axis}");
+            }
+        }
+        // The walls' inner faces are exactly the room's edges.
+        var room = Areas.Home;
+        Assert.Equal(room.MinZ, HomeLayout.WallNorth.Max.Z, 4);
+        Assert.Equal(room.MinX, HomeLayout.WallWest.Max.X, 4);
+        Assert.Equal(room.MaxX, HomeLayout.WallEast.Min.X, 4);
+        Assert.Equal(room.MaxZ, HomeLayout.WallSouthWest.Min.Z, 4);
+        Assert.Equal(Areas.HomeFloorY, HomeLayout.Floor.Max.Y, 4);
+        // The door fits its opening with at least 2 cm to spare and sits in the doorway, at HomeExit.
+        var door = HomeLayout.Door;
+        Assert.Equal(Places.HomeExit.Position.X, door.Center.X, 4);
+        Assert.True(door.Min.X - HomeLayout.WallSouthWest.Max.X >= HomeLayout.MinGap);
+        Assert.True(HomeLayout.WallSouthEast.Min.X - door.Max.X >= HomeLayout.MinGap);
+        Assert.True(HomeLayout.Lintel.Min.Y - door.Max.Y >= HomeLayout.MinGap);
+        Assert.True(door.Min.Y - Areas.HomeFloorY >= HomeLayout.MinGap);
+        Assert.True(door.Min.Z - room.MaxZ >= HomeLayout.MinGap);
+    }
+
+    [Fact]
+    public void HomeDoorKnobStandsOutOfTheDoor()
+    {
+        // The knob is sunk into the door's inner face (attached, never floating) with its center
+        // at least 2 cm in front of it, inside the door's outline.
+        var door = HomeLayout.Door;
+        var knob = HomeLayout.KnobCenter;
+        float inFront = door.Min.Z - knob.Z;
+        Assert.True(inFront >= HomeLayout.MinGap, $"knob center {inFront} m in front of the door");
+        Assert.True(inFront < HomeLayout.KnobRadius);
+        Assert.InRange(knob.X + HomeLayout.KnobRadius, door.Min.X, door.Max.X - HomeLayout.MinGap);
+        Assert.InRange(knob.Y, door.Min.Y + 0.5f, door.Max.Y - 0.5f);
+    }
+
+    [Fact]
+    public void HomeViewDrawsTheLayout()
+    {
+        // MapView draws every box and window from HomeLayout, not its own copies of the numbers.
+        string view = ModuleFile("Godot/MapView.cs");
+        Assert.Contains("HomeLayout.Boxes", view);
+        Assert.Contains("HomeLayout.Windows", view);
+        Assert.Contains("HomeLayout.KnobCenter", view);
+        Assert.DoesNotContain("room.MinZ - 0.02f", view);
+    }
+
     // Module
 
     [Fact]
