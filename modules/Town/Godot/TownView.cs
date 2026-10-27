@@ -12,7 +12,6 @@ namespace Fungtopia.Town.View;
 /// large as the Map says, and small flower clumps and garden mushrooms (each leaning by its tilt), all from town.glb. The
 /// street lamps' bulbs, the glowing mushrooms and every window light up while <see cref="TownModule.LampsLit"/> (night),
 /// fading over a second or two, each lamp (and the food stall's lanterns) with a warm light of its own. Nothing else moves.
-/// The town's song plays on loop at <see cref="TownModule.MusicLevel"/> (paused while it is 0).
 /// </summary>
 public partial class TownView : Node3D, IModuleView
 {
@@ -26,8 +25,6 @@ public partial class TownView : Node3D, IModuleView
     private TownModule? _town;
     private readonly List<OmniLight3D> _lights = new();
     private float _lit = -1f;
-    private AudioStreamPlayer? _music;
-    private bool _musicStarted;
 
     public void Bind(IModule module) => _town = (TownModule)module;
 
@@ -65,13 +62,6 @@ public partial class TownView : Node3D, IModuleView
             }
         }
         Apply(_town?.LampsLit == true ? 1f : 0f);
-
-        var song = TownMusic.Load();
-        if (song != null)
-        {
-            _music = new AudioStreamPlayer { Name = "Music", Stream = song, VolumeDb = TownMusic.FullVolumeDb };
-            AddChild(_music);
-        }
     }
 
     public override void _ExitTree() => TownModels.Release();
@@ -81,26 +71,6 @@ public partial class TownView : Node3D, IModuleView
         float target = _town?.LampsLit == true ? 1f : 0f;
         if (_lit != target)
             Apply(Mathf.MoveToward(_lit, target, (float)delta / FadeSeconds));
-        PlayMusic(_town?.MusicLevel ?? 0f);
-    }
-
-    /// <summary>The song at <paramref name="level"/> (0..1) of its full volume; paused at 0, resuming where it stopped.</summary>
-    private void PlayMusic(float level)
-    {
-        if (_music == null)
-            return;
-        if (level <= 0f)
-        {
-            _music.StreamPaused = true;
-            return;
-        }
-        _music.VolumeDb = TownMusic.FullVolumeDb + Mathf.LinearToDb(level);
-        if (!_musicStarted)
-        {
-            _musicStarted = true;
-            _music.Play();
-        }
-        _music.StreamPaused = false;
     }
 
     private void Apply(float lit)

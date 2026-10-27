@@ -7,8 +7,7 @@ Map's Town props (`Fungtopia.Map.Props`, the ones in `Area.Town`: street lamps, 
 fences, planters, crates), and small flower clumps and garden mushrooms of fourteen kinds. The
 street lamps, the glowing mushrooms and every window light up at night. Nothing in the town moves or is walked into here: the Map's `Ground.Obstacles` already
 cover the buildings and the props; the Home module handles the house door and the shop, the
-signpost is the Travel module's. In town its song, `Audio/mushroom_town.mp3`, plays on loop,
-fading in as you arrive and out as you leave.
+signpost is the Travel module's. Its song ("Snowman Snuggles") is the Music module's.
 
 The rule (Map README, **Props**): anything taller than about 0.4 m or wider than about 0.6 m is
 solid and drawn only from the Map's data, exactly where and as large as it says; Town scatters
@@ -16,19 +15,17 @@ only flower clumps (0.5 m across, 0.35 m tall) and garden mushrooms (at most 0.3
 across), which are walked over.
 
 - `Contract/` — `Fungtopia.Town.Contract` (namespace `Fungtopia.Town`): `TownLights`.
-- `Core/` — `Fungtopia.Town.Core`: `TownModule`, the module's one `IModule` (lamps and the
-  music's level); `TownLayout`, the
+- `Core/` — `Fungtopia.Town.Core`: `TownModule`, the module's one `IModule` (the lamps); `TownLayout`, the
   placement list; `TownGround`, how each placement stands on the uneven ground; `TownLook`, the
   mushroom caps' gloss and rim and how bright the glowing bits and windows are; `TownMushrooms`,
   the garden mushrooms' kinds, sizes, spot seeds and groups.
 - `Godot/` — `Main.tscn` with `TownView` (draws the placements, lamps' lights), `TownModels`
-  (loads `town.glb` at run time, toon materials, ink outlines on all but `TownLook.NoOutline`), `TownMusic` (loads the song at run time); `Preview.tscn` with `TownPreview` (for
+  (loads `town.glb` at run time, toon materials, ink outlines on all but `TownLook.NoOutline`); `Preview.tscn` with `TownPreview` (for
   screenshots); `Shaders/` (toon surface with `vivid`, ink outline).
-- `Audio/` — `mushroom_town.mp3`, Mushroom Town's music.
 - `Models/` — `town.py`, the Blender script that builds and exports `town.glb` next to it.
-- `Tests/` — `TownTests.cs`: xUnit tests of `TownLayout` (its props are exactly the Map's Town props), of `town.glb` having an object for every placement (and the food stall's materials: wood, spotted cap, sign, food, steam, lanterns), of the vivid mushrooms (`town.glb`'s caps saturated and bright, spots pure white, stems light cream, every cap material glossy and rim-lit, Glow and the glowing caps twice as bright), of the vibrant palette (lush and yellow-green leaves, golden wood, clean bright stone, six and more petal hues, candy paints, nothing neon, dark trims and lamp posts for contrast), of the garden mushrooms (every kind modelled at the size the game scales from; every kind in three or more sizes; domes, flat, funnel, bell, wavy and conical caps; singles, pairs and clusters of different heights; varied tilts and proportions; neighbors never alike; each group exactly what its spot's seed grows; bracket fungi and small mushrooms on every house, mushrooms in the planters), of the windows (every pane a thin pane at least 2 cm in front of its wall, the frame and the one-piece crossing bars each at least 2 cm in front of the pane, and no two nearly parallel faces of different parts closer than 2 cm on and round any window, its window box and Abby's display window, read from `town.glb`; panes and bars drawn without an ink outline, frames with one), of `TownGround` (bases never float over the ground nor sink deep, at many spots over the town, roads and the rough Deep Forest), and of `TownModule` with a fake `IMessageBus` (lamps; the music level silent before the player
-exists, rising to 1 over 120 ticks in town, falling to 0 over 120 ticks on the road, in the
-forests, Pet City and the house; the song being an MP3 and broken bytes being refused).
+- `Tests/` — `TownTests.cs`: xUnit tests of `TownLayout` (its props are exactly the Map's Town props), of `town.glb` having an object for every placement (and the food stall's materials: wood, spotted cap, sign, food, steam, lanterns), of the vivid mushrooms (`town.glb`'s caps saturated and bright, spots pure white, stems light cream, every cap material glossy and rim-lit, Glow and the glowing caps twice as bright), of the vibrant palette (lush and yellow-green leaves, golden wood, clean bright stone, six and more petal hues, candy paints, nothing neon, dark trims and lamp posts for contrast), of the garden mushrooms (every kind modelled at the size the game scales from; every kind in three or more sizes; domes, flat, funnel, bell, wavy and conical caps; singles, pairs and clusters of different heights; varied tilts and proportions; neighbors never alike; each group exactly what its spot's seed grows; bracket fungi and small mushrooms on every house, mushrooms in the planters), of the windows (every pane a thin pane at least 2 cm in front of its wall, the frame and the one-piece crossing bars each at least 2 cm in front of the pane, and no two nearly parallel faces of different parts closer than 2 cm on and round any window, its window box and Abby's display window, read from `town.glb`; panes and bars drawn without an ink outline, frames with one), of `TownGround` (bases never float over the ground nor sink deep, at many spots over the town, roads and the rough Deep Forest), and of `TownModule` with a fake `IMessageBus` (lamps; no music: it subscribes to `TimeOfDay`
+only, has no music members, no `Audio/` folder and no audio code, and does not reference the
+Player module).
 
 Test it with `./test.sh Town` from the repository root.
 
@@ -43,12 +40,8 @@ Test it with `./test.sh Town` from the repository root.
 `TownModule` reads `Fungtopia.DayNight.TimeOfDay`: `LampsLit` follows its `IsNight` (off until
 the first night), and each change publishes one `TownLights`.
 
-It also reads `Fungtopia.Player.PlayerState` and keeps `MusicLevel` (0..1) for the view: each
-tick it rises by 1/`MusicFadeTicks` (120 ticks, 2 s) while the last `PlayerState.Area` is
-`Area.Town` and falls as fast anywhere else (Road, Forest, PetCity, DeepForest and Home, the
-house's inside). Before the first `PlayerState` (title/start screen) it stays 0. A fade turned
-round midway goes back from where it was. `LooksLikeMp3(bytes)` says whether bytes start like an
-MP3 (an ID3v2 tag or an MPEG audio frame header). No allocations per tick.
+Town plays no music: every place's song, Mushroom Town's included, is the Music module's
+(`modules/Music/README.md`), so two modules never play over each other.
 
 `TownLayout.All` is a plain list of `TownPlacement`s (`Piece`, `Variant`, `X`, `Z`, `Yaw`,
 `Width`, `Depth`, `Height`, `BuildingIndex`, `PropIndex`), the same every run:
@@ -114,15 +107,6 @@ stone skirt from just above their highest ground widening down into the ground, 
 and 4.4 at night, twice what it was so glowing mushrooms clearly glow, windows 0.084 and 1.54) and each
 street lamp has a warm `OmniLight3D` at its bulb (0.8 of its height), the food stall one among
 its lanterns (0.63 of its height); by day they are off. The sky and sun are DayNight's.
-
-### Music
-
-`TownMusic.Load` reads `Audio/mushroom_town.mp3`'s bytes (`FileAccess.GetFileAsBytes`) into an
-`AudioStreamMP3` with `Loop` on (seamless restart), the way `TownModels` loads `town.glb`, so a
-fresh checkout plays it without an editor import. A missing file, or bytes that are no MP3
-(`LooksLikeMp3`), log one `WARNING` and the town stays silent. `TownView` plays it through an
-`AudioStreamPlayer` at `FullVolumeDb` (-8 dB, medium) plus `LinearToDb(MusicLevel)`; at level 0
-the stream is paused and resumes where it stopped.
 
 ### Vivid mushrooms
 
