@@ -3,6 +3,7 @@ using Fungtopia.Map;
 using Fungtopia.Pet;
 using Fungtopia.Shell;
 using Godot;
+using GodotInput = Godot.Input;
 
 namespace Fungtopia.Home.View;
 
@@ -26,6 +27,7 @@ public partial class HomeView : Node3D, IModuleView
     private StandardMaterial3D _footprintMaterial = null!;
     private HomePanels _panels = null!;
     private float _time;
+    private bool _mouseMoved, _wasPlacing;
 
     public void Bind(IModule module) => _home = (HomeModule)module;
 
@@ -109,6 +111,7 @@ public partial class HomeView : Node3D, IModuleView
                 node.Transform = Pose(items[i].Center, items[i].Yaw, 0f);
         }
 
+        UpdateMouse();
         bool decorating = _home.Decorating && !_home.Picking;
         _grid.Visible = decorating;
         _footprint.Visible = decorating;
@@ -128,6 +131,65 @@ public partial class HomeView : Node3D, IModuleView
         }
 
         _panels.Refresh(_home);
+    }
+
+    /// <summary>
+    /// While decorating the mouse cursor shows (the Input module captures it again when the last menu
+    /// closes); the mouse, once moved, highlights the picker line under it or moves the grid cursor to
+    /// the floor under it. Entering placement mode by mouse puts the cursor under it at once.
+    /// </summary>
+    private void UpdateMouse()
+    {
+        bool placing = _home!.Decorating && !_home.Picking;
+        if (_home.Decorating && GodotInput.MouseMode != GodotInput.MouseModeEnum.Visible)
+            GodotInput.MouseMode = GodotInput.MouseModeEnum.Visible;
+        if (placing && (_mouseMoved || (!_wasPlacing && _home.MouseActive)))
+            PointAtMouse();
+        else if (_home.Decorating && _home.Picking && _mouseMoved)
+            _home.HoverPicker(_panels.PickerLineAtMouse());
+        _mouseMoved = false;
+        _wasPlacing = placing;
+    }
+
+    private void PointAtMouse()
+    {
+        if (TryMouseOnFloor(out var point))
+            _home!.PointAt(point);
+    }
+
+    /// <summary>The point on the floor under the mouse: the ray from the current camera through it, onto the floor plane.</summary>
+    private bool TryMouseOnFloor(out System.Numerics.Vector3 point)
+    {
+        point = default;
+        var camera = GetViewport().GetCamera3D();
+        if (camera == null)
+            return false;
+        var mouse = GetViewport().GetMousePosition();
+        var o = camera.ProjectRayOrigin(mouse);
+        var d = camera.ProjectRayNormal(mouse);
+        return HomeRoom.TryFloorPoint(new System.Numerics.Vector3(o.X, o.Y, o.Z), new System.Numerics.Vector3(d.X, d.Y, d.Z), out point);
+    }
+
+    public override void _Input(InputEvent e)
+    {
+        if (_home == null || !_home.Decorating)
+            return;
+        switch (e)
+        {
+            case InputEventMouseMotion motion when motion.Relative.Length() >= 2f:
+                _mouseMoved = true;
+                break;
+            case InputEventMouseButton { ButtonIndex: MouseButton.Left, Pressed: true }:
+                // Not marked handled: the Input module still sees the click (the device used last).
+                if (_home.Picking)
+                    _home.ClickPicker(_panels.PickerLineAtMouse());
+                else if (TryMouseOnFloor(out var point))
+                    _home.ClickFloor(point);
+                break;
+            case InputEventMouseButton { ButtonIndex: MouseButton.Middle, Pressed: true }:
+                _home.MouseRotate();
+                break;
+        }
     }
 
     private void DrawCursor(ReadOnlySpan<FurnitureItem> items)

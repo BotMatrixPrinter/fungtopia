@@ -35,6 +35,7 @@ public partial class HomePanels : CanvasLayer
 
     private HomePrompt _shownPrompt = (HomePrompt)(-1);
     private DeviceKind _shownDevice = (DeviceKind)(-1);
+    private bool _shownMouse;
     private int _shownCoins = -1, _shownSelection = -1, _shownAnswer = -1, _shownHeld = -2, _shownItems = -1;
     private int _shownHighlight = -2, _shownPicker = -1;
 
@@ -138,11 +139,12 @@ public partial class HomePanels : CanvasLayer
 
     public void Refresh(HomeModule home)
     {
-        if (home.Device != _shownDevice)
+        if (home.Device != _shownDevice || home.MouseHints != _shownMouse)
         {
             _shownDevice = home.Device;
+            _shownMouse = home.MouseHints;
             SetRich(_shopHelp, HomeText.ShopHelp(home.Device));
-            SetRich(_pickerHelp, HomeText.PickerHelp(home.Device));
+            SetRich(_pickerHelp, home.MouseHints ? HomeText.PickerMouseHelp() : HomeText.PickerHelp(home.Device));
             _shownPrompt = (HomePrompt)(-1);
             _shownHeld = -2;
         }
@@ -220,12 +222,27 @@ public partial class HomePanels : CanvasLayer
             SetRich(_decorateTitle, home.Held >= 0
                 ? $"Decorating: {Furniture.Name(items[home.Held].Kind)}"
                 : home.Highlighted >= 0 ? $"Decorating: {Furniture.Name(items[home.Highlighted].Kind)}" : "Decorating: move placed items");
-            SetRich(_decorateHelp, home.Held >= 0 ? HomeText.DecorateHelp(home.Device) : HomeText.MoveHelp(home.Device, home.Highlighted >= 0));
+            SetRich(_decorateHelp, home.MouseHints ? HomeText.MouseHelp(home.Held >= 0, home.Highlighted >= 0)
+                : home.Held >= 0 ? HomeText.DecorateHelp(home.Device) : HomeText.MoveHelp(home.Device, home.Highlighted >= 0));
         }
         else if (!_decorate.Visible)
         {
             _shownHeld = -2;
         }
+    }
+
+    /// <summary>The picker line under the mouse (an index as in <see cref="HomeModule.PickerSelection"/>), or -1.</summary>
+    public int PickerLineAtMouse()
+    {
+        if (!_picker.Visible)
+            return -1;
+        for (int i = 0; i < _pickerLines.Length; i++)
+        {
+            var line = _pickerLines[i];
+            if (line.Visible && line.GetGlobalRect().HasPoint(line.GetGlobalMousePosition()))
+                return i;
+        }
+        return -1;
     }
 
     private static PanelContainer Panel(Color fill, int padding)

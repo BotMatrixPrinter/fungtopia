@@ -793,6 +793,62 @@ public class InputModuleTests
         Assert.Contains(input, bus.FocusHandlers);
     }
 
+    // --- the mouse: a left click recaptures it only while no menu is open ---
+
+    [Theory]
+    [InlineData(false, false, true)]
+    [InlineData(false, true, false)]
+    [InlineData(true, false, false)]
+    [InlineData(true, true, false)]
+    public void ALeftClickRecapturesOnlyAFreeMouseWithNoMenuOpen(bool captured, bool menuOpen, bool expected) =>
+        Assert.Equal(expected, InputModule.ShouldRecapture(captured, menuOpen));
+
+    [Fact]
+    public void NoRecaptureWhileAUiFocusOwnerIsOpenAndOneAfterTheLastCloses()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        Assert.True(input.RecaptureOnClick(captured: false));
+        Assert.False(input.TakeRecapture());
+
+        bus.Focus(ShopMenu, true);
+        bus.Focus(Dialogue, true);
+        TickOnce(input, bus);
+        Assert.False(input.RecaptureOnClick(captured: false));
+        Assert.False(input.TakeRecapture());
+
+        // One of two closes: still a menu open, no recapture.
+        bus.Focus(ShopMenu, false);
+        TickOnce(input, bus);
+        Assert.False(input.RecaptureOnClick(captured: false));
+        Assert.False(input.TakeRecapture());
+
+        // The last closes: one recapture request, then none; clicks recapture again.
+        bus.Focus(Dialogue, false);
+        TickOnce(input, bus);
+        Assert.True(input.TakeRecapture());
+        Assert.False(input.TakeRecapture());
+        Assert.True(input.RecaptureOnClick(captured: false));
+        Assert.False(input.RecaptureOnClick(captured: true));
+    }
+
+    [Fact]
+    public void ClosingAnOwnerNotOpenOrReopeningBeforeTheRequestIsTakenDoesNotRecapture()
+    {
+        var bus = new FakeBus();
+        var input = Started(bus);
+        bus.Focus(ShopMenu, false);
+        Assert.False(input.TakeRecapture());
+
+        // Closed and opened again (another menu) before the view takes it: nothing to recapture.
+        bus.Focus(ShopMenu, true);
+        bus.Focus(ShopMenu, false);
+        bus.Focus(Dialogue, true);
+        Assert.False(input.TakeRecapture());
+        bus.Focus(Dialogue, false);
+        Assert.True(input.TakeRecapture());
+    }
+
     [Fact]
     public void NoMenuOpenLeavesInputsAsTheyAre()
     {

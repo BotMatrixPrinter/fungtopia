@@ -73,6 +73,24 @@ public static class HomeText
             : "")
         + $"{Prompts.Rich(PromptAction.Back, device, iconSize)} back";
 
+    /// <summary>The picker's hint line while the mouse is in use (BBCode): point to choose, "Left click take", Back.</summary>
+    public static string PickerMouseHelp(int iconSize = HelpIconSize) =>
+        $"{Prompts.Rich(PromptAction.Look, DeviceKind.KeyboardMouse, iconSize)} choose{Gap}"
+        + $"Left click take{Gap}"
+        + $"{Prompts.Rich(PromptAction.Back, DeviceKind.KeyboardMouse, iconSize)} done";
+
+    /// <summary>
+    /// Placement mode's hint line while the mouse is in use (BBCode): with an item held (<paramref name="held"/>)
+    /// "Left click Place" and "Middle click Rotate"; with nothing held, over a placed item
+    /// (<paramref name="overItem"/>), "Left click Pick up" and "[Put away] Put away"; Back always.
+    /// </summary>
+    public static string MouseHelp(bool held, bool overItem, int iconSize = HelpIconSize) =>
+        $"{Prompts.Rich(PromptAction.Look, DeviceKind.KeyboardMouse, iconSize)} move{Gap}"
+        + (held
+            ? $"Left click Place{Gap}Middle click Rotate{Gap}"
+            : overItem ? $"Left click Pick up{Gap}{PutAwayIcon(DeviceKind.KeyboardMouse, iconSize)} Put away{Gap}" : "")
+        + $"{Prompts.Rich(PromptAction.Back, DeviceKind.KeyboardMouse, iconSize)} back";
+
     /// <summary>
     /// The put-away button's icon: R on the keyboard, the left face button on a gamepad (X on Xbox,
     /// Square on PlayStation, Y on Nintendo; Godot's <c>JoyButton.X</c>).

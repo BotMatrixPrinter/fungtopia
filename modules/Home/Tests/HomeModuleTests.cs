@@ -587,6 +587,13 @@ public class HomeModuleTests
         yield return HomeText.DecorateHelp(device);
         yield return HomeText.MoveHelp(device, false);
         yield return HomeText.MoveHelp(device, true);
+        if (device == DeviceKind.KeyboardMouse)
+        {
+            yield return HomeText.PickerMouseHelp();
+            yield return HomeText.MouseHelp(true, false);
+            yield return HomeText.MouseHelp(false, true);
+            yield return HomeText.MouseHelp(false, false);
+        }
     }
 
     [Theory]
@@ -849,6 +856,299 @@ public class HomeModuleTests
         Assert.True(home.Picking);
         home.Back();
         Assert.False(home.Decorating);
+    }
+
+    // The mouse in decorating
+
+    [Fact]
+    public void FloorPointsMapToTheGridCellUnderThemAndClampAtTheWalls()
+    {
+        float minX = Areas.Home.MinX, minZ = Areas.Home.MinZ, y = Areas.HomeFloorY;
+        Assert.Equal((0, 0), HomeRoom.CellUnder(new Vector3(minX + 0.1f, y, minZ + 0.4f)));
+        Assert.Equal((5, 3), HomeRoom.CellUnder(new Vector3(minX + 2.7f, y, minZ + 1.6f)));
+        // On a line between cells: the cell east / south of it (0.5 m grid).
+        Assert.Equal((2, 4), HomeRoom.CellUnder(new Vector3(minX + 1.0f, y, minZ + 2.0f)));
+        Assert.Equal((2, 3), HomeRoom.CellUnder(new Vector3(minX + 1.49f, y, minZ + 1.99f)));
+        // Every cell's middle maps back to that cell.
+        for (int c = 0; c < HomeRoom.Columns; c++)
+            for (int r = 0; r < HomeRoom.Rows; r++)
+                Assert.Equal((c, r), HomeRoom.CellUnder(HomeRoom.CellsCenter(c, r, 1, 1)));
+        // Past the walls (and nonsense) stays inside the room.
+        Assert.Equal((0, 0), HomeRoom.CellUnder(new Vector3(minX - 3f, y, minZ - 50f)));
+        Assert.Equal((HomeRoom.Columns - 1, HomeRoom.Rows - 1), HomeRoom.CellUnder(new Vector3(Areas.Home.MaxX + 0.2f, y, Areas.Home.MaxZ + 9f)));
+        Assert.Equal((HomeRoom.Columns - 1, 7), HomeRoom.CellUnder(new Vector3(1e9f, y, minZ + 3.6f)));
+        Assert.Equal((0, 0), HomeRoom.CellUnder(new Vector3(float.NaN, y, float.NegativeInfinity)));
+        // A bigger footprint is centered on the point and kept wholly inside.
+        Assert.Equal((3, 6), HomeRoom.CellUnder(new Vector3(minX + 2.0f, y, minZ + 4.0f), 2, 4));
+        Assert.Equal((5, 8), HomeRoom.CellUnder(HomeRoom.CellsCenter(5, 8, 3, 4), 3, 4));
+        Assert.Equal((HomeRoom.Columns - 3, HomeRoom.Rows - 4), HomeRoom.CellUnder(new Vector3(Areas.Home.MaxX, y, Areas.Home.MaxZ), 3, 4));
+        Assert.Equal((0, 0), HomeRoom.CellUnder(new Vector3(minX, y, minZ), 2, 4));
+    }
+
+    [Fact]
+    public void ARayFromTheCameraMeetsTheFloorPlane()
+    {
+        var origin = new Vector3(600f, Areas.HomeFloorY + 4f, 604f);
+        Assert.True(HomeRoom.TryFloorPoint(origin, new Vector3(0f, -1f, -1f), out var p));
+        Assert.True(Vector3.Distance(new Vector3(600f, Areas.HomeFloorY, 600f), p) < 1e-4f, p.ToString());
+        Assert.True(HomeRoom.TryFloorPoint(origin, new Vector3(1f, -2f, 0f), out p));
+        Assert.True(Vector3.Distance(new Vector3(602f, Areas.HomeFloorY, 604f), p) < 1e-4f, p.ToString());
+        // Parallel to the floor, or looking up: no point.
+        Assert.False(HomeRoom.TryFloorPoint(origin, new Vector3(1f, 0f, 0f), out _));
+        Assert.False(HomeRoom.TryFloorPoint(origin, new Vector3(0f, 1f, -1f), out _));
+        Assert.False(HomeRoom.TryFloorPoint(origin, new Vector3(float.NaN, -1f, 0f), out _));
+    }
+
+    /// <summary>A home with a chair and a rug bought, inside, decorating, the chair held from the picker.</summary>
+    private static (HomeModule home, FakeBus bus) HoldingAChair()
+    {
+        var (home, bus) = Started(coins: 2000);
+        home.Buy(FurnitureKind.Chair);
+        home.Buy(FurnitureKind.Rug);
+        Inside(home, bus);
+        home.StartDecorating();
+        Assert.True(home.Choose(FurnitureKind.Chair));
+        return (home, bus);
+    }
+
+    private static void AssertSameHome(HomeModule expected, HomeModule actual)
+    {
+        Assert.Equal(expected.Items.ToArray(), actual.Items.ToArray());
+        Assert.Equal((expected.Decorating, expected.Picking, expected.Held, expected.Highlighted),
+            (actual.Decorating, actual.Picking, actual.Held, actual.Highlighted));
+        Assert.Equal((expected.CursorColumn, expected.CursorRow, expected.CursorRotation),
+            (actual.CursorColumn, actual.CursorRow, actual.CursorRotation));
+        Assert.Equal(expected.PickerSelection, actual.PickerSelection);
+    }
+
+    [Fact]
+    public void TheMouseMovesTheCursorToTheFloorUnderItAndALeftClickPlacesLikeInteract()
+    {
+        var (keys, keysBus) = HoldingAChair();
+        var (mouse, mouseBus) = HoldingAChair();
+
+        // Pointing moves the cursor (and the held chair) to the cell under the mouse.
+        mouse.PointAt(HomeRoom.CellsCenter(4, 6, 1, 1) + new Vector3(0.2f, 0f, -0.2f));
+        Assert.Equal((4, 6), (mouse.CursorColumn, mouse.CursorRow));
+        Assert.True(mouse.CanPlaceHeld);
+        // A ray from above onto the floor does the same.
+        var target = HomeRoom.CellsCenter(7, 9, 1, 1);
+        mouse.PointAt(target + new Vector3(0f, 5f, 5f), new Vector3(0f, -1f, -1f));
+        Assert.Equal((7, 9), (mouse.CursorColumn, mouse.CursorRow));
+        // Pointing past the wall keeps it inside.
+        mouse.PointAt(new Vector3(Areas.Home.MinX - 5f, Areas.HomeFloorY, Areas.Home.MinZ + 1.2f));
+        Assert.Equal((0, 2), (mouse.CursorColumn, mouse.CursorRow));
+
+        // A left click on a cell acts at the next tick exactly like Interact with the cursor there.
+        keys.MoveCursor(-100, -100);
+        keys.MoveCursor(5, 7);
+        PressInteract(keysBus);
+        keys.Tick(Step);
+        mouse.ClickFloor(HomeRoom.CellsCenter(5, 7, 1, 1));
+        Assert.False(mouse.Items[1].Placed); // not before the tick, as Interact
+        mouse.Tick(Step);
+        Assert.True(mouse.Items[1].Placed);
+        Assert.Equal((5, 7), (mouse.Items[1].Column, mouse.Items[1].Row));
+        Assert.True(mouse.Picking);
+        AssertSameHome(keys, mouse);
+        Assert.Equal(keysBus.Published.Count(t => t == typeof(UiFocus)), mouseBus.Published.Count(t => t == typeof(UiFocus)));
+    }
+
+    [Fact]
+    public void ALeftClickWhereTheHeldItemDoesNotFitPlacesNothingLikeInteract()
+    {
+        var (keys, keysBus) = HoldingAChair();
+        var (mouse, _) = HoldingAChair();
+        // The bed stands at (2, 0): neither can place the chair on it.
+        keys.MoveCursor(-100, -100);
+        keys.MoveCursor(2, 1);
+        Assert.False(keys.CanPlaceHeld);
+        PressInteract(keysBus);
+        keys.Tick(Step);
+        mouse.ClickFloor(HomeRoom.CellsCenter(2, 1, 1, 1));
+        Assert.False(mouse.CanPlaceHeld);
+        mouse.Tick(Step);
+        Assert.False(mouse.Items[1].Placed);
+        Assert.Equal(1, mouse.Held);
+        AssertSameHome(keys, mouse);
+    }
+
+    [Fact]
+    public void WithNothingHeldALeftClickOnAPlacedItemPicksItUpLikeInteract()
+    {
+        HomeModule MovingPlaced(out FakeBus bus)
+        {
+            var (home, b) = Started();
+            Inside(home, b);
+            home.StartDecorating();
+            home.MovePickerSelection(-1); // "Move placed items"
+            home.Confirm();
+            home.Tick(Step);
+            Assert.False(home.Picking);
+            Assert.Equal(-1, home.Held);
+            bus = b;
+            return home;
+        }
+        var keys = MovingPlaced(out var keysBus);
+        var mouse = MovingPlaced(out _);
+
+        // A click on an empty cell picks nothing up, as Interact there.
+        keys.MoveCursor(-100, -100);
+        keys.MoveCursor(10, 10);
+        PressInteract(keysBus);
+        keys.Tick(Step);
+        mouse.ClickFloor(HomeRoom.CellsCenter(10, 10, 1, 1));
+        mouse.Tick(Step);
+        AssertSameHome(keys, mouse);
+        Assert.Equal(-1, mouse.Held);
+
+        // Hovering the bed (2..3, 0..3) highlights it; a click picks it up, as Interact.
+        mouse.PointAt(HomeRoom.CellsCenter(3, 2, 1, 1));
+        Assert.Equal(0, mouse.Highlighted);
+        keys.MoveCursor(-100, -100);
+        keys.MoveCursor(3, 2);
+        PressInteract(keysBus);
+        keys.Tick(Step);
+        mouse.ClickFloor(HomeRoom.CellsCenter(3, 2, 1, 1));
+        mouse.Tick(Step);
+        Assert.Equal(0, mouse.Held);
+        Assert.False(mouse.Items[0].Placed);
+        AssertSameHome(keys, mouse);
+
+        // Moved with the mouse and placed with a click.
+        mouse.PointAt(HomeRoom.CellsCenter(10, 2, 2, 4));
+        Assert.Equal((10, 2), (mouse.CursorColumn, mouse.CursorRow));
+        mouse.ClickFloor(HomeRoom.CellsCenter(10, 2, 2, 4));
+        mouse.Tick(Step);
+        Assert.True(mouse.Items[0].Placed);
+        Assert.Equal((10, 2), (mouse.Items[0].Column, mouse.Items[0].Row));
+        Assert.False(mouse.Picking);
+    }
+
+    [Fact]
+    public void TheMiddleButtonRotatesTheHeldItemExactlyLikeRotate()
+    {
+        HomeModule HoldingTheRug()
+        {
+            var (home, bus) = Started(coins: 2000);
+            home.Buy(FurnitureKind.Rug);
+            Inside(home, bus);
+            home.StartDecorating();
+            Assert.True(home.Choose(FurnitureKind.Rug));
+            home.PointAt(HomeRoom.CellsCenter(8, 8, 1, 1));
+            return home;
+        }
+        var keys = HoldingTheRug();
+        var mouse = HoldingTheRug();
+        // The rug (4 x 3) is centered as near as the grid allows on the pointed cell's middle (ties go east).
+        Assert.Equal((7, 7), (mouse.CursorColumn, mouse.CursorRow));
+        for (int turn = 1; turn <= 4; turn++)
+        {
+            keys.Rotate();
+            mouse.MouseRotate();
+            Assert.Equal(turn & 3, mouse.CursorRotation);
+            AssertSameHome(keys, mouse);
+        }
+        // Turned once (3 x 4) next to the east wall: kept inside, as Rotate does.
+        keys.PointAt(new Vector3(Areas.Home.MaxX, Areas.HomeFloorY, Areas.Home.MinZ + 4f));
+        mouse.PointAt(new Vector3(Areas.Home.MaxX, Areas.HomeFloorY, Areas.Home.MinZ + 4f));
+        keys.Rotate();
+        mouse.MouseRotate();
+        AssertSameHome(keys, mouse);
+        Assert.Equal(HomeRoom.Columns - 3, mouse.CursorColumn);
+
+        // Nothing held, or in the picker: neither turns anything.
+        keys.Back();
+        mouse.Back();
+        keys.Rotate();
+        mouse.MouseRotate();
+        AssertSameHome(keys, mouse);
+        Assert.True(mouse.Picking);
+    }
+
+    [Fact]
+    public void PickerEntriesAreHighlightedByHoverAndChosenByALeftClick()
+    {
+        var (home, bus) = Started(coins: 2000);
+        home.Buy(FurnitureKind.Chair);
+        home.Buy(FurnitureKind.Lamp);
+        Inside(home, bus);
+        home.StartDecorating();
+        Assert.Equal(new[] { FurnitureKind.Lamp, FurnitureKind.Chair }, home.PickerEntries.ToArray().Select(e => e.Kind));
+
+        // Hovering highlights without choosing; off the lines changes nothing.
+        home.HoverPicker(2);
+        Assert.Equal(2, home.PickerSelection);
+        home.HoverPicker(-1);
+        home.HoverPicker(3);
+        Assert.Equal(2, home.PickerSelection);
+        home.Tick(Step);
+        Assert.True(home.Picking);
+
+        // A click off the lines does nothing; a click on "Chair x1" chooses it at the next tick, like Confirm.
+        home.ClickPicker(-1);
+        home.ClickPicker(5);
+        home.Tick(Step);
+        Assert.True(home.Picking);
+        home.ClickPicker(1);
+        Assert.Equal(1, home.PickerSelection);
+        home.Tick(Step);
+        Assert.False(home.Picking);
+        Assert.Equal(FurnitureKind.Chair, home.Items[home.Held].Kind);
+
+        // Back in the picker, a click on "Move placed items" opens placement mode with nothing held.
+        home.Back();
+        Assert.True(home.Picking);
+        home.ClickPicker(home.PickerCount);
+        home.Tick(Step);
+        Assert.False(home.Picking);
+        Assert.True(home.Decorating);
+        Assert.Equal(-1, home.Held);
+        // Picker clicks do nothing outside the picker.
+        home.ClickPicker(0);
+        home.Tick(Step);
+        Assert.False(home.Picking);
+        Assert.Equal(-1, home.Held);
+    }
+
+    [Fact]
+    public void TheHintsShowTheMouseActionsWhileTheMouseIsTheActiveDevice()
+    {
+        var (home, bus) = HoldingAChair();
+        Assert.False(home.MouseHints);
+        home.PointAt(HomeRoom.CellsCenter(5, 5, 1, 1));
+        Assert.True(home.MouseActive);
+        Assert.True(home.MouseHints);
+        // A menu step (keys, D-pad, stick) moves the cursor and the keyboard hints come back.
+        bus.Publish(new MenuNav(0, 1));
+        Assert.Equal((6, 5), (home.CursorColumn, home.CursorRow));
+        Assert.False(home.MouseHints);
+        home.MouseRotate();
+        Assert.True(home.MouseHints);
+        // A gamepad: its own hints.
+        bus.Publish(new ActiveDevice(DeviceKind.Xbox));
+        Assert.False(home.MouseActive);
+        Assert.False(home.MouseHints);
+        bus.Publish(new ActiveDevice(DeviceKind.KeyboardMouse));
+        home.HoverPicker(0); // not in the picker: nothing
+        Assert.False(home.MouseHints);
+        home.PointAt(HomeRoom.CellsCenter(5, 5, 1, 1));
+        Assert.True(home.MouseHints);
+
+        string held = HomeText.MouseHelp(held: true, overItem: false);
+        Assert.Contains("Left click Place", held);
+        Assert.Contains("Middle click Rotate", held);
+        Assert.Contains("[/img] back", held);
+        Assert.DoesNotContain("Put away", held);
+        Assert.Equal(new[] { "mouse_move", "key_esc" }, IconsIn(held));
+        string over = HomeText.MouseHelp(held: false, overItem: true);
+        Assert.Contains("Left click Pick up", over);
+        Assert.Contains("[/img] Put away", over);
+        Assert.Contains("[/img] back", over);
+        Assert.DoesNotContain("Rotate", over);
+        Assert.Equal(new[] { "mouse_move", "key_r", "key_esc" }, IconsIn(over));
+        Assert.DoesNotContain("Left click", HomeText.MouseHelp(held: false, overItem: false));
+        Assert.Contains("Left click take", HomeText.PickerMouseHelp());
     }
 
     // Choosing what to place, and putting away

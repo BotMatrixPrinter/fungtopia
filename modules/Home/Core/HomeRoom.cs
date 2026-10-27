@@ -59,6 +59,37 @@ public static class HomeRoom
 
     public static int RowAt(float z) => (int)MathF.Floor((z - Areas.Home.MinZ) / Cell);
 
+    /// <summary>
+    /// Where a ray (for example from the camera through the mouse) meets the floor plane at
+    /// <see cref="FloorY"/>: false when it runs parallel to the floor, points away from it, or is not finite.
+    /// </summary>
+    public static bool TryFloorPoint(Vector3 origin, Vector3 direction, out Vector3 point)
+    {
+        point = default;
+        float t = (FloorY - origin.Y) / direction.Y;
+        if (MathF.Abs(direction.Y) < 1e-6f || !(t >= 0f) || !float.IsFinite(t))
+            return false;
+        point = new Vector3(origin.X + direction.X * t, FloorY, origin.Z + direction.Z * t);
+        return float.IsFinite(point.X) && float.IsFinite(point.Z);
+    }
+
+    /// <summary>
+    /// The north-west cell of a <paramref name="width"/> x <paramref name="depth"/> footprint whose
+    /// middle is as near as the grid allows to <paramref name="point"/> on the floor (a 1 x 1 footprint
+    /// is the cell under the point), kept inside the room (clamped at the walls). Pure.
+    /// </summary>
+    public static (int Column, int Row) CellUnder(Vector3 point, int width = 1, int depth = 1)
+    {
+        width = Math.Clamp(width, 1, Columns);
+        depth = Math.Clamp(depth, 1, Rows);
+        float x = (point.X - Areas.Home.MinX) / Cell - (width - 1) * 0.5f;
+        float z = (point.Z - Areas.Home.MinZ) / Cell - (depth - 1) * 0.5f;
+        // Clamp before converting, so points far outside (or not finite) stay inside too.
+        int column = (int)MathF.Floor(Math.Clamp(float.IsFinite(x) ? x : 0f, 0f, Columns - width));
+        int row = (int)MathF.Floor(Math.Clamp(float.IsFinite(z) ? z : 0f, 0f, Rows - depth));
+        return (column, row);
+    }
+
     /// <summary>The middle (on the floor) of the rectangle of cells starting at (column, row).</summary>
     public static Vector3 CellsCenter(int column, int row, int width, int depth) =>
         new(Areas.Home.MinX + (column + width * 0.5f) * Cell, FloorY, Areas.Home.MinZ + (row + depth * 0.5f) * Cell);

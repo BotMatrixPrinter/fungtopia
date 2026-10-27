@@ -60,7 +60,11 @@ prompts use `ActiveDevice` with `Prompts` to show only the buttons of the device
   `PressFoodCycle(direction)`) that arrive between ticks are added up and handed out once (presses made while a menu is open are dropped, not saved for later);
   `PressGamepadA()` (the bottom face button) becomes Interact or Jump at the tick, by `InteractOffered`
   (any `InteractAvailable` owner available) and `MenuOpen`. `MenuOpen` is true while
-  any `UiFocus` owner is open. `SetAim(origin, direction)` takes the camera ray (a non-finite origin or a zero or
+  any `UiFocus` owner is open. The mouse: `ShouldRecapture(captured, menuOpen)` (pure) is true only for a
+  mouse that is not captured with no menu open, and `RecaptureOnClick(captured)` asks it with `MenuOpen`: while
+  any `UiFocus` owner is open a left click does not recapture the mouse (the menu that showed the cursor owns
+  the clicks). `TakeRecapture()` is true once after the last open owner closes (not when another opened
+  again first), and the view then captures the mouse as at start. `SetAim(origin, direction)` takes the camera ray (a non-finite origin or a zero or
   non-finite direction means no aim). `Device` is the device used last (keyboard and mouse at start),
 published as `ActiveDevice` every tick (also while a menu is open): `NoteKeyboardMouse()` (a key,
 mouse button or wheel press), `NoteMouseMotion(pixels)` (switches from `MouseSwitchPixels`, 2, in one
@@ -74,7 +78,9 @@ Xbox / XInput / Microsoft) or else the USB vendor in its SDL GUID (054c Sony, 05
 045e Microsoft); any other pad is Generic. Settings: `StickDeadZone` (0.2), `StickLookRadiansPerSecond` (3),
   `MouseRadiansPerPixel` (0.003), `TriggerThreshold` (0.5), `MenuStickThreshold` (0.5), `MenuRepeatSeconds` (0.2).
 - `Godot/`: `Main.tscn` with `InputView`, a full-screen `Control` that ignores the mouse. It
-  reads the devices before each tick, reports which device each real input came from (the family of
+  reads the devices before each tick, captures the mouse at start and again when `TakeRecapture()` says the
+  last menu closed (a left click still held then does not fire), recaptures it on a left click only when
+  `RecaptureOnClick` allows, reports which device each real input came from (the family of
   each joypad is detected once per connection), casts the aim ray with
   `GetViewport().GetCamera3D()`: `ProjectRayOrigin(center)` (the camera's position) and
   `ProjectRayNormal(center)`. It draws nothing on screen: the
@@ -106,9 +112,10 @@ Xbox / XInput / Microsoft) or else the USB vendor in its SDL GUID (054c Sony, 05
 | Select food 1 / 2 / 3 | 1 / 2 / 3 (physical keys, top row) | |
 | Previous / next food | Mouse wheel up / down (when captured) | D-pad Left / Right |
 | Free the mouse | Esc | |
-| Capture the mouse again | Left click (this click does not fire) | |
+| Capture the mouse again | Left click (this click does not fire; not while a menu is open) | |
 
-The mouse is captured when the game starts.
+The mouse is captured when the game starts, and again when the last open menu (`UiFocus` owner) closes.
+While a menu is open a left click is the menu's: it does not recapture the mouse.
 
 ## Prompts
 

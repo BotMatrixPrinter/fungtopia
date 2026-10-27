@@ -179,6 +179,8 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
     private readonly FurnitureItem[] _restored = new FurnitureItem[MaxItems];
     private readonly PickerEntry[] _picker = new PickerEntry[Furniture.KindCount];
     private bool _heldFromPicker;
+    private Vector3 _mousePoint;
+    private bool _hasMousePoint;
 
     public HomeModule()
     {
@@ -275,6 +277,15 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
     /// <summary>The held item's quarter turns.</summary>
     public int CursorRotation { get; private set; }
 
+    /// <summary>
+    /// The mouse was used last in decorating (pointing at the floor or a picker line, or clicking);
+    /// a <see cref="MenuNav"/> step or a gamepad makes it false. The cursor follows the device used last.
+    /// </summary>
+    public bool MouseActive { get; private set; }
+
+    /// <summary>The hint lines show the mouse's actions: keyboard and mouse are in use and the mouse was used last.</summary>
+    public bool MouseHints => Device == DeviceKind.KeyboardMouse && MouseActive;
+
     /// <summary>Whether the held item fits where the cursor is.</summary>
     /// <summary>Where a refused restore is reported (one line per refused <see cref="RestorePart"/>); the console by default.</summary>
     public Action<string> Log { get; set; } = Console.WriteLine;
@@ -354,7 +365,12 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
 
     public void Handle(in WalletState message) => Coins = message.Coins;
 
-    public void Handle(in ActiveDevice message) => Device = message.Kind;
+    public void Handle(in ActiveDevice message)
+    {
+        Device = message.Kind;
+        if (message.IsGamepad)
+            MouseActive = false;
+    }
 
     public void Handle(in WardrobeState message) => WardrobeOpen = message.Open;
 
@@ -513,6 +529,8 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
         {
             MoveCursor(message.Horizontal, message.Vertical);
         }
+        if (Decorating && message.Any)
+            MouseActive = false;
     }
 
     private HomePrompt PromptAt(Vector3 p)
@@ -703,6 +721,7 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
         Picking = false;
         Held = -1;
         _heldFromPicker = false;
+        _hasMousePoint = false;
     }
 
     /// <summary>Shows the picker (a held item goes back to the inventory), its lines counted afresh.</summary>
@@ -731,6 +750,79 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
             return;
         int n = PickerCount + 1;
         PickerSelection = ((PickerSelection + step) % n + n) % n;
+    }
+
+    /// <summary>The mouse is over picker line <paramref name="line"/> (an index into <see cref="PickerEntries"/>, or <see cref="PickerCount"/> for "Move placed items"): it is highlighted.</summary>
+    public void HoverPicker(int line)
+    {
+        if (!Decorating || !Picking || line < 0 || line > PickerCount)
+            return;
+        PickerSelection = line;
+        MouseActive = true;
+    }
+
+    /// <summary>A left click on picker line <paramref name="line"/>: highlights it and chooses it like <see cref="Confirm"/> (at the next tick). Nothing off the lines.</summary>
+    public void ClickPicker(int line)
+    {
+        if (!Decorating || !Picking || line < 0 || line > PickerCount)
+            return;
+        HoverPicker(line);
+        Confirm();
+    }
+
+    /// <summary>
+    /// In placement mode, the mouse points at <paramref name="floorPoint"/>: the cursor (and the held
+    /// item) moves to the grid cell under it (<see cref="HomeRoom.CellUnder"/>, the held footprint
+    /// centered there), staying inside the room.
+    /// </summary>
+    public void PointAt(Vector3 floorPoint)
+    {
+        if (!Decorating || Picking)
+            return;
+        MouseActive = true;
+        _mousePoint = floorPoint;
+        _hasMousePoint = true;
+        CursorToMouse();
+    }
+
+    /// <summary><see cref="PointAt"/> where a ray (from the camera through the mouse) meets the floor; nothing when it misses.</summary>
+    public void PointAt(Vector3 origin, Vector3 direction)
+    {
+        if (HomeRoom.TryFloorPoint(origin, direction, out var point))
+            PointAt(point);
+    }
+
+    /// <summary>
+    /// A left click on the floor in placement mode: the cursor moves to <paramref name="floorPoint"/>,
+    /// then it acts like Interact at the next tick (places the held item if it fits, or with nothing
+    /// held picks up the placed item there).
+    /// </summary>
+    public void ClickFloor(Vector3 floorPoint)
+    {
+        if (!Decorating || Picking)
+            return;
+        PointAt(floorPoint);
+        Confirm();
+    }
+
+    /// <summary>The middle mouse button: <see cref="Rotate"/> (the held item turns about the point under the mouse).</summary>
+    public void MouseRotate()
+    {
+        if (!Decorating || Picking)
+            return;
+        MouseActive = true;
+        Rotate();
+    }
+
+    private void CursorToMouse()
+    {
+        int w = 1, d = 1;
+        if (Held >= 0)
+        {
+            w = Furniture.Width(_items[Held].Kind, CursorRotation);
+            d = Furniture.Depth(_items[Held].Kind, CursorRotation);
+        }
+        (CursorColumn, CursorRow) = HomeRoom.CellUnder(_mousePoint, w, d);
     }
 
     /// <summary>The picker's confirm: holds an item of the highlighted kind, or on "Move placed items" opens placement mode with nothing held.</summary>
@@ -806,6 +898,9 @@ public sealed class HomeModule : IModule, IMessageHandler<PlayerState>, IMessage
         if (!Decorating || Picking || Held < 0)
             return;
         CursorRotation = (CursorRotation + 1) & 3;
+        // Turned under the mouse: the footprint stays centered on the point it points at.
+        if (MouseActive && _hasMousePoint)
+            CursorToMouse();
         ClampCursor();
     }
 

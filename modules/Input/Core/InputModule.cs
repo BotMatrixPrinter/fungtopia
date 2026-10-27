@@ -60,6 +60,7 @@ public sealed class InputModule : IModule, IMessageHandler<UiFocus>, IMessageHan
     private int _menuButtonsVertical;
     private int _menuButtonsHorizontal;
     private double _sinceMenuStep = double.PositiveInfinity;
+    private bool _recapture;
 
     /// <summary>The menu step published on the latest tick.</summary>
     public MenuNav LatestMenuNav { get; private set; }
@@ -87,7 +88,33 @@ public sealed class InputModule : IModule, IMessageHandler<UiFocus>, IMessageHan
     /// <summary>
     /// Tracks open menus per owner: opening an owner already open, or closing one not open, changes nothing.
     /// </summary>
-    public void Handle(in UiFocus message) => Track(ref _openOwners, ref _openCount, message.Owner, message.Open);
+    public void Handle(in UiFocus message)
+    {
+        bool wasOpen = MenuOpen;
+        Track(ref _openOwners, ref _openCount, message.Owner, message.Open);
+        if (wasOpen && !MenuOpen)
+            _recapture = true;
+    }
+
+    /// <summary>
+    /// Whether a left click recaptures the mouse: only while it is not captured and no menu is open
+    /// (a menu that shows the cursor owns the clicks).
+    /// </summary>
+    public static bool ShouldRecapture(bool captured, bool menuOpen) => !captured && !menuOpen;
+
+    /// <summary><see cref="ShouldRecapture"/> with <see cref="MenuOpen"/>: whether a left click now recaptures the mouse.</summary>
+    public bool RecaptureOnClick(bool captured) => ShouldRecapture(captured, MenuOpen);
+
+    /// <summary>
+    /// True once after the last open <see cref="UiFocus"/> owner closed (and none opened again since):
+    /// the view captures the mouse again, as at start. Taking it clears it.
+    /// </summary>
+    public bool TakeRecapture()
+    {
+        bool recapture = _recapture && !MenuOpen;
+        _recapture = false;
+        return recapture;
+    }
 
     /// <summary>Tracks offered interactions per owner, the same way as <see cref="UiFocus"/>.</summary>
     public void Handle(in InteractAvailable message) =>

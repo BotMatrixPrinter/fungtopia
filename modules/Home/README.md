@@ -88,6 +88,23 @@ the start screen is open, below):
   past `HomeInterior`), off the catalog book's stand, and overlapping no other furniture (rugs
   included). Back in placement mode returns to the picker (a held item goes back to the
   inventory); Back in the picker closes decorating. Leaving the house or fainting ends it too.
+- **The mouse in decorating.** While the picker or placement mode is open the mouse cursor shows
+  (the view frees it; the Input module captures it again when decorating, the last menu, closes, and
+  does not take its left clicks meanwhile). In the picker `HoverPicker(line)` highlights the line
+  under the mouse and `ClickPicker(line)` highlights it and chooses it like Confirm (next tick);
+  off the lines nothing happens. In placement mode `PointAt(floorPoint)` (or `PointAt(origin,
+  direction)`, the ray from the current camera through the mouse onto the floor plane at
+  `Areas.HomeFloorY`, `HomeRoom.TryFloorPoint`) moves the cursor to `HomeRoom.CellUnder(point, width,
+  depth)`: a pure function giving the north-west cell of the footprint centered as near as the 0.5 m
+  grid allows on the point (a 1 x 1 cursor: the cell under it), clamped inside the room. The held item
+  moves with it (green fits, red does not). `ClickFloor(point)` points there and acts like Interact at
+  the next tick (places if it fits; with nothing held picks up the placed item there);
+  `MouseRotate()` (the middle button) is `Rotate`. While the mouse was used last (`MouseActive`),
+  `Rotate` keeps the turned footprint centered on the pointed spot. A `MenuNav` step or a gamepad
+  clears `MouseActive`: the device used last moves the cursor, and keyboard and gamepad keep working.
+  `MouseHints` (keyboard and mouse in use and `MouseActive`) switches the hints to
+  `HomeText.MouseHelp(held, overItem)` ("Left click Place", "Middle click Rotate"; with nothing held
+  over an item "Left click Pick up" and "[R] Put away"; Back always) and `PickerMouseHelp()`.
 - **Putting away.** In placement mode with nothing held, the placed item under the cursor
   (`Highlighted`) can be put away (`PutAway`, the view's R key or the gamepad's left face button):
   it goes back to the inventory, no longer placed (saved as `"p":false`), still owned, and counted
@@ -157,8 +174,15 @@ Input module):
 | Decorating: move | Arrow keys, WASD (`MenuNav`) | D-pad, left stick (`MenuNav`) |
 | Decorating: turn (an item held) | R | RB |
 | Decorating: put away (nothing held) | R | X / Square / Nintendo Y (the left face button) |
+| Decorating with the mouse | Point (highlight a picker line, move the cursor), left click (choose / place / pick up), middle click (turn) | |
 | Buy / take / place / pick up | E or Enter | A / Cross (through Interact; X / Square works too) |
 | Close / done | Q or Esc | B / Circle |
+
+While decorating `HomeView` keeps the mouse cursor visible and reads the mouse itself (`_Input`, not
+marked handled): motion of 2 px or more marks the mouse moved, and on the next frame the picker line
+under it (`HomePanels.PickerLineAtMouse()`) is hovered or the camera ray through it is pointed at the
+floor (also once on entering placement mode while `MouseActive`); left and middle presses become
+`ClickPicker` / `ClickFloor` and `MouseRotate`.
 
 **Prompts.** Every prompt and hint shows only the buttons of the device used last
 (`HomeModule.Device`, the latest `ActiveDevice`), as icons in `RichTextLabel`s, rebuilt the moment

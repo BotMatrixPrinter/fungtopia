@@ -74,8 +74,8 @@ public partial class InputView : Control, IModuleView
             case InputEventMouseMotion motion when captured:
                 _input.AddMouseMotion(new System.Numerics.Vector2(motion.Relative.X, motion.Relative.Y));
                 break;
-            case InputEventMouseButton { ButtonIndex: MouseButton.Left, Pressed: true } when !captured:
-                // This click only recaptures the mouse; it does not fire.
+            case InputEventMouseButton { ButtonIndex: MouseButton.Left, Pressed: true } when _input.RecaptureOnClick(captured):
+                // This click only recaptures the mouse; it does not fire. While a menu is open its clicks are the menu's.
                 GodotInput.MouseMode = GodotInput.MouseModeEnum.Captured;
                 GetViewport().SetInputAsHandled();
                 _ignoreFireUntilRelease = true;
@@ -126,6 +126,12 @@ public partial class InputView : Control, IModuleView
     {
         if (_input == null)
             return;
+        // The last open menu closed: capture the mouse again, as at start (a click still held does not fire).
+        if (_input.TakeRecapture() && GodotInput.MouseMode != GodotInput.MouseModeEnum.Captured)
+        {
+            GodotInput.MouseMode = GodotInput.MouseModeEnum.Captured;
+            _ignoreFireUntilRelease = true;
+        }
         bool captured = GodotInput.MouseMode == GodotInput.MouseModeEnum.Captured;
 
         float x = Held(Godot.Key.D) - Held(Godot.Key.A);
